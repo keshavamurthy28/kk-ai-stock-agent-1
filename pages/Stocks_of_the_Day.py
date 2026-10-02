@@ -13,7 +13,7 @@ st.set_page_config(
 
 st.title("⚡ NSE Market Scanner + Orderflow Delta & Minute Volumes")
 st.markdown(
-    " Scans all NSE equities for **Institutional Bulk/Block Deals**, **Fundamentals**, and provides a **Minute-by-Minute Orderflow Delta & Volume Breakdown**."
+    "Scans all NSE equities for **Institutional Bulk/Block Deals**, **Fundamentals**, and provides a **Minute-by-Minute Orderflow Delta & Volume Breakdown**."
 )
 
 # -------------------------------------------------------------------
@@ -32,30 +32,37 @@ def get_all_nse_equities():
         tables = pd.read_html(response.text)
         df_nse = tables[2]
         symbols = df_nse["Symbol"].tolist()
-        return sorted(list(set([str(sym).strip() for sym in symbols if str(sym).strip()])))
+        clean_symbols = sorted(
+            list(set([str(sym).strip() for sym in symbols if str(sym).strip()]))
+        )
+        if len(clean_symbols) > 0:
+            return clean_symbols
     except Exception:
-        return [
-            "RELIANCE",
-            "TCS",
-            "HDFCBANK",
-            "INFY",
-            "ICICIBANK",
-            "BHARTIARTL",
-            "SBIN",
-            "LTIM",
-            "ITC",
-            "HINDUNILVR",
-            "LT",
-            "BAJFINANCE",
-            "AXISBANK",
-            "MARUTI",
-            "SUNPHARMA",
-            "TATAMOTORS",
-            "TITAN",
-            "ULTRACEMCO",
-            "NTPC",
-            "ONGC",
-        ]
+        pass
+
+    # Reliable Fallback List
+    return [
+        "RELIANCE",
+        "TCS",
+        "HDFCBANK",
+        "INFY",
+        "ICICIBANK",
+        "BHARTIARTL",
+        "SBIN",
+        "LTIM",
+        "ITC",
+        "HINDUNILVR",
+        "LT",
+        "BAJFINANCE",
+        "AXISBANK",
+        "MARUTI",
+        "SUNPHARMA",
+        "TATAMOTORS",
+        "TITAN",
+        "ULTRACEMCO",
+        "NTPC",
+        "ONGC",
+    ]
 
 
 @st.cache_data(ttl=3600)
@@ -93,28 +100,23 @@ def get_nse_bulk_block_deals():
 
 
 def calculate_orderflow_delta(df_intraday):
-    """Computes proxy Orderflow Delta (Buy vs Sell Volume per minute) based on candle location and spread."""
     if df_intraday.empty:
         return df_intraday
 
-    # Close location value (CLV) formula mapped between -1 and 1
     high_low_range = df_intraday["High"] - df_intraday["Low"]
-    high_low_range = high_low_range.replace(0, 0.01)  # Prevent division by zero
+    high_low_range = high_low_range.replace(0, 0.01)
 
     clv = (
         (2 * df_intraday["Close"] - df_intraday["High"] - df_intraday["Low"])
         / high_low_range
     )
 
-    # Estimate aggressive buying and selling volume breakdown per minute
     df_intraday["Buy Volume"] = (
         df_intraday["Volume"] * (0.5 + (0.5 * clv))
     ).fillna(0)
     df_intraday["Sell Volume"] = (
         df_intraday["Volume"] * (0.5 - (0.5 * clv))
     ).fillna(0)
-
-    # Delta = Buy Volume - Sell Volume per minute
     df_intraday["Delta"] = df_intraday["Buy Volume"] - df_intraday["Sell Volume"]
     df_intraday["Cumulative Delta"] = df_intraday["Delta"].cumsum()
     return df_intraday
@@ -138,9 +140,7 @@ def scan_nse_market_with_orderflow(symbols_list, bulk_deals, scan_limit):
 
         try:
             t = yf.Ticker(ticker_str)
-            # Fetch daily trend data
             hist = t.history(period="3m", interval="1d")
-            # Fetch 5-minute intraday data for orderflow approximation
             intraday = t.history(period="5d", interval="5m")
 
             if hist.empty or len(hist) < 30:
@@ -177,7 +177,6 @@ def scan_nse_market_with_orderflow(symbols_list, bulk_deals, scan_limit):
 
             is_institutional = sym.upper() in [b.upper() for b in bulk_deals]
 
-            # Process intraday orderflow delta set
             processed_intraday = calculate_orderflow_delta(intraday)
             latest_delta_sum = (
                 float(processed_intraday["Delta"].tail(10).sum())
@@ -189,7 +188,7 @@ def scan_nse_market_with_orderflow(symbols_list, bulk_deals, scan_limit):
             if is_institutional:
                 score += 4
             if latest_delta_sum > 0:
-                score += 2  # Positive institutional orderflow delta accumulation
+                score += 2
             if latest_price > ema_20:
                 score += 1
             if 35 <= rsi <= 65:
@@ -198,7 +197,7 @@ def scan_nse_market_with_orderflow(symbols_list, bulk_deals, scan_limit):
                 score += 1
 
             if is_institutional:
-                signal = "🏛️ INSTITUTIONAL BULK ACCUMULATION"
+                signal = "🏛️️ INSTITUTIONAL BULK ACCUMULATION"
             elif latest_delta_sum > 0 and vol_surge >= 1.3:
                 signal = "⚡ HIGH DELTA BUY MOMENTUM"
             elif rsi < 32:
@@ -242,19 +241,25 @@ def scan_nse_market_with_orderflow(symbols_list, bulk_deals, scan_limit):
 
 
 # -------------------------------------------------------------------
-# 3. STREAMLIT INTERFACE
+# 3. STREAMLIT INTERFACE (SAFE SLIDER BOUNDS)
 # -------------------------------------------------------------------
 
 st.sidebar.header("⚙️ Scanner Settings")
 all_equities = get_all_nse_equities()
+total_equities_len = len(all_equities)
+
+# Safely handle slider boundaries to prevent MinMax errors
+max_slider_val = max(20, total_equities_len)
+default_val = min(50, max_slider_val)
 
 scan_count = st.sidebar.slider(
     "Number of Stocks to Scan",
-    min_value=20,
-    max_value=len(all_equities),
-    value=min(80, len(all_equities)),
+    min_value=10,
+    max_value=max_slider_val,
+    value=default_val,
     step=10,
 )
+
 top_picks_count = st.sidebar.slider(
     "Top Stocks to Display", min_value=3, max_value=15, value=5
 )
@@ -298,7 +303,6 @@ else:
             col3.metric("Net Orderflow Delta", f"{row['Net Delta (5m)']}")
             col4.metric("Market Cap", f"{row['Market Cap (Cr)']}")
 
-            # Tab views for Candlestick Chart vs. Orderflow Delta Breakdown Suite
             tab_chart, tab_delta = st.tabs(
                 ["📈 Price Action Chart", "⚡ Orderflow Delta & Minute Volumes"]
             )
@@ -327,10 +331,7 @@ else:
             with tab_delta:
                 intraday_df = row["IntradayDF"]
                 if not intraday_df.empty and "Delta" in intraday_df.columns:
-                    # Subplot or dual view for Delta & Volume
                     fig_delta = go.Figure()
-
-                    # Color coding positive vs negative delta bars
                     colors = [
                         "green" if val >= 0 else "red"
                         for val in intraday_df["Delta"]
