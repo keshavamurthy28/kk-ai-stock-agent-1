@@ -33,7 +33,6 @@ def fetch_real_nse_bulk_block_deals():
     deals_data = []
 
     try:
-        # Initialize session cookies from NSE home page
         session.get("https://www.nseindia.com", timeout=5)
         url = "https://www.nseindia.com/api/snapshot-capital-market-largedeal"
         resp = session.get(url, timeout=5)
@@ -41,7 +40,6 @@ def fetch_real_nse_bulk_block_deals():
         if resp.status_code == 200:
             raw_json = resp.json()
 
-            # Parse Bulk Deals
             for item in raw_json.get("bulkDeals", []):
                 deals_data.append(
                     {
@@ -58,7 +56,6 @@ def fetch_real_nse_bulk_block_deals():
                     }
                 )
 
-            # Parse Block Deals
             for item in raw_json.get("blockDeals", []):
                 deals_data.append(
                     {
@@ -87,7 +84,7 @@ def fetch_real_nse_bulk_block_deals():
                 "Deal Type": "BUY",
                 "Quantity": 450000,
                 "Traded Price (₹)": 142.50,
-                "Date": pd.Timestamp.today().strftime("%d-%b-%Y"),
+                "Date": "02-Oct-2026",
                 "Category": "Bulk Deal",
             },
             {
@@ -97,7 +94,7 @@ def fetch_real_nse_bulk_block_deals():
                 "Deal Type": "BUY",
                 "Quantity": 1250000,
                 "Traded Price (₹)": 310.00,
-                "Date": pd.Timestamp.today().strftime("%d-%b-%Y"),
+                "Date": "02-Oct-2026",
                 "Category": "Block Deal",
             },
             {
@@ -107,7 +104,7 @@ def fetch_real_nse_bulk_block_deals():
                 "Deal Type": "BUY",
                 "Quantity": 2500000,
                 "Traded Price (₹)": 985.20,
-                "Date": pd.Timestamp.today().strftime("%d-%b-%Y"),
+                "Date": "01-Oct-2026",
                 "Category": "Block Deal",
             },
             {
@@ -117,7 +114,7 @@ def fetch_real_nse_bulk_block_deals():
                 "Deal Type": "SELL",
                 "Quantity": 1800000,
                 "Traded Price (₹)": 810.40,
-                "Date": pd.Timestamp.today().strftime("%d-%b-%Y"),
+                "Date": "01-Oct-2026",
                 "Category": "Bulk Deal",
             },
         ]
@@ -126,7 +123,7 @@ def fetch_real_nse_bulk_block_deals():
 
 
 # -------------------------------------------------------------------
-# 2. SIDEBAR FILTERS
+# 2. SIDEBAR FILTERS (INCLUDING DATE FILTER)
 # -------------------------------------------------------------------
 st.sidebar.header("⚙️ Deal Filters")
 filter_deal_type = st.sidebar.selectbox(
@@ -136,18 +133,28 @@ filter_category = st.sidebar.selectbox(
     "Deal Category", ["All", "Bulk Deal", "Block Deal"]
 )
 
-run_fetch = st.sidebar.button("🔄 Fetch Today's Institutional Deals")
+# Added Date Filter Field directly below Deal Category
+selected_date = st.sidebar.date_input(
+    "Filter By Specific Date", value=pd.Timestamp.today().date()
+)
+
+run_fetch = st.sidebar.button("🔄 Fetch Institutional Deals")
 
 # -------------------------------------------------------------------
 # 3. MAIN DISPLAY LOGIC
 # -------------------------------------------------------------------
-if run_fetch or True:  # Loads automatically on page view
-    with st.spinner("Fetching live exchange institutional filings..."):
+if run_fetch or True:
+    with st.spinner("Fetching exchange institutional filings..."):
         df_deals = fetch_real_nse_bulk_block_deals()
 
     if df_deals.empty:
-        st.warning("No bulk or block deals recorded for the current session.")
+        st.warning("No bulk or block deals recorded.")
     else:
+        # Standardize date format for filtering comparison
+        df_deals["Parsed_Date"] = pd.to_datetime(
+            df_deals["Date"], errors="coerce"
+        ).dt.date
+
         # Apply sidebar filters
         if filter_deal_type == "BUY Only":
             df_deals = df_deals[df_deals["Deal Type"] == "BUY"]
@@ -157,60 +164,71 @@ if run_fetch or True:  # Loads automatically on page view
         if filter_category != "All":
             df_deals = df_deals[df_deals["Category"] == filter_category]
 
-        st.success(
-            f"Successfully loaded {len(df_deals)} genuine institutional transactions!"
-        )
+        # Apply Date Filter
+        if selected_date:
+            df_deals = df_deals[df_deals["Parsed_Date"] == selected_date]
 
-        # Highlight Buy vs Sell metrics
-        total_buys = len(df_deals[df_deals["Deal Type"] == "BUY"])
-        total_sells = len(df_deals[df_deals["Deal Type"] == "SELL"])
+        # Drop helper column before view
+        display_clean_df = df_deals.drop(columns=["Parsed_Date"])
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Institutional Deals", len(df_deals))
-        col2.metric("🟢 Accumulation (Buy)", total_buys)
-        col3.metric("🔴 Distribution (Sell)", total_sells)
-
-        st.markdown("### 📋 Live Executed Bulk & Block Deal Records")
-
-        # Custom formatting function for table
-        def color_deal(val):
-            color = "green" if val == "BUY" else "red"
-            return f"color: {color}; font-weight: bold;"
-
-        st.dataframe(df_deals, use_container_width=True)
-
-        # Quick price validation via yfinance for the top listed stock
-        if not df_deals.empty:
-            top_symbol = df_deals.iloc[0]["Symbol"]
-            st.markdown(
-                f"### 📈 Quick Technical Check: {top_symbol} Price Context"
+        if display_clean_df.empty:
+            st.warning(
+                f"No deals found for the selected date: {selected_date}. Try changing the date or clearing filters."
             )
-            try:
-                ticker_str = (
-                    f"{top_symbol}.NS"
-                    if not top_symbol.endswith(".NS")
-                    else top_symbol
+        else:
+            st.success(
+                f"Successfully filtered {len(display_clean_df)} transactions for {selected_date}!"
+            )
+
+            total_buys = len(
+                display_clean_df[display_clean_df["Deal Type"] == "BUY"]
+            )
+            total_sells = len(
+                display_clean_df[display_clean_df["Deal Type"] == "SELL"]
+            )
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Deals on Selected Date", len(display_clean_df))
+            col2.metric("🟢 Accumulation (Buy)", total_buys)
+            col3.metric("🔴 Distribution (Sell)", total_sells)
+
+            st.markdown(
+                f"### 📋 Executed Bulk & Block Deals for {selected_date}"
+            )
+            st.dataframe(display_clean_df, use_container_width=True)
+
+            # Quick price validation via yfinance for the top listed stock
+            if not display_clean_df.empty:
+                top_symbol = display_clean_df.iloc[0]["Symbol"]
+                st.markdown(
+                    f"### 📈 Quick Technical Check: {top_symbol} Price Context"
                 )
-                hist = yf.Ticker(ticker_str).history(period="1mo")
-                if not hist.empty:
-                    fig = go.Figure()
-                    fig.add_trace(
-                        go.Scatter(
-                            x=hist.index,
-                            y=hist["Close"],
-                            mode="lines+markers",
-                            name=top_symbol,
+                try:
+                    ticker_str = (
+                        f"{top_symbol}.NS"
+                        if not top_symbol.endswith(".NS")
+                        else top_symbol
+                    )
+                    hist = yf.Ticker(ticker_str).history(period="1mo")
+                    if not hist.empty:
+                        fig = go.Figure()
+                        fig.add_trace(
+                            go.Scatter(
+                                x=hist.index,
+                                y=hist["Close"],
+                                mode="lines+markers",
+                                name=top_symbol,
+                            )
                         )
+                        fig.update_layout(
+                            title=f"1-Month Trend for {top_symbol}",
+                            xaxis_title="Date",
+                            yaxis_title="Price (₹)",
+                            template="plotly_white",
+                            height=350,
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                except Exception:
+                    st.info(
+                        "Could not fetch technical chart for this ticker symbol."
                     )
-                    fig.update_layout(
-                        title=f"1-Month Trend for {top_symbol} (Recent Institutional Target)",
-                        xaxis_title="Date",
-                        yaxis_title="Price (₹)",
-                        template="plotly_white",
-                        height=350,
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-            except Exception:
-                st.info(
-                    "Could not fetch technical chart for this specific ticker symbol."
-                )
