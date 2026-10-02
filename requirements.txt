@@ -1,6 +1,4 @@
 streamlit
-google-genai
-yfinance
 pandas
-matplotlib
-ta
+yfinance
+openpyxl
