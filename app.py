@@ -1,188 +1,100 @@
-import matplotlib.dates as mdates
-import matplotlib.pyplot as plt
 import pandas as pd
+import pandas_ta as ta
 import streamlit as st
-import ta
 import yfinance as yf
-from google import genai
 
-# Page Configuration
+# Page setup
 st.set_page_config(
-    page_title="AI Stock Agent", page_icon="📈", layout="wide"
+    page_title="AI Stock Analysis & Intraday Signals",
+    page_icon="📈",
+    layout="wide",
 )
 
 st.title("📈 AI Stock Analysis & Intraday Signals")
-
-# Hardcoded API key from your setup (or enter in sidebar)
-DEFAULT_API_KEY = (
-    "AQ.Ab8RN6KQhnH16r3F8pm9E9yU5UzcLo1iQHi1xI5HhNge-sJptw"
+st.markdown(
+    "Analyze technical indicators and trend signals for individual stocks."
 )
 
-# Sidebar Inputs
+# Sidebar inputs
 st.sidebar.header("Trading Controls")
-api_key = st.sidebar.text_input(
-    "Gemini API Key", value=DEFAULT_API_KEY, type="password"
-)
-symbol = st.sidebar.text_input(
-    "Stock Ticker (e.g., INFY, RELIANCE, TCS)", "INFY"
+ticker_symbol = st.sidebar.text_input(
+    "Stock Ticker (e.g., INFY, RELIANCE, TCS)", value="INFY"
 )
 timeframe = st.sidebar.selectbox(
-    "Select Timeframe", ["15m (Intraday)", "5m (Intraday)", "1d (Daily)"]
+    "Select Timeframe",
+    ["15m (Intraday)", "1d (Daily)", "1h (Hourly)"],
+    index=0,
 )
-
 run_btn = st.sidebar.button("Run Technical Analysis")
 
 
-def fetch_data_and_analyze(ticker_symbol, tf_option):
-  # Set correct interval
-  interval = "15m" if "15m" in tf_option else ("5m" if "5m" in tf_option else "1d")
-  period = "5d" if interval in ["5m", "15m"] else "6mo"
+def get_stock_data(symbol, timeframe_choice):
+    ticker = (
+        f"{symbol.upper()}.NS" if not symbol.endswith(".NS") else symbol.upper()
+    )
 
-  yf_ticker = (
-      f"{ticker_symbol.upper()}.NS"
-      if not ticker_symbol.endswith(".NS")
-      else ticker_symbol
-  )
+    interval_map = {
+        "15m (Intraday)": ("15m", "5d"),
+        "1h (Hourly)": ("1h", "1mo"),
+        "1d (Daily)": ("1d", "6mo"),
+    }
+    interval, period = interval_map.get(timeframe_choice, ("15m", "5d"))
 
-  df = yf.Ticker(yf_ticker).history(period=period, interval=interval)
-  if df.empty:
-    st.error("Invalid ticker or no data returned.")
-    return None, None
-
-  # Indicators
-  df["EMA_9"] = ta.trend.ema_indicator(df["Close"], window=9)
-  df["EMA_21"] = ta.trend.ema_indicator(df["Close"], window=21)
-  df["RSI"] = ta.momentum.rsi(df["Close"], window=14)
-  df["ATR"] = ta.volatility.average_true_range(
-      df["High"], df["Low"], df["Close"], window=14
-  )
-
-  latest = df.iloc[-1]
-  cmp = round(latest["Close"], 2)
-  atr = round(latest["ATR"], 2)
-
-  # Intraday Signals
-  is_bullish = latest["EMA_9"] > latest["EMA_21"] and latest["RSI"] > 50
-  signal = "BUY" if is_bullish else "SELL"
-  entry = cmp
-  stop_loss = (
-      round(cmp - (1.5 * atr), 2) if is_bullish else round(cmp + (1.5 * atr), 2)
-  )
-  target_1 = (
-      round(cmp + (1.5 * atr), 2) if is_bullish else round(cmp - (1.5 * atr), 2)
-  )
-  target_2 = (
-      round(cmp + (3.0 * atr), 2) if is_bullish else round(cmp - (3.0 * atr), 2)
-  )
-
-  metrics = {
-      "Symbol": ticker_symbol.upper(),
-      "Timeframe": interval,
-      "Signal": signal,
-      "CMP": cmp,
-      "Entry": entry,
-      "Stop Loss": stop_loss,
-      "Target 1": target_1,
-      "Target 2": target_2,
-      "RSI": round(latest["RSI"], 2),
-  }
-
-  # Plot Chart
-  df_plot = df.tail(50)
-  fig, (ax1, ax2) = plt.subplots(
-      2,
-      1,
-      figsize=(10, 6),
-      sharex=True,
-      gridspec_kw={"height_ratios": [3, 1]},
-  )
-
-  ax1.plot(
-      df_plot.index,
-      df_plot["Close"],
-      label="Price",
-      color="black",
-      linewidth=1.5,
-  )
-  ax1.plot(
-      df_plot.index,
-      df_plot["EMA_9"],
-      label="9 EMA",
-      color="blue",
-      linestyle="--",
-  )
-  ax1.plot(
-      df_plot.index,
-      df_plot["EMA_21"],
-      label="21 EMA",
-      color="orange",
-      linestyle="--",
-  )
-
-  # Level Lines
-  ax1.axhline(
-      y=entry,
-      color="green" if is_bullish else "red",
-      linewidth=2,
-      label=f"ENTRY ({signal}): ₹{entry}",
-  )
-  ax1.axhline(
-      y=stop_loss, color="crimson", linestyle="--", label=f"STOP LOSS: ₹{stop_loss}"
-  )
-  ax1.axhline(
-      y=target_1, color="royalblue", linestyle=":", label=f"TARGET 1: ₹{target_1}"
-  )
-  ax1.axhline(
-      y=target_2, color="darkblue", linestyle=":", label=f"TARGET 2: ₹{target_2}"
-  )
-
-  ax1.set_title(
-      f"{ticker_symbol.upper()} ({interval}) - Trading Levels Chart",
-      fontweight="bold",
-  )
-  ax1.legend(loc="upper left")
-  ax1.grid(True, alpha=0.3)
-
-  ax2.plot(df_plot.index, df_plot["RSI"], label="RSI (14)", color="purple")
-  ax2.axhline(70, color="red", linestyle=":")
-  ax2.axhline(30, color="green", linestyle=":")
-  ax2.set_ylim(0, 100)
-  ax2.grid(True, alpha=0.3)
-
-  if interval in ["5m", "15m"]:
-    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M\n%d-%b"))
-
-  plt.tight_layout()
-  return metrics, fig
+    df = yf.download(ticker, period=period, interval=interval, progress=False)
+    return df, ticker
 
 
-if run_btn:
-  metrics, fig = fetch_data_and_analyze(symbol, timeframe)
+if run_btn or ticker_symbol:
+    if ticker_symbol:
+        with st.spinner(f"Fetching data for {ticker_symbol}..."):
+            df, full_ticker = get_stock_data(ticker_symbol, timeframe)
 
-  if metrics:
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Signal", metrics["Signal"])
-    col2.metric("Entry Price", f"₹{metrics['Entry']}")
-    col3.metric("Stop Loss", f"₹{metrics['Stop Loss']}")
-    col4.metric("Target 1", f"₹{metrics['Target 1']}")
+            if df.empty:
+                st.error(
+                    f"Could not fetch data for '{ticker_symbol}'. Please check the symbol name."
+                )
+            else:
+                if isinstance(df.columns, pd.MultiIndex):
+                    close = df["Close"][full_ticker]
+                else:
+                    close = df["Close"]
 
-    st.pyplot(fig)
+                # Calculate TA Indicators
+                rsi = ta.rsi(close, length=14)
+                ema_50 = ta.ema(close, length=50)
 
-    st.subheader("🤖 AI Analysis")
-    with st.spinner("Generating AI Analysis Report..."):
-      client = genai.Client(api_key=api_key)
-      prompt = f"""
-            You are an expert Stock Technical Analyst. Analyze {metrics['Symbol']} on {metrics['Timeframe']} timeframe:
-            - Signal: {metrics['Signal']}
-            - Current Price / Entry: ₹{metrics['CMP']}
-            - Stop Loss: ₹{metrics['Stop Loss']}
-            - Target 1: ₹{metrics['Target 1']}
-            - Target 2: ₹{metrics['Target 2']}
-            - RSI: {metrics['RSI']}
+                latest_price = close.iloc[-1]
+                latest_rsi = rsi.iloc[-1] if not rsi.empty else 50
+                latest_ema50 = ema_50.iloc[-1] if not ema_50.empty else 0
 
-            Provide a clear summary with Trend Alignment, Risk Management advice, and execution strategy.
-            """
-      response = client.models.generate_content(
-          model="gemini-3.8-flash", contents=prompt
-      )
-      st.markdown(response.text)
+                # Recommendation Engine
+                if latest_price > latest_ema50 and 45 < latest_rsi < 65:
+                    signal = "STRONG BUY / ADD"
+                elif latest_price < latest_ema50 or latest_rsi > 70:
+                    signal = "SELL / TRIM"
+                else:
+                    signal = "HOLD / NEUTRAL"
+
+                # Metrics display
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Current Price (LTP)", f"₹{latest_price:.2f}")
+                col2.metric("RSI (14)", f"{latest_rsi:.2f}")
+                col3.metric("50 EMA", f"₹{latest_ema50:.2f}")
+                col4.metric("Trend Signal", signal)
+
+                st.markdown("---")
+                st.subheader(f"Price Chart ({full_ticker})")
+
+                # Display Price Chart
+                st.line_chart(close)
+
+                # Historical Table
+                st.subheader("Recent Data & Technicals")
+                chart_df = pd.DataFrame(
+                    {
+                        "Close Price": close,
+                        "RSI (14)": rsi,
+                        "50 EMA": ema_50,
+                    }
+                ).tail(20)
+                st.dataframe(chart_df, use_container_width=True)
