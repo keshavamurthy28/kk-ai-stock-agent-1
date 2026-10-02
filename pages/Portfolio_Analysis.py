@@ -1,9 +1,7 @@
 import pandas as pd
-import pandas_ta as ta
 import streamlit as st
 import yfinance as yf
 
-# Page Configuration
 st.set_page_config(
     page_title="Zerodha Portfolio Agent", page_icon="📊", layout="wide"
 )
@@ -13,17 +11,30 @@ st.markdown(
     "Upload your downloaded Zerodha Console holdings **.xlsx** file to analyze actions."
 )
 
-# Sidebar File Uploader
 uploaded_file = st.sidebar.file_uploader(
     "Upload Holdings (.xlsx or .csv)", type=["xlsx", "csv"]
 )
+
+
+def calculate_ema(series, span=50):
+    return series.ewm(span=span, adjust=False).mean()
+
+
+def calculate_rsi(series, period=14):
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
 
 
 def analyze_stock(symbol):
     ticker = f"{symbol}.NS"
     df = yf.download(ticker, period="6m", interval="1d", progress=False)
 
-    if df.empty or len(df) < 50:
+    if df.empty or len(df) < 20:
         return "UNKNOWN", 0, 0, 0
 
     if isinstance(df.columns, pd.MultiIndex):
@@ -31,11 +42,10 @@ def analyze_stock(symbol):
     else:
         close = df["Close"]
 
-    rsi = ta.rsi(close, length=14).iloc[-1]
-    ema_50 = ta.ema(close, length=50).iloc[-1]
+    rsi = calculate_rsi(close, 14).iloc[-1]
+    ema_50 = calculate_ema(close, 50).iloc[-1]
     ltp = close.iloc[-1]
 
-    # Action Rules
     if ltp > ema_50 and 45 < rsi < 65:
         signal = "ADD / BUY"
     elif ltp < ema_50 or rsi > 70:
