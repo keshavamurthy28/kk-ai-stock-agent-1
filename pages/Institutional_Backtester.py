@@ -113,7 +113,7 @@ require_bulk_deal = st.sidebar.checkbox(
 
 st.sidebar.subheader("Backtest Performance Horizon")
 backtest_period = st.sidebar.selectbox(
-    "Select Historical Lookback", ["1 Month", "3 Months", "6 Months", "1 Year"]
+    "Select Historical Lookback", ["1 Day", "1 Week", "1 Month", "3 Months"]
 )
 
 period_map = {
