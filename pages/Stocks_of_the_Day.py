@@ -4,48 +4,76 @@ import streamlit as st
 import yfinance as yf
 
 st.set_page_config(
-    page_title="NSE Daily Stock Scanner", page_icon="📅", layout="wide"
+    page_title="NSE Dynamic Stock Scanner", page_icon="📅", layout="wide"
 )
 
-st.title("📅 NSE Top Stocks of the Day")
+st.title("📅 NSE Top Stocks of the Day (Live Nifty 50 Fetch)")
 st.markdown(
-    "Automated daily analysis combining **Fundamental Valuation** (P/E, Market Cap, Dividend Yield) with **Technical Indicators** (RSI, 20/50 EMA, Volume Surge)."
+    "Automated dynamic scanner pulling live constituents directly from **Nifty 50** to evaluate Fundamental & Technical setups."
 )
 
-# Core Watchlist of major liquid NSE stocks
-DEFAULT_SYMBOLS = [
-    "RELIANCE",
-    "HDFCBANK",
-    "BHARTIARTL",
-    "ICICIBANK",
-    "TCS",
-    "TATAMOTORS",
-    "SBIN",
-    "INFY",
-    "LT",
-    "AXISBANK",
-]
+# -------------------------------------------------------------------
+# DYNAMIC NSE STOCK LIST RETRIEVAL
+# -------------------------------------------------------------------
 
 
-@st.cache_data(ttl=900)  # Cache results for 15 minutes to speed up loading
+@st.cache_data(ttl=86400)  # Cache the ticker list for 24 hours
+def get_nifty50_tickers():
+    """Fetches the official Nifty 50 stock list dynamically from Wikipedia."""
+    try:
+        url = "https://en.wikipedia.org/wiki/NIFTY_50"
+        tables = pd.read_html(url)
+        nifty_table = tables[2]  # Nifty 50 constituents table
+        symbols = nifty_table["Symbol"].tolist()
+        return [str(sym).strip() for sym in symbols if str(sym).strip()]
+    except Exception:
+        # Fallback list if external fetch fails
+        return [
+            "RELIANCE",
+            "HDFCBANK",
+            "BHARTIARTL",
+            "ICICIBANK",
+            "TCS",
+            "TATAMOTORS",
+            "SBIN",
+            "INFY",
+            "LT",
+            "AXISBANK",
+            "KOTAKBANK",
+            "HINDUNILVR",
+            "ITC",
+            "BAJFINANCE",
+            "MARUTI",
+        ]
+
+
+# -------------------------------------------------------------------
+# STOCK DATA FETCH & TECHNICAL ANALYSIS
+# -------------------------------------------------------------------
+
+
+@st.cache_data(ttl=900)  # Cache analysis results for 15 minutes
 def fetch_daily_stock_details(symbols):
     data_list = []
+    progress_bar = st.progress(0)
+    status_text = st.empty()
 
-    for sym in symbols:
+    for idx, sym in enumerate(symbols):
+        status_text.text(f"Scanning Nifty 50 constituent [{idx+1}/50]: {sym}...")
         ticker_str = (
             f"{sym.upper()}.NS" if not sym.endswith(".NS") else sym.upper()
         )
         t = yf.Ticker(ticker_str)
 
-        # Download 6 months of daily historical price data
         hist = t.history(period="6m", interval="1d")
         if hist.empty or len(hist) < 50:
+            progress_bar.progress((idx + 1) / len(symbols))
             continue
 
         close = hist["Close"]
         volume = hist["Volume"]
 
-        # Technical Calculations
+        # Technical Indicators
         latest_price = float(close.iloc[-1])
         prev_price = float(close.iloc[-2])
         day_change_pct = ((latest_price - prev_price) / prev_price) * 100
@@ -66,10 +94,10 @@ def fetch_daily_stock_details(symbols):
             (float(volume.iloc[-1]) / avg_vol) if avg_vol > 0 else 1.0
         )
 
-        # Fundamentals Retrieval
+        # Fundamental Data
         try:
             info = t.info
-            mcap = info.get("marketCap", 0) / 1e7  # Convert to Cr (INR)
+            mcap = info.get("marketCap", 0) / 1e7  # Cr INR
             pe = info.get("trailingPE", 0.0) or info.get("forwardPE", 0.0)
             div_yield = (info.get("dividendYield", 0.0) or 0.0) * 100
             sector = info.get("sector", "N/A")
@@ -77,20 +105,20 @@ def fetch_daily_stock_details(symbols):
         except Exception:
             mcap, pe, div_yield, sector, company_name = 0, 0, 0, "N/A", sym
 
-        # Scoring & Signal Allocation
+        # Scoring Logic
         score = 0
         if latest_price > ema_20:
             score += 1
         if ema_20 > ema_50:
             score += 1
-        if 30 <= rsi <= 65:
+        if 35 <= rsi <= 65:
             score += 1
         if vol_surge >= 1.2:
             score += 1
         if pe > 0 and pe < 35:
             score += 1
 
-        if rsi < 35:
+        if rsi < 32:
             signal = "🟢 OVERSOLD BUY (Reversal)"
         elif score >= 4:
             signal = "🔥 STRONG BUY (Trend + Vol)"
@@ -123,49 +151,43 @@ def fetch_daily_stock_details(symbols):
             }
         )
 
+        progress_bar.progress((idx + 1) / len(symbols))
+
+    status_text.empty()
+    progress_bar.empty()
     return pd.DataFrame(data_list)
 
 
-# Sidebar Options
-st.sidebar.header("🔍 Stock Selection Filters")
-selected_symbols = st.sidebar.multiselect(
-    "Select Stocks to Analyze:",
-    options=[
-        "RELIANCE",
-        "HDFCBANK",
-        "BHARTIARTL",
-        "ICICIBANK",
-        "TCS",
-        "TATAMOTORS",
-        "SBIN",
-        "INFY",
-        "LT",
-        "AXISBANK",
-        "KOTAKBANK",
-    ],
-    default=DEFAULT_SYMBOLS[:5],  # Top 5 by default
-)
+# -------------------------------------------------------------------
+# APP CONTROLS & RENDER
+# -------------------------------------------------------------------
 
-if st.sidebar.button("🔄 Refresh Data"):
+st.sidebar.header("⚙️ Scanner Settings")
+
+# Fetch full Nifty 50 list dynamically
+nifty_symbols = get_nifty50_tickers()
+st.sidebar.write(f"**Live Index:** Nifty 50 ({len(nifty_symbols)} Stocks Loaded)")
+
+top_n_picks = st.sidebar.slider("Number of Top Picks to Display", 3, 10, 5)
+
+if st.sidebar.button("🔄 Force Refresh Data"):
     st.cache_data.clear()
 
-with st.spinner("Fetching fundamentals & technicals from NSE..."):
-    df_results = fetch_daily_stock_details(selected_symbols)
+with st.spinner("Executing dynamic Nifty 50 market scan..."):
+    df_results = fetch_daily_stock_details(nifty_symbols)
 
 if df_results.empty:
-    st.warning("No stock data returned. Please select symbols from the sidebar.")
+    st.warning("Could not pull stock data. Click 'Force Refresh Data'.")
 else:
-    # Sort by highest setup score
     df_sorted = df_results.sort_values(
         by="Score", ascending=False
     ).reset_index(drop=True)
 
-    st.subheader("⭐ Top 5 Stocks of the Day")
+    st.subheader(f"⭐ Top {top_n_picks} Stocks of the Day (Nifty 50)")
 
-    # Display Top 5 Stock Cards
-    top_5 = df_sorted.head(5)
+    top_picks_df = df_sorted.head(top_n_picks)
 
-    for idx, row in top_5.iterrows():
+    for idx, row in top_picks_df.iterrows():
         with st.expander(
             f"#{idx+1} {row['Symbol']} — {row['Company']} ({row['Action Signal']})",
             expanded=(idx == 0),
@@ -185,7 +207,6 @@ else:
                 st.write(f"**Volume Surge:** {row['Vol Surge']}")
 
             with c2:
-                # Mini chart
                 hist_df = row["HistDF"]
                 fig = go.Figure()
                 fig.add_trace(
@@ -207,8 +228,6 @@ else:
                 st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("---")
-
-    # Complete Summary Data Table
-    st.subheader("📋 Overview Comparison Table")
+    st.subheader("📋 Complete Nifty 50 Comparison Table")
     display_df = df_sorted.drop(columns=["HistDF"])
     st.dataframe(display_df, use_container_width=True)
