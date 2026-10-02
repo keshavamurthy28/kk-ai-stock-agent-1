@@ -4,3 +4,8 @@ yfinance
 pandas
 matplotlib
 ta
+streamlit
+pandas
+yfinance
+pandas-ta
+openpyxl
