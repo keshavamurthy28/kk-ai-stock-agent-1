@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 import yfinance as yf
 
@@ -141,57 +142,73 @@ if run_backtest:
             total_trades = int(df_data["Signal"].sum())
             m3.metric("Total Signals Generated", f"{total_trades}")
 
-            st.subheader("📈 Cumulative Performance Comparison")
-            fig_perf = go.Figure()
-            fig_perf.add_trace(
+            # -------------------------------------------------------------------
+            # UNIFIED MASTER CHART (Performance Top Pane + Delta Bottom Pane)
+            # -------------------------------------------------------------------
+            st.subheader("📈 Unified Backtest Performance & Orderflow Master Chart")
+
+            fig = make_subplots(
+                rows=2,
+                cols=1,
+                shared_xaxes=True,
+                vertical_spacing=0.08,
+                row_heights=[0.65, 0.35],
+                subplot_titles=(
+                    "Cumulative Strategy vs Benchmark Return (%)",
+                    "Orderflow Delta & Volume Breakdown",
+                ),
+            )
+
+            # Row 1: Strategy & Benchmark Returns
+            fig.add_trace(
                 go.Scatter(
                     x=df_data.index,
                     y=cumulative_strategy,
                     name="Strategy Return",
-                    line=dict(color="green", width=2),
-                )
+                    line=dict(color="#26a69a", width=2),
+                ),
+                row=1,
+                col=1,
             )
-            fig_perf.add_trace(
+            fig.add_trace(
                 go.Scatter(
                     x=df_data.index,
                     y=cumulative_market,
                     name="Benchmark (Buy & Hold)",
                     line=dict(color="gray", width=1.5, dash="dash"),
-                )
+                ),
+                row=1,
+                col=1,
             )
-            fig_perf.update_layout(
-                height=350,
-                margin=dict(l=10, r=10, t=10, b=10),
-                template="plotly_white",
-                yaxis_title="Return (%)",
-            )
-            st.plotly_chart(fig_perf, use_container_width=True)
 
-            st.subheader("⚡ Minute/Hour Orderflow Delta & Volume Breakdown")
-            fig_delta = go.Figure()
-
+            # Row 2: Delta Volume Bars
             bar_colors = [
                 "#26a69a" if val >= 0 else "#ef5350"
                 for val in df_data["Delta"]
             ]
-            fig_delta.add_trace(
+            fig.add_trace(
                 go.Bar(
                     x=df_data.index,
                     y=df_data["Delta"],
                     name="Period Delta (Buy - Sell)",
                     marker_color=bar_colors,
-                )
+                ),
+                row=2,
+                col=1,
             )
-            fig_delta.update_layout(
-                height=300,
-                margin=dict(l=10, r=10, t=10, b=10),
+
+            fig.update_layout(
+                height=550,
+                margin=dict(l=10, r=10, t=30, b=10),
                 template="plotly_white",
-                yaxis_title="Delta Volume",
-                xaxis_title="Time / Date",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
             )
-            st.plotly_chart(fig_delta, use_container_width=True)
+            fig.update_yaxes(title_text="Return (%)", row=1, col=1)
+            fig.update_yaxes(title_text="Delta Volume", row=2, col=1)
 
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Signal Logs Table
             st.subheader("📋 Signal Execution Logs")
             trades_df = df_data[df_data["Signal"] == 1][
                 ["Close", "Volume", "Vol_Surge", "Delta", "EMA"]
