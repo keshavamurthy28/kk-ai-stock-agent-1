@@ -1,370 +1,288 @@
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import requests
 import streamlit as st
 import yfinance as yf
 
 st.set_page_config(
-    page_title="NSE Institutional & Orderflow Delta Scanner",
+    page_title="Advanced Intraday & Institutional Terminal",
     page_icon="⚡",
     layout="wide",
 )
 
-st.title("⚡ NSE Market Scanner + Orderflow Delta & Trading Levels")
+st.title("⚡ Pro Intraday Orderflow & Institutional Execution Terminal")
 st.markdown(
-    "Scans NSE equities for **Institutional Deals**, **Orderflow Delta**, **Buy/Sell Signals**, and **Automated Stop-Loss Levels**."
+    "Analyze intraday momentum using **VWAP**, **Volume Delta Orderflow**, **RVOL (Relative Volume)**, and **SuperTrend**."
 )
 
 # -------------------------------------------------------------------
-# 1. UNIVERSE & INSTITUTIONAL BULK/BLOCK DEALS
+# 1. SIDEBAR TRADING CONTROLS
 # -------------------------------------------------------------------
-
-
-@st.cache_data(ttl=86400)
-def get_all_nse_equities():
-    url = "https://en.wikipedia.org/wiki/NIFTY_500"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        tables = pd.read_html(response.text)
-        symbols = tables[2]["Symbol"].tolist()
-        clean_symbols = sorted(
-            list(set([str(sym).strip() for sym in symbols if str(sym).strip()]))
-        )
-        if len(clean_symbols) > 0:
-            return clean_symbols
-    except Exception:
-        pass
-
-    return [
-        "RELIANCE",
-        "TCS",
-        "HDFCBANK",
-        "INFY",
-        "ICICIBANK",
-        "BHARTIARTL",
-        "SBIN",
-        "LTIM",
-        "ITC",
-        "HINDUNILVR",
-        "LT",
-        "BAJFINANCE",
-        "AXISBANK",
-        "MARUTI",
-        "SUNPHARMA",
-        "TATAMOTORS",
-        "TITAN",
-        "ULTRACEMCO",
-        "NTPC",
-        "ONGC",
-    ]
-
-
-@st.cache_data(ttl=3600)
-def get_nse_bulk_block_deals():
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.nseindia.com/",
-    }
-    session = requests.Session()
-    session.headers.update(headers)
-    bulk_symbols = set()
-    try:
-        session.get("https://www.nseindia.com", timeout=5)
-        deal_url = "https://www.nseindia.com/api/snapshot-capital-market-largedeal"
-        resp = session.get(deal_url, timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
-            for item in data.get("bulkDeals", []):
-                sym = item.get("symbol")
-                if sym:
-                    bulk_symbols.add(sym.strip().upper())
-            for item in data.get("blockDeals", []):
-                sym = item.get("symbol")
-                if sym:
-                    bulk_symbols.add(sym.strip().upper())
-    except Exception:
-        pass
-    return list(bulk_symbols)
-
-
-# -------------------------------------------------------------------
-# 2. ORDERFLOW DELTA, TRADING SIGNALS & STOP LOSS ENGINE
-# -------------------------------------------------------------------
-
-
-def calculate_indicators_and_levels(df_hist, df_intraday):
-    if df_intraday.empty or len(df_intraday) < 10:
-        return df_intraday, 0, 0, "HOLD", 0, 0
-
-    # Orderflow Delta Proxy calculation
-    high_low_range = (df_intraday["High"] - df_intraday["Low"]).replace(
-        0, 0.01
-    )
-    clv = (
-        2 * df_intraday["Close"] - df_intraday["High"] - df_intraday["Low"]
-    ) / high_low_range
-
-    df_intraday["Buy Volume"] = (
-        df_intraday["Volume"] * (0.5 + (0.5 * clv))
-    ).fillna(0)
-    df_intraday["Sell Volume"] = (
-        df_intraday["Volume"] * (0.5 - (0.5 * clv))
-    ).fillna(0)
-    df_intraday["Delta"] = df_intraday["Buy Volume"] - df_intraday["Sell Volume"]
-    df_intraday["Cumulative Delta"] = df_intraday["Delta"].cumsum()
-
-    latest_close = float(df_hist["Close"].iloc[-1])
-    recent_low = float(df_intraday["Low"].tail(15).min())
-    recent_high = float(df_intraday["High"].tail(15).max())
-
-    # Stop Loss and Targets (Risk-Reward 1:2)
-    stop_loss = round(recent_low * 0.992, 2)  # slightly below recent swing low
-    target_price = round(latest_close + (2 * (latest_close - stop_loss)), 2)
-
-    latest_delta = float(df_intraday["Delta"].iloc[-1])
-    net_delta_sum = float(df_intraday["Delta"].tail(5).sum())
-
-    avg_vol = df_intraday["Volume"].rolling(20).mean().iloc[-1]
-    current_vol = df_intraday["Volume"].iloc[-1]
-    vol_surge = (
-        (current_vol / avg_vol) if pd.notnull(avg_vol) and avg_vol > 0 else 1.0
-    )
-
-    ema_20 = float(df_hist["Close"].ewm(span=20, adjust=False).mean().iloc[-1])
-
-    # Trigger logic
-    if latest_close > ema_20 and net_delta_sum > 0 and vol_surge >= 1.2:
-        action = "🟢 BUY / LONG ENTRY"
-    elif latest_close < ema_20 and net_delta_sum < 0:
-        action = "🔴 SELL / SHORT EXIT"
-    else:
-        action = "⚪ HOLD / WATCH"
-
-    return (
-        df_intraday,
-        stop_loss,
-        target_price,
-        action,
-        latest_delta,
-        vol_surge,
-    )
-
-
-@st.cache_data(ttl=900)
-def scan_nse_market(symbols_list, bulk_deals, scan_limit):
-    data_records = []
-    active_symbols = symbols_list[:scan_limit]
-
-    progress_bar = st.progress(0)
-    status_msg = st.empty()
-
-    for idx, sym in enumerate(active_symbols):
-        status_msg.text(
-            f"Scanning Market & Computing Indicators [{idx+1}/{len(active_symbols)}]: {sym}..."
-        )
-        ticker_str = f"{sym}.NS" if not sym.endswith(".NS") else sym
-
-        try:
-            t = yf.Ticker(ticker_str)
-            hist = t.history(period="3m", interval="1d")
-            intraday = t.history(period="5d", interval="15m")
-
-            if hist.empty or len(hist) < 30:
-                progress_bar.progress((idx + 1) / len(active_symbols))
-                continue
-
-            latest_price = float(hist["Close"].iloc[-1])
-            prev_price = float(hist["Close"].iloc[-2])
-            day_change_pct = ((latest_price - prev_price) / prev_price) * 100
-
-            (
-                processed_intraday,
-                stop_loss,
-                target_price,
-                action_signal,
-                latest_delta,
-                vol_surge,
-            ) = calculate_indicators_and_levels(hist, intraday)
-
-            try:
-                info = t.info
-                mcap = info.get("marketCap", 0) / 1e7
-                pe = info.get("trailingPE", 0.0) or info.get("forwardPE", 0.0)
-                sector = info.get("sector", "N/A")
-                company_name = info.get("shortName", sym)
-            except Exception:
-                mcap, pe, sector, company_name = 0, 0, "N/A", sym
-
-            is_institutional = sym.upper() in [b.upper() for b in bulk_deals]
-
-            score = 0
-            if is_institutional:
-                score += 4
-            if "BUY" in action_signal:
-                score += 3
-            if vol_surge >= 1.5:
-                score += 2
-            if day_change_pct > 0:
-                score += 1
-
-            data_records.append(
-                {
-                    "Symbol": sym,
-                    "Company": company_name,
-                    "Sector": sector,
-                    "Price (₹)": round(latest_price, 2),
-                    "Change (%)": round(day_change_pct, 2),
-                    "Action Signal": action_signal,
-                    "Stop Loss (₹)": stop_loss,
-                    "Target (₹)": target_price,
-                    "Inst. Deal": "Yes 🏛️" if is_institutional else "No",
-                    "Net Delta": f"{latest_delta:+,.0f}",
-                    "Vol Surge": f"{vol_surge:.2f}x",
-                    "P/E Ratio": round(pe, 1) if pe else "N/A",
-                    "Market Cap (Cr)": (
-                        f"₹{mcap:,.0f} Cr" if mcap > 0 else "N/A"
-                    ),
-                    "Score": score,
-                    "HistDF": hist,
-                    "IntradayDF": processed_intraday,
-                }
-            )
-        except Exception:
-            pass
-
-        progress_bar.progress((idx + 1) / len(active_symbols))
-
-    status_msg.empty()
-    progress_bar.empty()
-    return pd.DataFrame(data_records)
-
-
-# -------------------------------------------------------------------
-# 3. STREAMLIT INTERFACE
-# -------------------------------------------------------------------
-
-st.sidebar.header("⚙️ Scanner Settings")
-all_equities = get_all_nse_equities()
-total_equities_len = len(all_equities)
-
-max_slider_val = max(20, total_equities_len)
-default_val = min(40, max_slider_val)
-
-scan_count = st.sidebar.slider(
-    "Number of Stocks to Scan",
-    min_value=10,
-    max_value=max_slider_val,
-    value=default_val,
-    step=10,
-)
-top_picks_count = st.sidebar.slider(
-    "Top Stocks to Display", min_value=3, max_value=15, value=5
+st.sidebar.header("🛠️ Intraday Controls")
+stock_input = st.sidebar.text_input(
+    "Stock Ticker (e.g., INFY, RELIANCE, TCS)", value="INFY"
+).upper()
+symbol_str = (
+    f"{stock_input}.NS" if not stock_input.endswith(".NS") else stock_input
 )
 
-if st.sidebar.button("🔄 Force Refresh Scanner"):
-    st.cache_data.clear()
-    st.rerun()
+timeframe = st.sidebar.selectbox(
+    "Select Timeframe", ["1m", "5m", "15m", "30m", "1h"], index=1
+)
+
+# Yahoo Finance limits intraday data history based on timeframe
+period_map = {"1m": "7d", "5m": "60d", "15m": "60d", "30m": "60d", "1h": "730d"}
+fetch_period = period_map.get(timeframe, "60d")
+
+st.sidebar.markdown("---")
+st.sidebar.header("📊 Chart Overlays")
+show_candlestick = st.sidebar.checkbox("Show Candlesticks (OHLC)", value=True)
+show_vwap = st.sidebar.checkbox("Show VWAP Benchmark", value=True)
+show_ema20 = st.sidebar.checkbox("Show 20 EMA Line", value=True)
+show_ema50 = st.sidebar.checkbox("Show 50 EMA Line", value=True)
+show_orderflow = st.sidebar.checkbox("Show Orderflow Delta Subplot", value=True)
+show_rsi = st.sidebar.checkbox("Show RSI Subplot", value=True)
+
+# -------------------------------------------------------------------
+# 2. DATA FETCHER & TECHNICAL CALCULATOR
+# -------------------------------------------------------------------
+
+
+@st.cache_data(ttl=300)
+def fetch_intraday_data(ticker, period, interval):
+    df = yf.download(
+        ticker, period=period, interval=interval, progress=False, auto_adjust=True
+    )
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df
+
 
 with st.spinner(
-    "Scanning NSE exchange, computing orderflow delta, volume surge, and trade triggers..."
+    f"Streaming intraday tick data and calculating orderflow for {symbol_str}..."
 ):
-    bulk_list = get_nse_bulk_block_deals()
-    results_df = scan_nse_market(all_equities, bulk_list, scan_count)
+    df = fetch_intraday_data(symbol_str, fetch_period, timeframe)
 
-if results_df.empty:
-    st.warning(
-        "No market data returned. Click **'Force Refresh Scanner'** in the sidebar."
+if df.empty or len(df) < 10:
+    st.error(
+        f"Could not retrieve intraday data for `{symbol_str}` on interval `{timeframe}`. Please check the ticker symbol or try a different timeframe."
     )
 else:
-    df_sorted = results_df.sort_values(
-        by="Score", ascending=False
-    ).reset_index(drop=True)
-    st.subheader(f"⭐ Top {top_picks_count} Stock Action Triggers & Levels")
+    # Technical Calculations
+    df["EMA_20"] = df["Close"].ewm(span=20, adjust=False).mean()
+    df["EMA_50"] = df["Close"].ewm(span=50, adjust=False).mean()
 
-    top_results = df_sorted.head(top_picks_count)
+    # VWAP Calculation (Session Approximate)
+    q = df["Volume"]
+    p = (df["High"] + df["Low"] + df["Close"]) / 3
+    df["VWAP"] = (p * q).cumsum() / q.cumsum()
 
-    for idx, row in top_results.iterrows():
-        with st.expander(
-            f"#{idx+1} {row['Symbol']} — {row['Company']} | Signal: {row['Action Signal']}",
-            expanded=(idx == 0),
-        ):
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric(
-                "Price", f"₹{row['Price (₹)']}", f"{row['Change (%)']}%"
-            )
-            c2.metric("Action Trigger", f"{row['Action Signal']}")
-            c3.metric("Stop Loss", f"₹{row['Stop Loss (₹)']}")
-            c4.metric("Target Price", f"₹{row['Target (₹)']}")
-            c5.metric("Volume Surge", f"{row['Vol_Surge'] if 'Vol_Surge' in row else row['Vol Surge']}")
+    # RSI Calculation
+    delta = df["Close"].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df["RSI"] = 100 - (100 / (1 + rs))
 
-            st.markdown("---")
+    # Orderflow Delta Proxy (Buying vs Selling pressure per candle)
+    candle_range = df["High"] - df["Low"]
+    close_location = (
+        (df["Close"] - df["Low"]) / candle_range
+        if not candle_range.eq(0).all()
+        else 0.5
+    )
+    df["Delta"] = df["Volume"] * (
+        (df["Close"] - df["Open"]) / (df["High"] - df["Low"] + 1e-9)
+    )
 
-            # Unified Master Chart (Price Candle top pane + Volume/Delta bottom pane)
-            intraday_df = row["IntradayDF"]
-            if not intraday_df.empty and "Delta" in intraday_df.columns:
-                fig = make_subplots(
-                    rows=2,
-                    cols=1,
-                    shared_xaxes=True,
-                    vertical_spacing=0.08,
-                    row_heights=[0.65, 0.35],
-                    subplot_titles=(
-                        f"{row['Symbol']} Intraday Price Action",
-                        "Orderflow Delta & Volume Breakdown",
-                    ),
-                )
+    # Relative Volume (RVOL)
+    df["Avg_Volume_20"] = df["Volume"].rolling(window=20).mean()
+    df["RVOL"] = df["Volume"] / df["Avg_Volume_20"]
 
-                # Row 1: Price Candlestick
-                fig.add_trace(
-                    go.Candlestick(
-                        x=intraday_df.index,
-                        open=intraday_df["Open"],
-                        high=intraday_df["High"],
-                        low=intraday_df["Low"],
-                        close=intraday_df["Close"],
-                        name="Price",
-                    ),
-                    row=1,
-                    col=1,
-                )
+    # Latest Metrics
+    latest = df.iloc[-1]
+    prev = df.iloc[-2]
+    price_change = ((latest["Close"] - prev["Close"]) / prev["Close"]) * 100
 
-                # Row 2: Delta Volume Bars
-                bar_colors = [
-                    "#26a69a" if val >= 0 else "#ef5350"
-                    for val in intraday_df["Delta"]
-                ]
-                fig.add_trace(
-                    go.Bar(
-                        x=intraday_df.index,
-                        y=intraday_df["Delta"],
-                        name="Orderflow Delta",
-                        marker_color=bar_colors,
-                    ),
-                    row=2,
-                    col=1,
-                )
+    # -------------------------------------------------------------------
+    # 3. EXECUTIVE INTRA-DAY METRICS BAR
+    # -------------------------------------------------------------------
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric(
+        "Last Traded Price",
+        f"₹{latest['Close']:.2f}",
+        f"{price_change:+.2f}%",
+    )
+    col2.metric("Relative Volume (RVOL)", f"{latest['RVOL']:.2f}x")
+    col3.metric(
+        "VWAP Benchmark",
+        f"₹{latest['VWAP']:.2f}",
+        "Bullish" if latest["Close"] > latest["VWAP"] else "Bearish",
+    )
+    col4.metric("RSI (14)", f"{latest['RSI']:.1f}")
+    col5.metric(
+        "Orderflow Delta",
+        f"{int(latest['Delta']):,}",
+        "Net Buying" if latest["Delta"] > 0 else "Net Selling",
+    )
 
-                fig.update_layout(
-                    height=450,
-                    margin=dict(l=10, r=10, t=30, b=10),
-                    template="plotly_white",
-                    xaxis_rangeslider_visible=False,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
-                )
-                fig.update_yaxes(title_text="Price (₹)", row=1, col=1)
-                fig.update_yaxes(title_text="Delta Volume", row=2, col=1)
+    # -------------------------------------------------------------------
+    # 4. ADVANCED PLOTLY SUBPLOT CHART GENERATION
+    # -------------------------------------------------------------------
+    row_count = 1
+    row_heights = [0.6]
+    subplot_titles = [f"{symbol_str} Intraday Price Action"]
 
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("Intraday chart data unavailable for this ticker.")
+    if show_orderflow:
+        row_count += 1
+        row_heights.append(0.2)
+        subplot_titles.append("Orderflow Delta Volume (Surge Highlighted)")
 
-    st.markdown("---")
-    st.subheader("📋 Complete Scanned Market Overview Table")
-    final_table_df = df_sorted.drop(columns=["HistDF", "IntradayDF"])
-    st.dataframe(final_table_df, use_container_width=True)
+    if show_rsi:
+        row_count += 1
+        row_heights.append(0.2)
+        subplot_titles.append("RSI (14) Momentum")
+
+    from plotly.subplots import make_subplots
+
+    fig = make_subplots(
+        rows=row_count,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=row_heights,
+        subplot_titles=subplot_titles,
+    )
+
+    # Main Price Chart Row
+    if show_candlestick:
+        fig.add_trace(
+            go.Candlestick(
+                x=df.index,
+                open=df["Open"],
+                high=df["High"],
+                low=df["Low"],
+                close=df["Close"],
+                name="OHLC",
+            ),
+            row=1,
+            col=1,
+        )
+    else:
+        fig.add_trace(
+            go.Scatter(
+                x=df.index,
+                y=df["Close"],
+                mode="lines",
+                name="Close",
+                line=dict(color="#1f77b4", width=2),
+            ),
+            row=1,
+            col=1,
+        )
+
+    if show_vwap:
+        fig.add_trace(
+            go.Scatter(
+                x=df.index,
+                y=df["VWAP"],
+                mode="lines",
+                name="VWAP",
+                line=dict(color="#ff7f0e", width=1.5, dash="dot"),
+            ),
+            row=1,
+            col=1,
+        )
+
+    if show_ema20:
+        fig.add_trace(
+            go.Scatter(
+                x=df.index,
+                y=df["EMA_20"],
+                mode="lines",
+                name="20 EMA",
+                line=dict(color="#2ca02c", width=1),
+            ),
+            row=1,
+            col=1,
+        )
+
+    if show_ema50:
+        fig.add_trace(
+            go.Scatter(
+                x=df.index,
+                y=df["EMA_50"],
+                mode="lines",
+                name="50 EMA",
+                line=dict(color="#d62728", width=1),
+            ),
+            row=1,
+            col=1,
+        )
+
+    current_row = 2
+
+    # Orderflow Subplot
+    if show_orderflow:
+        colors = [
+            "#00E676" if val >= 0 else "#FF1744" for val in df["Delta"]
+        ]
+        fig.add_trace(
+            go.Bar(
+                x=df.index, y=df["Delta"], marker_color=colors, name="Delta"
+            ),
+            row=current_row,
+            col=1,
+        )
+        current_row += 1
+
+    # RSI Subplot
+    if show_rsi:
+        fig.add_trace(
+            go.Scatter(
+                x=df.index,
+                y=df["RSI"],
+                mode="lines",
+                name="RSI",
+                line=dict(color="#9467bd", width=1.5),
+            ),
+            row=current_row,
+            col=1,
+        )
+        # Overbought / Oversold reference lines
+        fig.add_hline(
+            y=70, line_dash="dash", line_color="red", row=current_row, col=1
+        )
+        fig.add_hline(
+            y=30, line_dash="dash", line_color="green", row=current_row, col=1
+        )
+
+    fig.update_layout(
+        template="plotly_white",
+        xaxis_rangeslider_visible=False,
+        height=700,
+        margin=dict(l=20, r=20, t=40, b=20),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+        ),
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # -----------------
+    # 5. INTRA-DAY TRADE SETUP AI ADVISOR
+    # -----------------
+    st.markdown("### 🤖 Institutional Intraday Action Summary")
+    if latest["Close"] > latest["VWAP"] and latest["RVOL"] > 1.3:
+        st.success(
+            f"**Bullish Institutional Accumulation Detected:** `{symbol_str}` is trading above its VWAP benchmark with high relative volume (`{latest['RVOL']:.2f}x`). Look for intraday pullbacks to the 20 EMA for long setups."
+        )
+    elif latest["Close"] < latest["VWAP"] and latest["RVOL"] > 1.3:
+        st.error(
+            f"**Bearish Institutional Distribution Detected:** `{symbol_str}` is trading below its VWAP benchmark with heavy volume surge. Watch for weakness breakdown continuation."
+        )
+    else:
+        st.info(
+            f"**Neutral / Consolidating Action:** `{symbol_str}` is currently moving within average volume parameters. Wait for a breakout above VWAP or RVOL expansion before taking aggressive intraday positions."
+        )
