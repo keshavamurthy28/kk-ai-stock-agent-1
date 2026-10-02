@@ -1,5 +1,4 @@
 import pandas as pd
-import pandas_ta as ta
 import streamlit as st
 import yfinance as yf
 
@@ -26,6 +25,20 @@ timeframe = st.sidebar.selectbox(
     index=0,
 )
 run_btn = st.sidebar.button("Run Technical Analysis")
+
+
+def calculate_ema(series, span=50):
+    return series.ewm(span=span, adjust=False).mean()
+
+
+def calculate_rsi(series, period=14):
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
 
 
 def get_stock_data(symbol, timeframe_choice):
@@ -59,13 +72,13 @@ if run_btn or ticker_symbol:
                 else:
                     close = df["Close"]
 
-                # Calculate TA Indicators
-                rsi = ta.rsi(close, length=14)
-                ema_50 = ta.ema(close, length=50)
+                # Calculate Technical Indicators directly
+                rsi = calculate_rsi(close, 14)
+                ema_50 = calculate_ema(close, 50)
 
-                latest_price = close.iloc[-1]
-                latest_rsi = rsi.iloc[-1] if not rsi.empty else 50
-                latest_ema50 = ema_50.iloc[-1] if not ema_50.empty else 0
+                latest_price = float(close.iloc[-1])
+                latest_rsi = float(rsi.iloc[-1]) if not rsi.empty else 50.0
+                latest_ema50 = float(ema_50.iloc[-1]) if not ema_50.empty else 0.0
 
                 # Recommendation Engine
                 if latest_price > latest_ema50 and 45 < latest_rsi < 65:
