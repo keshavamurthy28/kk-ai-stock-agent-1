@@ -1,8 +1,10 @@
 import pandas as pd
 import plotly.graph_objects as go
+import requests
 import streamlit as st
 import yfinance as yf
 
+# Configure page layout
 st.set_page_config(
     page_title="NSE Dynamic Stock Scanner", page_icon="📅", layout="wide"
 )
@@ -13,16 +15,21 @@ st.markdown(
 )
 
 # -------------------------------------------------------------------
-# DYNAMIC NSE STOCK LIST RETRIEVAL
+# DYNAMIC NIFTY 50 TICKER RETRIEVAL
 # -------------------------------------------------------------------
 
 
-@st.cache_data(ttl=86400)  # Cache the ticker list for 24 hours
+@st.cache_data(ttl=86400)  # Cache index list for 24 hours
 def get_nifty50_tickers():
-    """Fetches the official Nifty 50 stock list dynamically from Wikipedia."""
+    """Fetches the official Nifty 50 stock list dynamically with custom headers to prevent 403 blocks."""
+    url = "https://en.wikipedia.org/wiki/NIFTY_50"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+    }
+
     try:
-        url = "https://en.wikipedia.org/wiki/NIFTY_50"
-        tables = pd.read_html(url)
+        response = requests.get(url, headers=headers, timeout=10)
+        tables = pd.read_html(response.text)
         nifty_table = tables[2]  # Nifty 50 constituents table
         symbols = nifty_table["Symbol"].tolist()
         return [str(sym).strip() for sym in symbols if str(sym).strip()]
@@ -59,97 +66,105 @@ def fetch_daily_stock_details(symbols):
     status_text = st.empty()
 
     for idx, sym in enumerate(symbols):
-        status_text.text(f"Scanning Nifty 50 constituent [{idx+1}/50]: {sym}...")
+        status_text.text(
+            f"Scanning Nifty 50 constituent [{idx+1}/{len(symbols)}]: {sym}..."
+        )
         ticker_str = (
             f"{sym.upper()}.NS" if not sym.endswith(".NS") else sym.upper()
         )
-        t = yf.Ticker(ticker_str)
 
-        hist = t.history(period="6m", interval="1d")
-        if hist.empty or len(hist) < 50:
-            progress_bar.progress((idx + 1) / len(symbols))
-            continue
-
-        close = hist["Close"]
-        volume = hist["Volume"]
-
-        # Technical Indicators
-        latest_price = float(close.iloc[-1])
-        prev_price = float(close.iloc[-2])
-        day_change_pct = ((latest_price - prev_price) / prev_price) * 100
-
-        ema_20 = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
-        ema_50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
-
-        # RSI Calculation
-        delta = close.diff()
-        gain = delta.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean()
-        loss = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
-        rs = gain / loss
-        rsi = float((100 - (100 / (1 + rs))).iloc[-1])
-
-        # Volume Surge Ratio
-        avg_vol = volume.tail(20).mean()
-        vol_surge = (
-            (float(volume.iloc[-1]) / avg_vol) if avg_vol > 0 else 1.0
-        )
-
-        # Fundamental Data
         try:
-            info = t.info
-            mcap = info.get("marketCap", 0) / 1e7  # Cr INR
-            pe = info.get("trailingPE", 0.0) or info.get("forwardPE", 0.0)
-            div_yield = (info.get("dividendYield", 0.0) or 0.0) * 100
-            sector = info.get("sector", "N/A")
-            company_name = info.get("shortName", sym)
+            t = yf.Ticker(ticker_str)
+            hist = t.history(period="6m", interval="1d")
+
+            if hist.empty or len(hist) < 50:
+                progress_bar.progress((idx + 1) / len(symbols))
+                continue
+
+            close = hist["Close"]
+            volume = hist["Volume"]
+
+            # Technical Indicators
+            latest_price = float(close.iloc[-1])
+            prev_price = float(close.iloc[-2])
+            day_change_pct = ((latest_price - prev_price) / prev_price) * 100
+
+            ema_20 = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
+            ema_50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
+
+            # RSI Calculation
+            delta = close.diff()
+            gain = delta.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean()
+            loss = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
+            rs = gain / loss
+            rsi = float((100 - (100 / (1 + rs))).iloc[-1])
+
+            # Volume Surge Ratio
+            avg_vol = volume.tail(20).mean()
+            vol_surge = (
+                (float(volume.iloc[-1]) / avg_vol) if avg_vol > 0 else 1.0
+            )
+
+            # Fundamental Data
+            try:
+                info = t.info
+                mcap = info.get("marketCap", 0) / 1e7  # Cr INR
+                pe = info.get("trailingPE", 0.0) or info.get("forwardPE", 0.0)
+                div_yield = (info.get("dividendYield", 0.0) or 0.0) * 100
+                sector = info.get("sector", "N/A")
+                company_name = info.get("shortName", sym)
+            except Exception:
+                mcap, pe, div_yield, sector, company_name = 0, 0, 0, "N/A", sym
+
+            # Scoring Logic
+            score = 0
+            if latest_price > ema_20:
+                score += 1
+            if ema_20 > ema_50:
+                score += 1
+            if 35 <= rsi <= 65:
+                score += 1
+            if vol_surge >= 1.2:
+                score += 1
+            if pe > 0 and pe < 35:
+                score += 1
+
+            if rsi < 32:
+                signal = "🟢 OVERSOLD BUY (Reversal)"
+            elif score >= 4:
+                signal = "🔥 STRONG BUY (Trend + Vol)"
+            elif score == 3:
+                signal = "📈 ACCUMULATE (Positive)"
+            elif latest_price < ema_50 or rsi > 70:
+                signal = "🔴 TRIM / BEARISH"
+            else:
+                signal = "⚪ NEUTRAL / HOLD"
+
+            data_list.append(
+                {
+                    "Symbol": sym,
+                    "Company": company_name,
+                    "Sector": sector,
+                    "Price (₹)": round(latest_price, 2),
+                    "Change (%)": round(day_change_pct, 2),
+                    "RSI (14)": round(rsi, 1),
+                    "20 EMA": round(ema_20, 2),
+                    "50 EMA": round(ema_50, 2),
+                    "P/E Ratio": round(pe, 1) if pe else "N/A",
+                    "Market Cap (Cr)": (
+                        f"₹{mcap:,.0f} Cr" if mcap > 0 else "N/A"
+                    ),
+                    "Div Yield (%)": f"{div_yield:.2f}%"
+                    if div_yield
+                    else "0.00%",
+                    "Vol Surge": f"{vol_surge:.2f}x",
+                    "Action Signal": signal,
+                    "Score": score,
+                    "HistDF": hist,
+                }
+            )
         except Exception:
-            mcap, pe, div_yield, sector, company_name = 0, 0, 0, "N/A", sym
-
-        # Scoring Logic
-        score = 0
-        if latest_price > ema_20:
-            score += 1
-        if ema_20 > ema_50:
-            score += 1
-        if 35 <= rsi <= 65:
-            score += 1
-        if vol_surge >= 1.2:
-            score += 1
-        if pe > 0 and pe < 35:
-            score += 1
-
-        if rsi < 32:
-            signal = "🟢 OVERSOLD BUY (Reversal)"
-        elif score >= 4:
-            signal = "🔥 STRONG BUY (Trend + Vol)"
-        elif score == 3:
-            signal = "📈 ACCUMULATE (Positive)"
-        elif latest_price < ema_50 or rsi > 70:
-            signal = "🔴 TRIM / BEARISH"
-        else:
-            signal = "⚪ NEUTRAL / HOLD"
-
-        data_list.append(
-            {
-                "Symbol": sym,
-                "Company": company_name,
-                "Sector": sector,
-                "Price (₹)": round(latest_price, 2),
-                "Change (%)": round(day_change_pct, 2),
-                "RSI (14)": round(rsi, 1),
-                "20 EMA": round(ema_20, 2),
-                "50 EMA": round(ema_50, 2),
-                "P/E Ratio": round(pe, 1) if pe else "N/A",
-                "Market Cap (Cr)": (
-                    f"₹{mcap:,.0f} Cr" if mcap > 0 else "N/A"
-                ),
-                "Div Yield (%)": f"{div_yield:.2f}%" if div_yield else "0.00%",
-                "Vol Surge": f"{vol_surge:.2f}x",
-                "Action Signal": signal,
-                "Score": score,
-                "HistDF": hist,
-            }
-        )
+            pass
 
         progress_bar.progress((idx + 1) / len(symbols))
 
@@ -166,18 +181,23 @@ st.sidebar.header("⚙️ Scanner Settings")
 
 # Fetch full Nifty 50 list dynamically
 nifty_symbols = get_nifty50_tickers()
-st.sidebar.write(f"**Live Index:** Nifty 50 ({len(nifty_symbols)} Stocks Loaded)")
+st.sidebar.write(
+    f"**Live Index:** Nifty 50 ({len(nifty_symbols)} Stocks Loaded)"
+)
 
 top_n_picks = st.sidebar.slider("Number of Top Picks to Display", 3, 10, 5)
 
 if st.sidebar.button("🔄 Force Refresh Data"):
     st.cache_data.clear()
+    st.rerun()
 
 with st.spinner("Executing dynamic Nifty 50 market scan..."):
     df_results = fetch_daily_stock_details(nifty_symbols)
 
 if df_results.empty:
-    st.warning("Could not pull stock data. Click 'Force Refresh Data'.")
+    st.error(
+        "Could not pull stock data. Please click 'Force Refresh Data' in the sidebar."
+    )
 else:
     df_sorted = df_results.sort_values(
         by="Score", ascending=False
@@ -193,7 +213,9 @@ else:
             expanded=(idx == 0),
         ):
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Current Price", f"₹{row['Price (₹)']}", f"{row['Change (%)']}%")
+            col1.metric(
+                "Current Price", f"₹{row['Price (₹)']}", f"{row['Change (%)']}%"
+            )
             col2.metric("P/E Ratio", f"{row['P/E Ratio']}")
             col3.metric("RSI (14)", f"{row['RSI (14)']}")
             col4.metric("Market Cap", f"{row['Market Cap (Cr)']}")
