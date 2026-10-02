@@ -117,13 +117,18 @@ backtest_period = st.sidebar.selectbox(
 )
 
 period_map = {
+    "1 Day": "1d",
+    "1 Week": "1wk",
     "1 Month": "1mo",
     "3 Months": "3mo",
     "6 Months": "6mo",
     "1 Year": "1y",
 }
-selected_period = period_map[backtest_period]
 
+selected_period = st.sidebar.selectbox(
+    "Select Historical Lookback",
+    ["1 Day", "1 Week", "1 Month", "3 Months", "6 Months", "1 Year"],
+)
 run_screening = st.sidebar.button("🚀 Run Institutional Screener & Backtest")
 
 # -------------------------------------------------------------------
