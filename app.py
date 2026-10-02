@@ -11,7 +11,7 @@ st.set_page_config(
 
 st.title("⚡ AI Intraday & Trend Analysis Agent")
 st.markdown(
-    "Interactive Candlestick & Technical Indicator Dashboard with Volume, Delta Orderflow, Stop Loss levels, and automated signals."
+    "Interactive Candlestick & Technical Indicator Dashboard with Multi-Tier Volume Delta Color-Coding, Stop Loss levels, and automated signals."
 )
 
 # -------------------------------------------------------------------
@@ -84,6 +84,25 @@ else:
     df_data["Sell Vol"] = (df_data["Volume"] * (0.5 - (0.5 * clv))).fillna(0)
     df_data["Delta"] = df_data["Buy Vol"] - df_data["Sell Vol"]
 
+    # Volume Surge Multi-Tier Mapping
+    vol_ma = df_data["Volume"].rolling(window=20).mean()
+    df_data["Vol_Ratio"] = df_data["Volume"] / vol_ma.replace(0, 1)
+
+
+    # Dynamic Color Assignment Function
+    def get_delta_color(row):
+        delta = row["Delta"]
+        v_ratio = row["Vol_Ratio"]
+        if delta >= 0:
+            # High Volume Surge Buy vs Normal Buy
+            return "#00E676" if v_ratio >= 2.0 else "#26a69a"
+        else:
+            # High Volume Surge Sell vs Normal Sell
+            return "#FF1744" if v_ratio >= 2.0 else "#ef5350"
+
+
+    df_data["Bar_Color"] = df_data.apply(get_delta_color, axis=1)
+
     latest_close = float(df_data["Close"].iloc[-1])
     recent_low = float(df_data["Low"].tail(10).min())
     stop_loss = round(recent_low * 0.992, 2)
@@ -113,15 +132,18 @@ else:
 
     st.markdown("---")
 
-    # Info pills
-    col_p1, col_p2, col_p3 = st.columns(3)
-    col_p1.info(
-        f"**20 EMA (Short Trend):** ₹{float(df_data['20_EMA'].iloc[-1]):,.2f}"
+    # Legend info explaining colors
+    st.markdown(
+        """
+        🎨 **Orderflow Delta Color Guide:** 
+        * <span style="color:#00E676; font-weight:bold;">■ Bright Green (#00E676)</span>: Heavy Volume Surge ($\ge 2x$) + Aggressive Buying
+        * <span style="color:#26a69a; font-weight:bold;">■ Normal Green (#26a69a)</span>: Standard Buying Delta
+        * <span style="color:#ef5350; font-weight:bold;">■ Normal Red (#ef5350)</span>: Standard Selling Delta
+        * <span style="color:#FF1744; font-weight:bold;">■ Bright Red (#FF1744)</span>: Heavy Volume Surge ($\ge 2x$) + Aggressive Selling Dump
+        """,
+        unsafe_allow_html=True,
     )
-    col_p2.info(
-        f"**50 EMA (Baseline):** ₹{float(df_data['50_EMA'].iloc[-1]):,.2f}"
-    )
-    col_p3.info(f"**Net 5-Period Delta:** {net_delta:+,.0f}")
+    st.markdown("---")
 
     # -------------------------------------------------------------------
     # DYNAMIC SUBPLOT CHART GENERATION
@@ -133,14 +155,15 @@ else:
     if show_delta:
         subplot_rows += 1
         row_heights.append(0.3)
-        subplot_titles_list.append("Orderflow Delta Volume")
+        subplot_titles_list.append(
+            "Orderflow Delta Volume (Surge Highlighted)"
+        )
 
     if show_rsi:
         subplot_rows += 1
         row_heights.append(0.3)
         subplot_titles_list.append("RSI (14) Indicator")
 
-    # Normalize row heights dynamically
     total_h = sum(row_heights)
     normalized_heights = [h / total_h for h in row_heights]
 
@@ -196,17 +219,14 @@ else:
 
     current_row += 1
 
-    # Row 2: Orderflow Delta
+    # Row 2: Orderflow Delta with Multi-Tier Colors
     if show_delta:
-        delta_colors = [
-            "#26a69a" if val >= 0 else "#ef5350" for val in df_data["Delta"]
-        ]
         fig.add_trace(
             go.Bar(
                 x=df_data.index,
                 y=df_data["Delta"],
                 name="Orderflow Delta",
-                marker_color=delta_colors,
+                marker_color=df_data["Bar_Color"],
             ),
             row=current_row,
             col=1,
@@ -225,7 +245,6 @@ else:
             row=current_row,
             col=1,
         )
-        # Overbought / Oversold reference lines
         fig.add_hline(
             y=70,
             line_dash="dash",
