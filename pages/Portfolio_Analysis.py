@@ -1,204 +1,125 @@
-import pandas as pd
 import streamlit as st
+import pandas as pd
 import yfinance as yf
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-st.set_page_config(
-    page_title="Zerodha Portfolio Agent", page_icon="📊", layout="wide"
-)
+st.set_page_config(page_title="Zerodha Portfolio Analysis", layout="wide")
 
 st.title("📊 Zerodha Portfolio Trend & Action Agent")
-st.markdown(
-    "Upload your downloaded Zerodha Console holdings **.xlsx** file to analyze actions."
-)
+st.write("Upload your Zerodha Console holdings `.xlsx` file for customized rules and visual charts.")
 
-uploaded_file = st.sidebar.file_uploader(
-    "Upload Holdings (.xlsx or .csv)", type=["xlsx", "csv"]
-)
+# Sidebar Parameters for Customizable Rules
+st.sidebar.header("⚙️ Customize Trading Rules")
+rsi_overbought = st.sidebar.slider("RSI Overbought (Sell Limit)", 60, 80, 70)
+rsi_oversold = st.sidebar.slider("RSI Oversold (Dip Limit)", 20, 40, 30)
+ema_fast_p = st.sidebar.number_input("Fast EMA Period", value=20)
+ema_slow_p = st.sidebar.number_input("Slow EMA Period", value=50)
 
-
-def calculate_ema(series, span=50):
-    return series.ewm(span=span, adjust=False).mean()
-
+def clean_symbol(symbol):
+    s = str(symbol).strip().upper()
+    s = s.replace("-EQ", "").replace("-E", "").replace(".NS", "")
+    return f"{s}.NS"
 
 def calculate_rsi(series, period=14):
     delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
-    rs = avg_gain / avg_loss
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-
-def analyze_stock(symbol):
-    ticker = f"{symbol}.NS"
-    df = yf.download(ticker, period="6m", interval="1d", progress=False)
-
-    if df.empty or len(df) < 20:
-        return "UNKNOWN", 0, 0, 0
-
-    if isinstance(df.columns, pd.MultiIndex):
-        close = df["Close"][ticker]
-    else:
-        close = df["Close"]
-
-    rsi = calculate_rsi(close, 14).iloc[-1]
-    ema_50 = calculate_ema(close, 50).iloc[-1]
-    ltp = close.iloc[-1]
-
-    if ltp > ema_50 and 45 < rsi < 65:
-        signal = "ADD / BUY"
-    elif ltp < ema_50 or rsi > 70:
+def fetch_and_analyze(symbol):
+    ticker_symbol = clean_symbol(symbol)
+    df = yf.Ticker(ticker_symbol).history(period="6m", interval="1d")
+    
+    if df.empty or len(df) < ema_slow_p:
+        return None, "NO DATA", 0, 0, 0
+    
+    df[f'EMA_{ema_fast_p}'] = df['Close'].ewm(span=ema_fast_p, adjust=False).mean()
+    df[f'EMA_{ema_slow_p}'] = df['Close'].ewm(span=ema_slow_p, adjust=False).mean()
+    df['RSI'] = calculate_rsi(df['Close'], period=14)
+    
+    latest = df.iloc[-1]
+    ltp = float(latest['Close'])
+    rsi_val = float(latest['RSI'])
+    ema_fast_val = float(latest[f'EMA_{ema_fast_p}'])
+    ema_slow_val = float(latest[f'EMA_{ema_slow_p}'])
+    
+    if ltp < ema_slow_val or rsi_val >= rsi_overbought:
         signal = "SELL / TRIM"
+    elif ltp > ema_slow_val and ema_fast_val > ema_slow_val and 45 <= rsi_val < rsi_overbought:
+        signal = "BUY / ACCUMULATE"
+    elif abs(ltp - ema_slow_val) / ema_slow_val <= 0.02 and rsi_val <= (rsi_oversold + 10):
+        signal = "DIP BUY"
     else:
         signal = "HOLD"
+        
+    return df, signal, ltp, rsi_val, ema_slow_val
 
-    return (
-        signal,
-        round(float(ltp), 2),
-        round(float(rsi), 2),
-        round(float(ema_50), 2),
+def build_plotly_chart(df, symbol, signal):
+    fig = make_subplots(
+        rows=2, cols=1, 
+        shared_xaxes=True, 
+        vertical_spacing=0.08, 
+        subplot_titles=(f"{symbol} — Daily Candlestick with {ema_fast_p} & {ema_slow_p} EMA", "14-Day RSI Indicator"),
+        row_width=[0.3, 0.7]
     )
+    
+    # Candlestick
+    fig.add_trace(go.Candlestick(
+        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+        name="OHLC Price"
+    ), row=1, col=1)
+    
+    # Fast & Slow EMA
+    fig.add_trace(go.Scatter(x=df.index, y=df[f'EMA_{ema_fast_p}'], line=dict(color='orange', width=1.5), name=f'{ema_fast_p} EMA'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df[f'EMA_{ema_slow_p}'], line=dict(color='blue', width=2), name=f'{ema_slow_p} EMA'), row=1, col=1)
+    
+    # RSI Line
+    fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='purple', width=2), name='RSI (14)'), row=2, col=1)
+    
+    # RSI Reference Lines
+    fig.add_hline(y=rsi_overbought, line_dash="dash", line_color="red", row=2, col=1, annotation_text="Overbought Zone")
+    fig.add_hline(y=rsi_oversold, line_dash="dash", line_color="green", row=2, col=1, annotation_text="Oversold Zone")
+    fig.add_hline(y=50, line_dash="dot", line_color="gray", row=2, col=1)
+    
+    fig.update_layout(height=550, xaxis_rangeslider_visible=False, template="plotly_white")
+    return fig
 
+# Upload Section
+uploaded_file = st.file_uploader("Upload Holdings (.xlsx or .csv)", type=["xlsx", "csv"])
 
-if uploaded_file is not None:
-    # Read raw Excel or CSV
-    if uploaded_file.name.endswith(".xlsx"):
-        df_raw = pd.read_excel(uploaded_file)
-    else:
-        df_raw = pd.read_csv(uploaded_file)
-
-    # Detect header row automatically if title rows exist
-    header_idx = None
-    for idx, row in df_raw.iterrows():
-        row_str = row.astype(str).str.lower().values
-        if any(
-            col in row_str
-            for col in [
-                "symbol",
-                "instrument",
-                "trading symbol",
-                "tradingsymbol",
-            ]
-        ):
-            header_idx = idx
-            break
-
-    if header_idx is not None and header_idx > 0:
-        if uploaded_file.name.endswith(".xlsx"):
-            holdings_df = pd.read_excel(uploaded_file, header=header_idx + 1)
-        else:
-            holdings_df = pd.read_csv(uploaded_file, header=header_idx + 1)
-    else:
-        holdings_df = df_raw
-
-    holdings_df.columns = holdings_df.columns.astype(str).str.strip()
-
-    st.subheader("📋 Portfolio Recommendations")
-
+if uploaded_file:
+    df_raw = pd.read_excel(uploaded_file) if uploaded_file.name.endswith(".xlsx") else pd.read_csv(uploaded_file)
+    symbol_col = [c for c in df_raw.columns if "symbol" in c.lower() or "instrument" in c.lower() or "stock" in c.lower()][0]
+    
     results = []
-    with st.spinner("Analyzing portfolio stocks..."):
-        for idx, row in holdings_df.iterrows():
-            # Find symbol from matching column names
-            symbol = None
-            for col in holdings_df.columns:
-                if col.lower() in [
-                    "symbol",
-                    "instrument",
-                    "trading symbol",
-                    "tradingsymbol",
-                    "stock",
-                ]:
-                    symbol = str(row[col]).strip()
-                    break
-
-            if (
-                not symbol
-                or symbol == "nan"
-                or symbol.lower() in ["total", "subtotal", "none", ""]
-            ):
-                continue
-
-            # Strip exchange prefix if present (e.g. NSE:INFY -> INFY)
-            if ":" in symbol:
-                symbol = symbol.split(":")[-1]
-
-            qty = 0
-            for col in holdings_df.columns:
-                if "qty" in col.lower() or "quantity" in col.lower():
-                    try:
-                        qty = float(row[col])
-                    except:
-                        qty = 0
-                    break
-
-            avg_cost = 0
-            for col in holdings_df.columns:
-                if (
-                    "avg" in col.lower()
-                    or "cost" in col.lower()
-                    or "buy" in col.lower()
-                    or "price" in col.lower()
-                ):
-                    try:
-                        avg_cost = float(row[col])
-                    except:
-                        avg_cost = 0
-                    break
-
-            try:
-                signal, ltp, rsi, ema_50 = analyze_stock(symbol)
-            except Exception:
-                continue
-
-            results.append(
-                {
-                    "Stock": symbol,
-                    "Qty": qty,
-                    "Buy Avg": avg_cost,
-                    "LTP": ltp,
-                    "RSI (14)": rsi,
-                    "50 EMA": ema_50,
-                    "Action Signal": signal,
-                }
-            )
-
-    if results:
-        res_df = pd.DataFrame(results)
-
-        def color_signals(val):
-            if "BUY" in str(val):
-                return "background-color: #d4edda; color: #155724; font-weight: bold;"
-            elif "SELL" in str(val):
-                return "background-color: #f8d7da; color: #721c24; font-weight: bold;"
-            return "background-color: #e2e3e5; color: #383d41;"
-
-        st.dataframe(
-            res_df.style.map(color_signals, subset=["Action Signal"]),
-            use_container_width=True,
-        )
-
-        st.markdown("---")
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.success("🟢 **Stocks Recommended to ADD / BUY**")
-            buys = res_df[res_df["Action Signal"] == "ADD / BUY"]
-            if not buys.empty:
-                st.table(buys[["Stock", "LTP", "RSI (14)", "50 EMA"]])
-            else:
-                st.write("No strong buy setups detected today.")
-
-        with col2:
-            st.error("🔴 **Stocks Recommended to SELL / TRIM**")
-            sells = res_df[res_df["Action Signal"] == "SELL / TRIM"]
-            if not sells.empty:
-                st.table(sells[["Stock", "LTP", "RSI (14)", "50 EMA"]])
-            else:
-                st.write("No sell/breakdown alerts detected today.")
-    else:
-        st.error(
-            "Could not parse stock symbols from the file. Please ensure the file contains valid holding symbols."
-        )
-else:
-    st.info("👈 Upload your downloaded Zerodha `.xlsx` file in the sidebar.")
+    stock_data_map = {}
+    
+    with st.spinner("Analyzing portfolio against custom trading rules..."):
+        for sym in df_raw[symbol_col].dropna().unique():
+            hist_df, signal, ltp, rsi_val, ema_val = fetch_and_analyze(sym)
+            results.append({
+                "Stock": sym,
+                "LTP": round(ltp, 2),
+                "RSI (14)": round(rsi_val, 2),
+                f"{ema_slow_p} EMA": round(ema_val, 2),
+                "Action Signal": signal
+            })
+            if hist_df is not None:
+                stock_data_map[sym] = (hist_df, signal)
+                
+    res_df = pd.DataFrame(results)
+    st.subheader("📋 Analysis Results")
+    st.dataframe(res_df, use_container_width=True)
+    
+    # Interactive Visual Graph Inspector
+    st.markdown("---")
+    st.subheader("📈 Pictured Technical Graph Inspector")
+    selected_stock = st.selectbox("Select a stock to view technical chart & indicator lines:", list(stock_data_map.keys()))
+    
+    if selected_stock:
+        chart_df, stock_signal = stock_data_map[selected_stock]
+        st.info(f"**Current Signal for {selected_stock}:** `{stock_signal}`")
+        fig = build_plotly_chart(chart_df, selected_stock, stock_signal)
+        st.plotly_chart(fig, use_container_width=True)
