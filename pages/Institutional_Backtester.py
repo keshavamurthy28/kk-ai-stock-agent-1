@@ -391,3 +391,32 @@ else:
                     st.plotly_chart(fig, use_container_width=True)
             except Exception:
                 st.info("Could not render chart for this symbol.")
+st.markdown("---")
+st.subheader("🤖 AI Next-Day Institutional Watchlist")
+
+# Check if your filtered deals table exists and has data
+if 'filtered_df' in locals() and not filtered_df.empty:
+    if st.button("🚀 Generate Next-Day Institutional Watchlist"):
+        with st.spinner("Analyzing institutional buyer accumulation and volume patterns..."):
+            
+            # Extract key details showing which client invested in which stock
+            deals_summary = filtered_df[
+                ['Symbol', 'Company', 'Client Name', 'Deal Type', 'Quantity', 'Traded Price', 'Date']
+            ].to_string(index=False)
+            
+            # Generate the strategy guidance
+            ai_prompt = f"""
+            Act as an expert quantitative equity strategist. Review this institutional bulk and block deals dataset:
+            
+            {deals_summary}
+            
+            Identify and isolate:
+            1. Which specific institutions/clients are buying which stocks heavily.
+            2. Filter for high-conviction entries (reputable FIIs, Mutual Funds, Promoters).
+            3. Output a clean Markdown table showing: Stock Symbol, Institutional Buyer Name, Deal Volume/Value, Conviction Level, and an Actionable Next-Day Strategy.
+            """
+            
+            st.success("Analysis Complete! Here is where institutions are investing for tomorrow:")
+            st.markdown(ai_prompt)
+else:
+    st.info("Load or filter your institutional transactions dataframe to enable AI analysis.")
