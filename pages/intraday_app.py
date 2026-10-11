@@ -135,3 +135,52 @@ with tab_chart:
         height=450
     )
     st.plotly_chart(fig, use_container_width=True)
+    with tab_chart:
+    st.subheader("📊 Price Action & Technical Chart")
+    selected_stock = st.selectbox("Select Stock for Visual Graph", symbols)
+    
+    # Generate dynamic chart data based on selected timeframe category
+    stock_row = df_scans[df_scans["Symbol"] == selected_stock].iloc[0]
+    base_p = stock_row["LTP"]
+    
+    # Configure periods and frequency based on the selected candle duration
+    if candle_duration in ["1m", "3m", "5m", "15m", "30m", "1h"]:
+        periods = 50
+        freq_map = {"1m": "1min", "3m": "3min", "5m": "5min", "15m": "15min", "30m": "30min", "1h": "1h"}
+        dates = pd.date_range(start="2026-10-11 09:15:00", periods=periods, freq=freq_map.get(candle_duration, "5min"))
+        np.random.seed(hash(selected_stock) % 10000)
+        prices = base_p + np.cumsum(np.random.normal(0, base_p * 0.0015, periods))
+    elif candle_duration == "1d":
+        periods = 60
+        dates = pd.date_range(end="2026-10-11", periods=periods, freq="B") # Business days
+        np.random.seed(hash(selected_stock) % 10000)
+        prices = base_p + np.cumsum(np.random.normal(0, base_p * 0.008, periods))
+    elif candle_duration == "1W":
+        periods = 52
+        dates = pd.date_range(end="2026-10-11", periods=periods, freq="W") # Weekly
+        np.random.seed(hash(selected_stock) % 10000)
+        prices = base_p + np.cumsum(np.random.normal(0, base_p * 0.02, periods))
+    else: # 1M, 3M, 6M, 1Y (Long-term frames)
+        periods_map = {"1M": 12, "3M": 12, "6M": 12, "1Y": 24}
+        periods = periods_map.get(candle_duration, 12)
+        dates = pd.date_range(end="2026-10-11", periods=periods, freq="ME" if candle_duration!="1Y" else "QE")
+        np.random.seed(hash(selected_stock) % 10000)
+        prices = base_p + np.cumsum(np.random.normal(0, base_p * 0.04, periods))
+
+    fig = go.Figure(data=[go.Scatter(
+        x=dates, 
+        y=prices, 
+        mode='lines+markers', 
+        name=selected_stock,
+        line=dict(color='#00ffcc' if stock_row['Signal']=='BUY' else '#ff4d4d', width=2)
+    )])
+    
+    fig.add_hline(y=stock_row['VWAP'], line_dash="dash", line_color="yellow", annotation_text="VWAP / Baseline")
+    fig.update_layout(
+        title=f"{selected_stock} Trend View ({candle_duration} Candlestick View)",
+        xaxis_title="Timeline",
+        yaxis_title="Price (₹)",
+        template="plotly_dark",
+        height=450
+    )
+    st.plotly_chart(fig, use_container_width=True)
