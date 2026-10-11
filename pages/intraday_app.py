@@ -13,11 +13,11 @@ st.sidebar.header("Settings & Parameters")
 capital = st.sidebar.number_input("Capital (₹)", value=100000, step=10000)
 risk_per_trade = st.sidebar.slider("Risk per trade (% of capital)", 0.1, 3.0, 0.5)
 
-# 1. IMPROVED CANDLE TIMEFRAME SELECTOR (1m to 1 week)
+# CANDLE TIMEFRAME SELECTOR
 candle_duration = st.sidebar.selectbox(
     "Candle Timeframe", 
     ["1m", "3m", "5m", "15m", "30m", "1h", "1d", "1W", "1M", "3M", "6M", "1Y"], 
-    index=2  # Default to 5m
+    index=2
 )
 
 min_score = st.sidebar.slider("Min score to act (out of 5)", 1, 5, 4)
@@ -30,24 +30,20 @@ watchlist_input = st.sidebar.text_area(
 )
 symbols = [s.strip().upper() for s in watchlist_input.split(",") if s.strip()]
 
-# --- MOCK DATA ENGINE (Simulating live NSE scanner feed with volume spikes) ---
+# --- MOCK DATA ENGINE ---
 @st.cache_data(ttl=60)
 def fetch_scanner_data(symbol_list, timeframe):
-    np.random.seed(42) # Stable mock generation for demonstration
+    np.random.seed(42)
     data = []
     for sym in symbol_list:
         base_price = np.random.randint(200, 4500)
         change_pct = np.random.uniform(-2.5, 3.0)
         ltp = base_price * (1 + change_pct / 100)
         rsi = np.random.uniform(20, 80)
-        
-        # Volume spike multiplier (Vol x) - values > 1.8 indicate high volume surge
         vol_x = np.random.uniform(0.6, 3.5) 
         vwap = ltp * (1 + np.random.uniform(-0.005, 0.005))
         
-        # Score calculation based on technical alignment
         score = int(np.clip(np.round((rsi - 40) / 10 + (vol_x - 1)), -5, 5))
-        
         signal = "BUY" if score >= 3 else ("SELL" if score <= -3 else "WAIT")
         
         atr = ltp * 0.012
@@ -71,8 +67,6 @@ def fetch_scanner_data(symbol_list, timeframe):
     return pd.DataFrame(data)
 
 df_scans = fetch_scanner_data(symbols, candle_duration)
-
-# Filter based on min score requirement
 filtered_df = df_scans[df_scans["Score"].abs() >= min_score].copy()
 
 # --- TABS LAYOUT ---
@@ -81,7 +75,6 @@ tab_scan, tab_top3, tab_chart = st.tabs(["🔍 Live Scanner & Volume Spikes", "�
 with tab_scan:
     st.subheader(f"⚡ Live NSE Scans ({candle_duration} Interval)")
     
-    # Highlight Volume Spikes during market hours (Vol x > 2.0)
     def highlight_volume_spike(row):
         if row["Vol x"] >= 2.0:
             return ['background-color: rgba(0, 255, 0, 0.15)'] * len(row)
@@ -94,9 +87,7 @@ with tab_top3:
     st.subheader("🔥 Top 3 High-Conviction Stocks for Intraday Execution")
     st.markdown("Selected using multi-factor confluence: **RSI momentum, Volume Spike multiplier, and VWAP alignment**.")
     
-    # Sort and pick top 3 based on absolute score & volume intensity
     top_picks = df_scans.reindex(df_scans['Score'].abs().sort_values(ascending=False).index).head(3)
-    
     cols = st.columns(3)
     for idx, (_, row) in enumerate(top_picks.iterrows()):
         with cols[idx]:
@@ -110,36 +101,6 @@ with tab_chart:
     st.subheader("📊 Price Action & Technical Chart")
     selected_stock = st.selectbox("Select Stock for Visual Graph", symbols)
     
-    # Generate simulated intraday candle sequence for chart
-    stock_row = df_scans[df_scans["Symbol"] == selected_stock].iloc[0]
-    base_p = stock_row["LTP"]
-    
-    dates = pd.date_range(start="2026-10-11 09:15:00", periods=30, freq="5min")
-    np.random.seed(hash(selected_stock) % 10000)
-    prices = base_p + np.cumsum(np.random.normal(0, base_p * 0.002, 30))
-    
-    fig = go.Figure(data=[go.Scatter(
-        x=dates, 
-        y=prices, 
-        mode='lines+markers', 
-        name=selected_stock,
-        line=dict(color='#00ffcc' if stock_row['Signal']=='BUY' else '#ff4d4d', width=2)
-    )])
-    
-    fig.add_hline(y=stock_row['VWAP'], line_dash="dash", line_color="yellow", annotation_text="VWAP")
-    fig.update_layout(
-        title=f"{selected_stock} Intraday Trend ({candle_duration} Candlestick View)",
-        xaxis_title="Time",
-        yaxis_title="Price (₹)",
-        template="plotly_dark",
-        height=450
-    )
-    st.plotly_chart(fig, use_container_width=True)
-    with tab_chart:
-    st.subheader("📊 Price Action & Technical Chart")
-    selected_stock = st.selectbox("Select Stock for Visual Graph", symbols)
-    
-    # Generate dynamic chart data based on selected timeframe category
     stock_row = df_scans[df_scans["Symbol"] == selected_stock].iloc[0]
     base_p = stock_row["LTP"]
     
@@ -152,15 +113,15 @@ with tab_chart:
         prices = base_p + np.cumsum(np.random.normal(0, base_p * 0.0015, periods))
     elif candle_duration == "1d":
         periods = 60
-        dates = pd.date_range(end="2026-10-11", periods=periods, freq="B") # Business days
+        dates = pd.date_range(end="2026-10-11", periods=periods, freq="B")
         np.random.seed(hash(selected_stock) % 10000)
         prices = base_p + np.cumsum(np.random.normal(0, base_p * 0.008, periods))
     elif candle_duration == "1W":
         periods = 52
-        dates = pd.date_range(end="2026-10-11", periods=periods, freq="W") # Weekly
+        dates = pd.date_range(end="2026-10-11", periods=periods, freq="W")
         np.random.seed(hash(selected_stock) % 10000)
         prices = base_p + np.cumsum(np.random.normal(0, base_p * 0.02, periods))
-    else: # 1M, 3M, 6M, 1Y (Long-term frames)
+    else:
         periods_map = {"1M": 12, "3M": 12, "6M": 12, "1Y": 24}
         periods = periods_map.get(candle_duration, 12)
         dates = pd.date_range(end="2026-10-11", periods=periods, freq="ME" if candle_duration!="1Y" else "QE")
