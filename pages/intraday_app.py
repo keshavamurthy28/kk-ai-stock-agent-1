@@ -16,7 +16,7 @@ risk_per_trade = st.sidebar.slider("Risk per trade (% of capital)", 0.1, 3.0, 0.
 # 1. IMPROVED CANDLE TIMEFRAME SELECTOR (1m to 1 week)
 candle_duration = st.sidebar.selectbox(
     "Candle Timeframe", 
-    ["1m", "3m", "5m", "15m", "30m", "1h", "1d", "1W"], 
+    ["1m", "3m", "5m", "15m", "30m", "1h", "1d", "1W", "1M", "3M", "6M", "1Y"], 
     index=2  # Default to 5m
 )
 
