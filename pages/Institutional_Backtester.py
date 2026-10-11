@@ -399,10 +399,13 @@ if 'filtered_df' in locals() and not filtered_df.empty:
     if st.button("🚀 Generate Next-Day Institutional Watchlist"):
         with st.spinner("Analyzing institutional buyer accumulation and volume patterns..."):
             
-            # Extract key details showing which client invested in which stock
-            deals_summary = filtered_df[
-                ['Symbol', 'Company', 'Client Name', 'Deal Type', 'Quantity', 'Traded Price', 'Date']
-            ].to_string(index=False)
+            # Safely grab available columns to avoid KeyError
+            cols_to_use = [col for col in ['Symbol', 'Company', 'Client Name', 'Deal Type', 'Quantity', 'Traded Price', 'Date'] if col in filtered_df.columns]
+            
+            if not cols_to_use:
+                cols_to_use = filtered_df.columns.tolist()  # Fallback to all columns if names differ
+
+            deals_summary = filtered_df[cols_to_use].to_string(index=False)
             
             # Generate the strategy guidance
             ai_prompt = f"""
