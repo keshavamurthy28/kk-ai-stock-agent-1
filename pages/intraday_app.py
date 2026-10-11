@@ -181,4 +181,4 @@ with tab_chart:
         template="plotly_dark",
         height=450
     )
-    st.plotly_chart(fig
+   st.plotly_chart(fig, use_container_width=True)
