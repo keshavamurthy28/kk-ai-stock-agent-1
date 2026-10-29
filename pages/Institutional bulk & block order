@@ -1,0 +1,36 @@
+# 1. Capture the exact dates selected in your UI
+start_date, end_date = st.date_input(
+    "Select Date Range (From - To)",
+    value=(datetime.date.today() - timedelta(days=30), datetime.date.today()),
+)
+
+# 2. Format them to match what your API data source expects (e.g., DD-MM-YYYY)
+from_str = start_date.strftime("%d-%m-%Y")
+to_str = end_date.strftime("%d-%m-%Y")
+
+
+# 3. Pass these variables dynamically into your fetch function
+@st.cache_data(ttl=3600)
+def load_deals(f_date, t_date):
+  # If using nselib:
+  # df = capital_market.bulk_deal_data(from_date=f_date, to_date=t_date)
+
+  # OR if querying an endpoint, dynamically inject f_date and t_date:
+  url = f"https://www.nseindia.com/api/historical/bulk-deals?from={f_date}&to={t_date}"
+  # ... fetch and return dataframe ...
+  return df
+
+
+df_deals = load_deals(from_str, to_str)
+
+# 4. Enforce a secondary pandas filter to guarantee the table updates instantly
+if not df_deals.empty and "Date" in df_deals.columns:
+  df_deals["Date"] = pd.to_datetime(df_deals["Date"], errors="coerce")
+  mask = (df_deals["Date"] >= pd.to_datetime(start_date)) & (
+      df_deals["Date"] <= pd.to_datetime(end_date)
+  )
+  df_filtered = df_deals.loc[mask]
+else:
+  df_filtered = df_deals
+
+st.dataframe(df_filtered)
