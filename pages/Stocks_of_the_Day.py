@@ -208,4 +208,43 @@ else:
         row=3, col=1,
     )
     fig.add_hline(y=70, line_dash="dash", line_color="#EF5350", row=3, col=1, annotation_text="Overbought (70)")
-    fig.add_hline(y=30, line_dash
+    fig.add_hline(y=30, line_dash="dash", line_color="#66BB6A", row=3, col=1, annotation_text="Oversold (30)")
+
+    fig.update_layout(
+        template="plotly_dark",
+        xaxis_rangeslider_visible=False,
+        height=800,
+        margin=dict(l=20, r=20, t=40, b=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # -------------------------------------------------------------------
+    # 5. EDUCATIONAL TRADER'S GUIDE
+    # -------------------------------------------------------------------
+    st.markdown("---")
+    st.markdown("### 🎓 Interactive Trading Guide: How to Learn from This Chart")
+
+    col_guide1, col_guide2, col_guide3 = st.columns(3)
+
+    with col_guide1:
+        st.markdown("#### 1️⃣ VWAP (Orange Line)")
+        st.markdown(
+            "- **What it is:** The Volume Weighted Average Price represents the true institutional 'fair value' price of the day.\n"
+            "- **How to Trade:** If price stays **above VWAP**, institutions are accumulating (look for Buy setups). If price stays **below**, sellers are in control."
+        )
+
+    with col_guide2:
+        st.markdown("#### 2️⃣ Orderflow Delta (Middle Pane)")
+        st.markdown(
+            "- **What it is:** Shows whether aggressive buyers (Green) or aggressive sellers (Red) dominated each candle.\n"
+            "- **How to Trade:** A breakout candle accompanied by tall **Green Bars** means the move is backed by real capital. Low bars mean weak momentum."
+        )
+
+    with col_guide3:
+        st.markdown("#### 3️⃣ Signals & EMAs (Green/Red Arrows)")
+        st.markdown(
+            "- **Green Arrows (🟢):** Triggered when price crosses above VWAP supported by net buying pressure. Ideal entry for intraday long momentum.\n"
+            "- **Red Arrows (🔴):** Triggered when price breaks below VWAP with heavy selling pressure."
+        )
