@@ -17,7 +17,7 @@ st.markdown(
 )
 
 # -------------------------------------------------------------------
-# 1. CLEAN SIDEBAR CONTROLS (Preventing accidental layout resets)
+# 1. CLEAN SIDEBAR CONTROLS
 # -------------------------------------------------------------------
 st.sidebar.header("🛠️ Terminal Controls")
 stock_input = st.sidebar.text_input(
@@ -46,262 +46,162 @@ show_signals = st.sidebar.checkbox(
 # -------------------------------------------------------------------
 # 2. DATA FETCHER & TECHNICAL ENGINE
 # -------------------------------------------------------------------
-
-
 @st.cache_data(ttl=300)
 def fetch_intraday_data(ticker, period, interval):
-  df = yf.download(
-      ticker, period=period, interval=interval, progress=False, auto_adjust=True
-  )
-  if isinstance(df.columns, pd.MultiIndex):
-    df.columns = df.columns.get_level_values(0)
-  return df
+    df = yf.download(
+        ticker, period=period, interval=interval, progress=False, auto_adjust=True
+    )
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df
 
-
-with st.spinner(
-    f"Loading live data & calculating indicators for `{symbol_str}`..."
-):
-  df = fetch_intraday_data(symbol_str, fetch_period, timeframe)
+with st.spinner(f"Loading live data & calculating indicators for `{symbol_str}`..."):
+    df = fetch_intraday_data(symbol_str, fetch_period, timeframe)
 
 if df.empty or len(df) < 10:
-  st.error(
-      f"Could not retrieve data for `{symbol_str}` on interval `{timeframe}`."
-  )
+    st.error(f"Could not retrieve data for `{symbol_str}` on interval `{timeframe}`.")
 else:
-  # Technical Calculations
-  df["EMA_20"] = df["Close"].ewm(span=20, adjust=False).mean()
-  df["EMA_50"] = df["Close"].ewm(span=50, adjust=False).mean()
+    # Technical Calculations
+    df["EMA_20"] = df["Close"].ewm(span=20, adjust=False).mean()
+    df["EMA_50"] = df["Close"].ewm(span=50, adjust=False).mean()
 
-  # VWAP Calculation
-  q = df["Volume"]
-  p = (df["High"] + df["Low"] + df["Close"]) / 3
-  df["VWAP"] = (p * q).cumsum() / q.cumsum()
+    # VWAP Calculation
+    q = df["Volume"]
+    p = (df["High"] + df["Low"] + df["Close"]) / 3
+    df["VWAP"] = (p * q).cumsum() / q.cumsum()
 
-  # RSI Calculation
-  delta = df["Close"].diff()
-  gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-  loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-  rs = gain / loss
-  df["RSI"] = 100 - (100 / (1 + rs))
+    # RSI Calculation
+    delta = df["Close"].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df["RSI"] = 100 - (100 / (1 + rs))
 
-  # Volume Delta Calculation
-  range_hl = (df["High"] - df["Low"]).replace(0, 0.001)
-  buy_ratio = (df["Close"] - df["Low"]) / range_hl
-  df["Buy_Volume"] = df["Volume"] * buy_ratio
-  df["Sell_Volume"] = df["Volume"] * (1 - buy_ratio)
-  df["Delta"] = df["Buy_Volume"] - df["Sell_Volume"]
+    # Volume Delta Calculation
+    range_hl = (df["High"] - df["Low"]).replace(0, 0.001)
+    buy_ratio = (df["Close"] - df["Low"]) / range_hl
+    df["Buy_Volume"] = df["Volume"] * buy_ratio
+    df["Sell_Volume"] = df["Volume"] * (1 - buy_ratio)
+    df["Delta"] = df["Buy_Volume"] - df["Sell_Volume"]
 
-  # RVOL Calculation
-  df["Avg_Volume_20"] = df["Volume"].rolling(window=20).mean()
-  df["RVOL"] = df["Volume"] / df["Avg_Volume_20"]
+    # RVOL Calculation
+    df["Avg_Volume_20"] = df["Volume"].rolling(window=20).mean()
+    df["RVOL"] = df["Volume"] / df["Avg_Volume_20"]
 
-  # Identify Learning/Trade Signals on Candles
-  df["Signal_Type"] = "NONE"
-  # Simple Educational Logic: Buy when Price crosses above VWAP with high delta, Sell when crosses below
-  for i in range(1, len(df)):
-    if (
-        df["Close"].iloc[i] > df["VWAP"].iloc[i]
-        and df["Close"].iloc[i - 1] <= df["VWAP"].iloc[i - 1]
-        and df["Delta"].iloc[i] > 0
-    ):
-      df.loc[df.index[i], "Signal_Type"] = "BUY"
-    elif (
-        df["Close"].iloc[i] < df["VWAP"].iloc[i]
-        and df["Close"].iloc[i - 1] >= df["VWAP"].iloc[i - 1]
-        and df["Delta"].iloc[i] < 0
-    ):
-      df.loc[df.index[i], "Signal_Type"] = "SELL"
+    # Identify Learning/Trade Signals on Candles
+    df["Signal_Type"] = "NONE"
+    for i in range(1, len(df)):
+        if (
+            df["Close"].iloc[i] > df["VWAP"].iloc[i]
+            and df["Close"].iloc[i - 1] <= df["VWAP"].iloc[i - 1]
+            and df["Delta"].iloc[i] > 0
+        ):
+            df.loc[df.index[i], "Signal_Type"] = "BUY"
+        elif (
+            df["Close"].iloc[i] < df["VWAP"].iloc[i]
+            and df["Close"].iloc[i - 1] >= df["VWAP"].iloc[i - 1]
+            and df["Delta"].iloc[i] < 0
+        ):
+            df.loc[df.index[i], "Signal_Type"] = "SELL"
 
-  latest = df.iloc[-1]
-  prev = df.iloc[-2]
-  price_change = ((latest["Close"] - prev["Close"]) / prev["Close"]) * 100
+    latest = df.iloc[-1]
+    prev = df.iloc[-2]
+    price_change = ((latest["Close"] - prev["Close"]) / prev["Close"]) * 100
 
-  # -------------------------------------------------------------------
-  # 3. METRICS OVERVIEW BAR
-  # -------------------------------------------------------------------
-  col1, col2, col3, col4, col5 = st.columns(5)
-  col1.metric(
-      "Last Traded Price", f"₹{latest['Close']:.2f}", f"{price_change:+.2f}%"
-  )
-  col2.metric("Relative Volume (RVOL)", f"{latest['RVOL']:.2f}x")
-  col3.metric(
-      "VWAP Trend",
-      f"₹{latest['VWAP']:.2f}",
-      "Bullish" if latest["Close"] > latest["VWAP"] else "Bearish",
-  )
-  col4.metric("RSI (14)", f"{latest['RSI']:.1f}")
-  col5.metric(
-      "Net Delta",
-      f"{int(latest['Delta']):,}",
-      "Net Buyers" if latest["Delta"] > 0 else "Net Sellers",
-  )
+    # -------------------------------------------------------------------
+    # 3. METRICS OVERVIEW BAR
+    # -------------------------------------------------------------------
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Last Traded Price", f"₹{latest['Close']:.2f}", f"{price_change:+.2f}%")
+    col2.metric("Relative Volume (RVOL)", f"{latest['RVOL']:.2f}x")
+    col3.metric("VWAP Trend", f"₹{latest['VWAP']:.2f}", "Bullish" if latest["Close"] > latest["VWAP"] else "Bearish")
+    col4.metric("RSI (14)", f"{latest['RSI']:.1f}")
+    col5.metric("Net Delta", f"{int(latest['Delta']):,}", "Net Buyers" if latest["Delta"] > 0 else "Net Sellers")
 
-  # -------------------------------------------------------------------
-  # 4. TRADINGVIEW-STYLE MULTI-PANE CHART GENERATION
-  # -------------------------------------------------------------------
-  fig = make_subplots(
-      rows=3,
-      cols=1,
-      shared_xaxes=True,
-      vertical_spacing=0.03,
-      row_heights=[0.55, 0.22, 0.23],
-      subplot_titles=(
-          f"{symbol_str} Price Action, VWAP & EMAs (With Educational"
-          " Signals)",
-          "Net Buy/Sell Volume Delta (Orderflow)",
-          "RSI (14) Momentum",
-      ),
-  )
+    # -------------------------------------------------------------------
+    # 4. TRADINGVIEW-STYLE MULTI-PANE CHART GENERATION
+    # -------------------------------------------------------------------
+    fig = make_subplots(
+        rows=3,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=[0.55, 0.22, 0.23],
+        subplot_titles=(
+            f"{symbol_str} Price Action, VWAP & EMAs (With Educational Signals)",
+            "Net Buy/Sell Volume Delta (Orderflow)",
+            "RSI (14) Momentum",
+        ),
+    )
 
-  # Pane 1: Price Action
-  fig.add_trace(
-      go.Candlestick(
-          x=df.index,
-          open=df["Open"],
-          high=df["High"],
-          low=df["Low"],
-          close=df["Close"],
-          name="OHLC",
-      ),
-      row=1,
-      col=1,
-  )
-
-  if show_vwap:
+    # Pane 1: Price Action
     fig.add_trace(
-        go.Scatter(
+        go.Candlestick(
             x=df.index,
-            y=df["VWAP"],
-            mode="lines",
-            name="VWAP (Fair Value)",
-            line=dict(color="#FFA726", width=2),
+            open=df["Open"],
+            high=df["High"],
+            low=df["Low"],
+            close=df["Close"],
+            name="OHLC",
         ),
         row=1,
         col=1,
     )
 
-  if show_ema20:
+    if show_vwap:
+        fig.add_trace(
+            go.Scatter(x=df.index, y=df["VWAP"], mode="lines", name="VWAP (Fair Value)", line=dict(color="#FFA726", width=2)),
+            row=1, col=1,
+        )
+
+    if show_ema20:
+        fig.add_trace(
+            go.Scatter(x=df.index, y=df["EMA_20"], mode="lines", name="20 EMA (Fast Trend)", line=dict(color="#29B6F6", width=1.2)),
+            row=1, col=1,
+        )
+
+    if show_ema50:
+        fig.add_trace(
+            go.Scatter(x=df.index, y=df["EMA_50"], mode="lines", name="50 EMA (Slow Trend)", line=dict(color="#AB47BC", width=1.2)),
+            row=1, col=1,
+        )
+
+    if show_signals:
+        buy_signals = df[df["Signal_Type"] == "BUY"]
+        sell_signals = df[df["Signal_Type"] == "SELL"]
+
+        fig.add_trace(
+            go.Scatter(
+                x=buy_signals.index,
+                y=buy_signals["Low"] * 0.995,
+                mode="markers",
+                marker=dict(symbol="triangle-up", size=12, color="#00E676"),
+                name="🟢 Learn: BUY Signal (VWAP Cross + Delta)",
+            ),
+            row=1, col=1,
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=sell_signals.index,
+                y=sell_signals["High"] * 1.005,
+                mode="markers",
+                marker=dict(symbol="triangle-down", size=12, color="#FF1744"),
+                name="🔴 Learn: SELL Signal (VWAP Breakdown)",
+            ),
+            row=1, col=1,
+        )
+
+    # Pane 2: Orderflow Delta Bar Chart
+    bar_colors = ["#00E676" if v >= 0 else "#FF1744" for v in df["Delta"]]
     fig.add_trace(
-        go.Scatter(
-            x=df.index,
-            y=df["EMA_20"],
-            mode="lines",
-            name="20 EMA (Fast Trend)",
-            line=dict(color="#29B6F6", width=1.2),
-        ),
-        row=1,
-        col=1,
+        go.Bar(x=df.index, y=df["Delta"], marker_color=bar_colors, name="Net Delta Volume"),
+        row=2, col=1,
     )
 
-  if show_ema50:
+    # Pane 3: RSI Momentum
     fig.add_trace(
-        go.Scatter(
-            x=df.index,
-            y=df["EMA_50"],
-            mode="lines",
-            name="50 EMA (Slow Trend)",
-            line=dict(color="#AB47BC", width=1.2),
-        ),
-        row=1,
-        col=1,
+        go.Scatter(x=df.index, y=df["RSI"], mode="lines", name="RSI (14)", line=dict(color="#7E57C2", width=1.5)),
+        row=3, col=1,
     )
-
-  # Plot Educational Buy / Sell Markers on Price Chart
-  if show_signals:
-    buy_signals = df[df["Signal_Type"] == "BUY"]
-    sell_signals = df[df["Signal_Type"] == "SELL"]
-
-    fig.add_trace(
-        go.Scatter(
-            x=buy_signals.index,
-            y=buy_signals["Low"] * 0.995,
-            mode="markers",
-            marker=dict(symbol="triangle-up", size=12, color="#00E676"),
-            name="🟢 Learn: BUY Signal (VWAP Cross + Delta)",
-        ),
-        row=1,
-        col=1,
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=sell_signals.index,
-            y=sell_signals["High"] * 1.005,
-            mode="markers",
-            marker=dict(symbol="triangle-down", size=12, color="#FF1744"),
-            name="🔴 Learn: SELL Signal (VWAP Breakdown)",
-        ),
-        row=1,
-        col=1,
-    )
-
-  # Pane 2: Orderflow Delta Bar Chart
-  bar_colors = ["#00E676" if v >= 0 else "#FF1744" for v in df["Delta"]]
-  fig.add_trace(
-      go.Bar(
-          x=df.index,
-          y=df["Delta"],
-          marker_color=bar_colors,
-          name="Net Delta Volume",
-      ),
-      row=2,
-      col=1,
-  )
-
-  # Pane 3: RSI Momentum
-  fig.add_trace(
-      go.Scatter(
-          x=df.index,
-          y=df["RSI"],
-      mode="lines",
-          name="RSI (14)",
-          line=dict(color="#7E57C2", width=1.5),
-      ),
-      row=3,
-      col=1,
-  )
-  fig.add_hline(
-      y=70,
-      line_dash="dash",
-      line_color="#EF5350",
-      row=3,
-      col=1,
-      annotation_text="Overbought (70)",
-  )
-  fig.add_hline(
-      y=30,
-      line_dash="dash",
-      line_color="#66BB6A",
-      row=3,
-      col=1,
-      annotation_text="Oversold (30)",
-  )
-
-  fig.update_layout(
-      template="plotly_dark",
-      xaxis_rangeslider_visible=False,
-      height=800,
-      margin=dict(l=20, r=20, t=40, b=20),
-      legend=dict(
-          orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
-      ),
-  )
-
-  st.plotly_chart(fig, use_container_width=True)
-
-  # -------------------------------------------------------------------
-  # 5. EDUCATIONAL TRADER'S GUIDE (How to read this chart)
-  # -------------------------------------------------------------------
-  st.markdown("---")
-  st.markdown("### 🎓 Interactive Trading Guide: How to Learn from This Chart")
-
-  col_guide1, col_guide2, col_guide3 = st.columns(3)
-
-  with col_guide1:
-    st.markdown("#### 1️⃣ VWAP (Orange Line)")
-    st.markdown(
-        "- **What it is:** The Volume Weighted Average Price represents the true institutional 'fair value' price of the day.\n"
-        "- **How to Trade:** If price stays **above VWAP**, institutions are accumulating (look for Buy setups). If price stays **below**, sellers are in control."
-    )
-
-  with col_guide
+    fig.add_hline(y=70, line_dash="dash", line_color="#EF5350", row=3, col=1, annotation_text="Overbought (70)")
