@@ -6,7 +6,7 @@ from plotly.subplots import make_subplots
 import streamlit as st
 import yfinance as yf
 
-# Page Configuration (Compatible with Multi-page apps)
+# Page Configuration
 try:
   st.set_page_config(
       page_title="Institutional Trading Terminal - SMC & Advanced Analytics",
@@ -29,80 +29,54 @@ st.markdown(
 
 st.title("⚡ Institutional Terminal: SMC, FVG & Intraday Engine")
 
-# Expanded Comprehensive Stock Universe (Nifty 50, Bank Nifty & Liquid Equities)
-DEFAULT_STOCKS = {
-    "RELIANCE - Reliance Industries Ltd": "RELIANCE.NS",
-    "TCS - Tata Consultancy Services Ltd": "TCS.NS",
-    "HDFCBANK - HDFC Bank Ltd": "HDFCBANK.NS",
-    "INFY - Infosys Ltd": "INFY.NS",
-    "ICICIBANK - ICICI Bank Ltd": "ICICIBANK.NS",
-    "SBIN - State Bank of India": "SBIN.NS",
-    "BHARTIARTL - Bharti Airtel Ltd": "BHARTIARTL.NS",
-    "ITC - ITC Ltd": "ITC.NS",
-    "KOTAKBANK - Kotak Mahindra Bank Ltd": "KOTAKBANK.NS",
-    "LT - Larsen & Toubro Ltd": "LT.NS",
-    "AXISBANK - Axis Bank Ltd": "AXISBANK.NS",
-    "HINDUNILVR - Hindustan Unilever Ltd": "HINDUNILVR.NS",
-    "BAJFINANCE - Bajaj Finance Ltd": "BAJFINANCE.NS",
-    "MARUTI - Maruti Suzuki India Ltd": "MARUTI.NS",
-    "TATAMOTORS - Tata Motors Ltd": "TATAMOTORS.NS",
-    "SUNPHARMA - Sun Pharmaceutical Industries": "SUNPHARMA.NS",
-    "TITAN - Titan Company Ltd": "TITAN.NS",
-    "NTPC - NTPC Ltd": "NTPC.NS",
-    "ONGC - Oil & Natural Gas Corporation": "ONGC.NS",
-    "TATASTEEL - Tata Steel Ltd": "TATASTEEL.NS",
-    "WIPRO - Wipro Ltd": "WIPRO.NS",
-    "BAJAJFINSV - Bajaj Finserv Ltd": "BAJAJFINSV.NS",
-    "ASIANPAINT - Asian Paints Ltd": "ASIANPAINT.NS",
-    "ADANIENT - Adani Enterprises Ltd": "ADANIENT.NS",
-    "ADANIPORTS - Adani Ports & SEZ Ltd": "ADANIPORTS.NS",
-    "POWERGRID - Power Grid Corp": "POWERGRID.NS",
-    "JSWSTEEL - JSW Steel Ltd": "JSWSTEEL.NS",
-    "GRASIM - Grasim Industries Ltd": "GRASIM.NS",
-    "HINDALCO - Hindalco Industries Ltd": "HINDALCO.NS",
-    "TECHM - Tech Mahindra Ltd": "TECHM.NS",
-    "NESTLEIND - Nestle India Ltd": "NESTLEIND.NS",
-    "CIPLA - Cipla Ltd": "CIPLA.NS",
-    "DRREDDY - Dr. Reddy's Laboratories": "DRREDDY.NS",
-    "SBILIFE - SBI Life Insurance Co Ltd": "SBILIFE.NS",
-    "BPCL - Bharat Petroleum Corp Ltd": "BPCL.NS",
-    "EICHERMOT - Eicher Motors Ltd": "EICHERMOT.NS",
-    "TATACONSUM - Tata Consumer Products": "TATACONSUM.NS",
-    "DIVISLAB - Divi's Laboratories Ltd": "DIVISLAB.NS",
-    "APOLLOHOSP - Apollo Hospitals Enterprise": "APOLLOHOSP.NS",
-    "HEROMOTOCO - Hero MotoCorp Ltd": "HEROMOTOCO.NS",
-    "UPL - UPL Ltd": "UPL.NS",
-    "INDUSINDBK - IndusInd Bank Ltd": "INDUSINDBK.NS",
-    "HDFCLIFE - HDFC Life Insurance": "HDFCLIFE.NS",
-    "BRITANNIA - Britannia Industries Ltd": "BRITANNIA.NS",
-    "SHRIRAMFIN - Shriram Finance Ltd": "SHRIRAMFIN.NS",
-    "LTIM - LTIMindtree Ltd": "LTIM.NS",
-    "TRENT - Trent Ltd": "TRENT.NS",
-    "BEL - Bharat Electronics Ltd": "BEL.NS",
-    "ZOMATO - Zomato Ltd": "ZOMATO.NS",
-    "HAL - Hindustan Aeronautics Ltd": "HAL.NS",
-}
-
-# Sidebar Controls
+# Sidebar Controls for Advanced Search & Navigation
 st.sidebar.header("🛠️ Terminal Controls")
 
-selected_name = st.sidebar.selectbox(
-    "Search & Select Stock", list(DEFAULT_STOCKS.keys())
-)
-ticker_symbol = DEFAULT_STOCKS[selected_name]
+# Universal Dynamic Stock Lookup (Allows searching any NSE/BSE or Global Stock)
+default_watchlist = {
+    "Reliance Industries": "RELIANCE.NS",
+    "Tata Consultancy Services": "TCS.NS",
+    "HDFC Bank": "HDFCBANK.NS",
+    "Infosys": "INFY.NS",
+    "ICICI Bank": "ICICIBANK.NS",
+    "State Bank of India": "SBIN.NS",
+    "Bharti Airtel": "BHARTIARTL.NS",
+    "ITC": "ITC.NS",
+    "Larsen & Toubro": "LT.NS",
+    "Axis Bank": "AXISBANK.NS",
+    "Tata Motors": "TATAMOTORS.NS",
+    "Tata Power": "TATAPOWER.NS",
+    "Zomato": "ZOMATO.NS",
+    "Suzlon Energy": "SUZLON.NS",
+    "IRCTC": "IRCTC.NS",
+    "Tata Steel": "TATASTEEL.NS",
+    "Nifty 50 Index": "^NSEI",
+    "Bank Nifty Index": "^NSEBANK",
+}
 
-# Allow custom ticker entry if needed
-custom_ticker = st.sidebar.text_input(
-    "Or Enter Yahoo Ticker (e.g., ^NSEI, TATAPOWER.NS)"
+search_query = st.sidebar.selectbox(
+    "Quick Select Watchlist", list(default_watchlist.keys())
 )
-if custom_ticker:
-  ticker_symbol = custom_ticker.strip().upper()
+ticker_input = st.sidebar.text_input(
+    "Or Type Any Stock Symbol (e.g. RELIANCE, TATAPOWER, ZOMATO)",
+    value=default_watchlist[search_query],
+)
 
+# Format ticker properly for Indian markets if user inputs plain text
+ticker_symbol = ticker_input.strip().upper()
+if (
+    not ticker_symbol.endswith(".NS")
+    and not ticker_symbol.endswith(".BO")
+    and not ticker_symbol.startswith("^")
+):
+  ticker_symbol += ".NS"
+
+# Timeframe Controls
 timeframe = st.sidebar.selectbox(
     "Select Timeframe / Interval", ["1m", "5m", "15m", "1h", "1d"], index=2
 )
 
-# Adjust lookback period based on timeframe validity
+# Lookback Period Mapping based on interval limitations
 period_map = {
     "1m": "7d",
     "5m": "60d",
@@ -113,7 +87,7 @@ period_map = {
 period = period_map.get(timeframe, "60d")
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def load_data(symbol, period, interval):
   df = yf.download(symbol, period=period, interval=interval, progress=False)
   if isinstance(df.columns, pd.MultiIndex):
@@ -126,7 +100,8 @@ data = load_data(ticker_symbol, period, timeframe)
 
 if data.empty:
   st.error(
-      f"No market data found for {ticker_symbol}. Check symbol or market hours."
+      f"No market data found for '{ticker_symbol}'. Please verify the symbol or"
+      " market hours."
   )
   st.stop()
 
@@ -142,7 +117,7 @@ def compute_analytics(df):
   df["Vol_SMA20"] = df["Volume"].rolling(window=20).mean()
   df["Volume_Surge"] = df["Volume"] > (1.5 * df["Vol_SMA20"])
 
-  # RSI
+  # RSI (14)
   delta = df["Close"].diff()
   gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
   loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -155,7 +130,7 @@ def compute_analytics(df):
   df["MACD"] = exp1 - exp2
   df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
 
-  # Buy / Sell Signals (EMA Crossover + Volume confirmation)
+  # Algorithmic Buy / Sell Crossover Signals with Volume Confirmation
   df["Signal"] = 0
   df.loc[
       (df["EMA_9"] > df["EMA_21"])
@@ -177,11 +152,9 @@ def compute_analytics(df):
   df["Bear_FVG_High"] = np.nan
 
   for i in range(1, len(df) - 1):
-    # Bullish FVG: Low of candle i+1 > High of candle i-1
     if df["Low"].iloc[i + 1] > df["High"].iloc[i - 1]:
       df.iloc[i, df.columns.get_loc("Bull_FVG_Low")] = df["High"].iloc[i - 1]
       df.iloc[i, df.columns.get_loc("Bull_FVG_High")] = df["Low"].iloc[i + 1]
-    # Bearish FVG: High of candle i+1 < Low of candle i-1
     elif df["High"].iloc[i + 1] < df["Low"].iloc[i - 1]:
       df.iloc[i, df.columns.get_loc("Bear_FVG_Low")] = df["High"].iloc[i + 1]
       df.iloc[i, df.columns.get_loc("Bear_FVG_High")] = df["Low"].iloc[i - 1]
@@ -190,13 +163,11 @@ def compute_analytics(df):
   df["Price_Range"] = df["High"] - df["Low"]
   df["Avg_Range"] = df["Price_Range"].rolling(window=20).mean()
   df["Phase"] = "Normal"
-  # Accumulation: Tight range contraction with high volume accumulation
   df.loc[
       (df["Price_Range"] < 0.7 * df["Avg_Range"])
       & (df["Volume"] > df["Vol_SMA20"]),
       "Phase",
   ] = "Accumulation"
-  # Distribution: High volatility range expansion near highs with selling volume
   df.loc[
       (df["Price_Range"] > 1.4 * df["Avg_Range"])
       & (df["Close"] < df["Open"])
@@ -217,18 +188,18 @@ pct_change = (price_change / prev_close) * 100
 
 col1, col2, col3, col4 = st.columns(4)
 col1.metric(
-    "Latest Price",
-    f"₹{latest_close:,.2f}",
+    "Active Ticker",
+    ticker_symbol,
     f"{pct_change:+.2f}%",
     delta_color="normal",
 )
-col2.metric("Total Bars Loaded", f"{len(df):,}")
-col3.metric("Data Range", f"{df.index[0].date()} to {df.index[-1].date()}")
+col2.metric("Latest Price", f"₹{latest_close:,.2f}")
+col3.metric("Total Bars Loaded", f"{len(df):,}")
 col4.metric(
     "Volume Surge Events", int(df["Volume_Surge"].fillna(False).sum())
 )
 
-# --- ADVANCED PLOTLY CHART SETUP ---
+# --- ADVANCED PLOTLY CHART ---
 fig = make_subplots(
     rows=3,
     cols=1,
@@ -245,13 +216,13 @@ fig.add_trace(
         high=df["High"],
         low=df["Low"],
         close=df["Close"],
-        name="Price Action",
+        name="Price",
     ),
     row=1,
     col=1,
 )
 
-# EMAs Overlays
+# EMAs
 fig.add_trace(
     go.Scatter(
         x=df.index,
@@ -283,8 +254,8 @@ fig.add_trace(
     col=1,
 )
 
-# Plot Fair Value Gaps (FVG) as Rectangles / Zones
-recent_df = df.tail(100)  # Render recent FVGs for chart clarity
+# Fair Value Gaps (FVG Zones)
+recent_df = df.tail(150)
 for idx, row in recent_df.iterrows():
   if not np.isnan(row["Bull_FVG_Low"]):
     fig.add_shape(
@@ -311,7 +282,7 @@ for idx, row in recent_df.iterrows():
         col=1,
     )
 
-# Buy / Sell Execution Markers
+# Buy / Sell Markers
 buy_signals = df[df["Signal"] == 1]
 sell_signals = df[df["Signal"] == -1]
 
@@ -338,7 +309,7 @@ fig.add_trace(
     col=1,
 )
 
-# 2. Volume & Volume Surge Highlight
+# 2. Volume Subplot with Surge Highlighting (Gold = Surge)
 vol_colors = [
     "#FFD700"
     if row["Volume_Surge"]
@@ -357,7 +328,7 @@ fig.add_trace(
     col=1,
 )
 
-# 3. RSI Indicator Subplot
+# 3. RSI Subplot
 fig.add_trace(
     go.Scatter(
         x=df.index,
@@ -368,12 +339,8 @@ fig.add_trace(
     row=3,
     col=1,
 )
-fig.add_hline(
-    y=70, line_dash="dash", line_color="#FF5252", row=3, col=1
-)  # Overbought
-fig.add_hline(
-    y=30, line_dash="dash", line_color="#69F0AE", row=3, col=1
-)  # Oversold
+fig.add_hline(y=70, line_dash="dash", line_color="#FF5252", row=3, col=1)
+fig.add_hline(y=30, line_dash="dash", line_color="#69F0AE", row=3, col=1)
 
 # Layout Configuration
 fig.update_layout(
@@ -388,8 +355,8 @@ fig.update_layout(
 
 st.plotly_chart(fig, use_container_width=True)
 
-# Data Table & Phase Insights
-if st.checkbox("🔍 Inspect Raw OHLCV Data, SMC Phases & Signals"):
+# Data Inspect View
+if st.checkbox("🔍 Inspect Raw Intraday Data, SMC Phases & Signals"):
   st.dataframe(
       df[
           [
