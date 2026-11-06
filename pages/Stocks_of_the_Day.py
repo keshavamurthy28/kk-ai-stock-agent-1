@@ -6,14 +6,14 @@ import streamlit as st
 import yfinance as yf
 
 st.set_page_config(
-    page_title="Advanced Smart Money & SuperTrend Terminal",
+    page_title="Advanced TradingView-Style Terminal",
     page_icon="📊",
     layout="wide",
 )
 
-st.title("📊 Pro Smart Money Concepts (SMC) & SuperTrend Trading Terminal")
+st.title("📊 Pro TradingView-Style Interactive Charting Terminal")
 st.markdown(
-    "Interactive TradingView-style terminal featuring **SuperTrend Strategy**, **Smart Money Order Blocks**, **CHoCH / BOS Structure Shifts**, and **Volume Delta**."
+    "Use your **mouse to scroll/zoom** and **click + drag (Hand Icon)** to pan across the chart just like TradingView."
 )
 
 # -------------------------------------------------------------------
@@ -43,7 +43,7 @@ show_smc = st.sidebar.checkbox("Show Smart Money Order Blocks & Structure", valu
 show_signals = st.sidebar.checkbox("Show Buy / Sell Signal Markers", value=True)
 
 # -------------------------------------------------------------------
-# 2. DATA FETCHER & SMC + SUPERTREND ENGINE
+# 2. DATA FETCHER & TECHNICAL ENGINE
 # -------------------------------------------------------------------
 @st.cache_data(ttl=300)
 def fetch_and_calculate_indicators(ticker, period, interval, period_atr, mult):
@@ -133,7 +133,7 @@ def fetch_and_calculate_indicators(ticker, period, interval, period_atr, mult):
     
     return df
 
-with st.spinner(f"Computing Smart Money & SuperTrend indicators for `{symbol_str}`..."):
+with st.spinner(f"Computing indicators for `{symbol_str}`..."):
     df = fetch_and_calculate_indicators(symbol_str, fetch_period, timeframe, atr_period, atr_multiplier)
 
 if df.empty or len(df) < 10:
@@ -154,7 +154,7 @@ else:
     c5.metric("Smart Money Bias", "🟢 Bullish Accumulation" if latest['Trend'] == 1 else "🔴 Bearish Distribution")
 
     # -------------------------------------------------------------------
-    # 4. TRADINGVIEW-STYLE PLOTLY CHART GENERATION
+    # 4. TRADINGVIEW-STYLE PLOTLY CHART GENERATION (PAN & SCROLL ENABLED)
     # -------------------------------------------------------------------
     fig = make_subplots(
         rows=2, cols=1,
@@ -254,23 +254,33 @@ else:
         x=df.index, y=df['Delta'], marker_color=delta_colors, name="Volume Delta"
     ), row=2, col=1)
 
+    # LAYOUT CONFIGURED FOR TRADINGVIEW PAN & ZOOM EXPERIENCE
     fig.update_layout(
         template="plotly_dark",
+        dragmode='pan',  # <-- Forces the moveable Hand Icon by default!
         xaxis_rangeslider_visible=False,
         height=800,
         margin=dict(l=20, r=20, t=40, b=20),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    # CONFIG SETTINGS TO ENABLE MOUSE SCROLL ZOOM & SMOOTH NAVIGATION
+    chart_config = {
+        'scrollZoom': True,       # Enables zooming in/out with mouse wheel scroll
+        'displayModeBar': True,   # Shows top toolbar (allows switching back to zoom/pan tools if needed)
+        'modeBarButtonsToRemove': ['lasso2d', 'select2d'], # Removes clutter selection tools
+        'responsive': True
+    }
+
+    st.plotly_chart(fig, use_container_width=True, config=chart_config)
 
     # -------------------------------------------------------------------
     # 5. STRATEGY GUIDE
     # -------------------------------------------------------------------
     st.markdown("---")
-    st.markdown("### 📋 Smart Money Concepts & SuperTrend Execution Guide")
+    st.markdown("### 📋 Navigation Guide (TradingView Style)")
     st.markdown(
-        "- **Smart Money Order Blocks (CHoCH / OB):** Squares marked on candles indicate institutional accumulation zones where smart money shifted market structure.\n"
-        "- **SuperTrend Trailing Lines:** Green indicates bullish trend support; red indicates bearish resistance.\n"
-        "- **'Buy long' / 'Sell short' Callouts:** Display exact entry triggers when trends flip."
+        "- **Move / Pan Chart:** Click anywhere on the chart and drag your mouse (Hand Icon is active by default).\n"
+        "- **Zoom In / Out:** Scroll your mouse wheel up and down over the price candles.\n"
+        "- **Reset View:** Double-click anywhere on the chart to instantly reset back to the default auto-scale view."
     )
