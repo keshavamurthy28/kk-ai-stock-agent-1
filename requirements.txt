@@ -1,6 +1,6 @@
 streamlit
 pandas
+numpy
+plotly
 yfinance
 openpyxl
-plotly
-numpy
