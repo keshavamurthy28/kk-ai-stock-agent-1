@@ -7,19 +7,16 @@ import streamlit as st
 import yfinance as yf
 
 # Page Configuration
-try:
-  st.set_page_config(
-      page_title="Institutional Trading Terminal - SMC & Advanced Analytics",
-      layout="wide",
-      initial_sidebar_state="expanded",
-  )
-except:
-  pass
+st.set_page_config(
+    page_title="Institutional Trading Terminal - SMC & Advanced Analytics",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-# Clear cache to prevent old versions from persisting on Streamlit Cloud
+# Force clear cache to instantly flush out old versions on Streamlit Cloud
 st.cache_data.clear()
 
-# Custom Styling for Speed & Readability
+# Custom Styling for Institutional Terminal
 st.markdown(
     """
     <style>
@@ -31,25 +28,89 @@ st.markdown(
 )
 
 st.title(
-    "⚡ Institutional Terminal: SMC, FVG, Volume Surge & Intraday Engine"
+    "⚡ Advanced Institutional Terminal: SMC, FVG, Volume Surge & Intraday"
 )
+
+# Comprehensive Stock Universe (Nifty 50, Bank Nifty, Midcaps, and High Liquidity Equities)
+ALL_STOCKS = {
+    "RELIANCE - Reliance Industries Ltd": "RELIANCE.NS",
+    "TCS - Tata Consultancy Services Ltd": "TCS.NS",
+    "HDFCBANK - HDFC Bank Ltd": "HDFCBANK.NS",
+    "INFY - Infosys Ltd": "INFY.NS",
+    "ICICIBANK - ICICI Bank Ltd": "ICICIBANK.NS",
+    "SBIN - State Bank of India": "SBIN.NS",
+    "BHARTIARTL - Bharti Airtel Ltd": "BHARTIARTL.NS",
+    "ITC - ITC Ltd": "ITC.NS",
+    "KOTAKBANK - Kotak Mahindra Bank Ltd": "KOTAKBANK.NS",
+    "LT - Larsen & Toubro Ltd": "LT.NS",
+    "AXISBANK - Axis Bank Ltd": "AXISBANK.NS",
+    "HINDUNILVR - Hindustan Unilever Ltd": "HINDUNILVR.NS",
+    "BAJFINANCE - Bajaj Finance Ltd": "BAJFINANCE.NS",
+    "MARUTI - Maruti Suzuki India Ltd": "MARUTI.NS",
+    "TATAMOTORS - Tata Motors Ltd": "TATAMOTORS.NS",
+    "SUNPHARMA - Sun Pharmaceutical Industries": "SUNPHARMA.NS",
+    "TITAN - Titan Company Ltd": "TITAN.NS",
+    "NTPC - NTPC Ltd": "NTPC.NS",
+    "ONGC - Oil & Natural Gas Corporation": "ONGC.NS",
+    "TATASTEEL - Tata Steel Ltd": "TATASTEEL.NS",
+    "HEG - HEG Ltd": "HEG.NS",
+    "TATAPOWER - Tata Power Co Ltd": "TATAPOWER.NS",
+    "ZOMATO - Zomato Ltd": "ZOMATO.NS",
+    "SUZLON - Suzlon Energy Ltd": "SUZLON.NS",
+    "IRCTC - IRCTC Ltd": "IRCTC.NS",
+    "WIPRO - Wipro Ltd": "WIPRO.NS",
+    "BAJAJFINSV - Bajaj Finserv Ltd": "BAJAJFINSV.NS",
+    "ASIANPAINT - Asian Paints Ltd": "ASIANPAINT.NS",
+    "ADANIENT - Adani Enterprises Ltd": "ADANIENT.NS",
+    "ADANIPORTS - Adani Ports & SEZ Ltd": "ADANIPORTS.NS",
+    "POWERGRID - Power Grid Corp": "POWERGRID.NS",
+    "JSWSTEEL - JSW Steel Ltd": "JSWSTEEL.NS",
+    "GRASIM - Grasim Industries Ltd": "GRASIM.NS",
+    "HINDALCO - Hindalco Industries Ltd": "HINDALCO.NS",
+    "TECHM - Tech Mahindra Ltd": "TECHM.NS",
+    "NESTLEIND - Nestle India Ltd": "NESTLEIND.NS",
+    "CIPLA - Cipla Ltd": "CIPLA.NS",
+    "DRREDDY - Dr. Reddy's Laboratories": "DRREDDY.NS",
+    "SBILIFE - SBI Life Insurance Co Ltd": "SBILIFE.NS",
+    "BPCL - Bharat Petroleum Corp Ltd": "BPCL.NS",
+    "EICHERMOT - Eicher Motors Ltd": "EICHERMOT.NS",
+    "TATACONSUM - Tata Consumer Products": "TATACONSUM.NS",
+    "DIVISLAB - Divi's Laboratories Ltd": "DIVISLAB.NS",
+    "APOLLOHOSP - Apollo Hospitals Enterprise": "APOLLOHOSP.NS",
+    "HEROMOTOCO - Hero MotoCorp Ltd": "HEROMOTOCO.NS",
+    "INDUSINDBK - IndusInd Bank Ltd": "INDUSINDBK.NS",
+    "HDFCLIFE - HDFC Life Insurance": "HDFCLIFE.NS",
+    "BRITANNIA - Britannia Industries Ltd": "BRITANNIA.NS",
+    "SHRIRAMFIN - Shriram Finance Ltd": "SHRIRAMFIN.NS",
+    "LTIM - LTIMindtree Ltd": "LTIM.NS",
+    "TRENT - Trent Ltd": "TRENT.NS",
+    "BEL - Bharat Electronics Ltd": "BEL.NS",
+    "HAL - Hindustan Aeronautics Ltd": "HAL.NS",
+    "NIFTY 50 - Index": "^NSEI",
+    "BANK NIFTY - Index": "^NSEBANK",
+}
 
 # Sidebar Controls
 st.sidebar.header("🛠️ Terminal Controls")
 
-# Universal Free-Text Stock Symbol Input (Type ANY stock: HEG, TATAPOWER, ZOMATO, etc.)
-ticker_input = st.sidebar.text_input(
-    "🔍 Type Any Stock Symbol (Press Enter)", value="HEG"
-)
+# Searchable Dropdown with ALL stocks populated
+selected_stock_name = st.sidebar.selectbox(
+    "Search & Select Stock", list(ALL_STOCKS.keys()), index=20
+)  # Defaults to HEG if index 20, or search any
+ticker_symbol = ALL_STOCKS[selected_stock_name]
 
-# Clean and format ticker for Yahoo Finance (NSE/BSE handling)
-ticker_symbol = ticker_input.strip().upper()
-if (
-    not ticker_symbol.endswith(".NS")
-    and not ticker_symbol.endswith(".BO")
-    and not ticker_symbol.startswith("^")
-):
-  ticker_symbol += ".NS"
+# Alternative custom ticker fallback text box
+custom_input = st.sidebar.text_input(
+    "Or Type Ticker Manually (e.g., HEG.NS, IOC.NS)"
+)
+if custom_input:
+  ticker_symbol = custom_input.strip().upper()
+  if (
+      not ticker_symbol.endswith(".NS")
+      and not ticker_symbol.endswith(".BO")
+      and not ticker_symbol.startswith("^")
+  ):
+    ticker_symbol += ".NS"
 
 # Timeframe Controls
 timeframe = st.sidebar.selectbox(
@@ -79,8 +140,7 @@ data = load_data(ticker_symbol, period, timeframe)
 
 if data.empty:
   st.error(
-      f"No market data found for '{ticker_symbol}'. Please verify the symbol"
-      " (e.g., HEG or HEG.NS) or market hours."
+      f"No market data found for {ticker_symbol}. Check symbol or market hours."
   )
   st.stop()
 
@@ -109,7 +169,7 @@ def compute_analytics(df):
   df["MACD"] = exp1 - exp2
   df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
 
-  # Algorithmic Buy / Sell Crossover Signals
+  # Algorithmic Buy / Sell Crossover Signals with Volume Confirmation
   df["Signal"] = 0
   df.loc[
       (df["EMA_9"] > df["EMA_21"])
@@ -334,7 +394,7 @@ fig.update_layout(
 
 st.plotly_chart(fig, use_container_width=True)
 
-# Data Table & SMC Inspect View
+# Data Inspect View
 if st.checkbox("🔍 Inspect Raw Data, SMC Phases & Signals"):
   st.dataframe(
       df[
