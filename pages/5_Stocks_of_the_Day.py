@@ -29,40 +29,37 @@ st.markdown(
 
 st.title("⚡ Institutional Terminal: SMC, FVG & Intraday Engine")
 
-# Sidebar Controls for Advanced Search & Navigation
+# Sidebar Controls
 st.sidebar.header("🛠️ Terminal Controls")
 
-# Universal Dynamic Stock Lookup (Allows searching any NSE/BSE or Global Stock)
-default_watchlist = {
+# Popular Quick Picks
+popular_stocks = {
+    "Select or Search...": "RELIANCE.NS",
+    "HEG Ltd": "HEG.NS",
     "Reliance Industries": "RELIANCE.NS",
-    "Tata Consultancy Services": "TCS.NS",
-    "HDFC Bank": "HDFCBANK.NS",
-    "Infosys": "INFY.NS",
-    "ICICI Bank": "ICICIBANK.NS",
-    "State Bank of India": "SBIN.NS",
-    "Bharti Airtel": "BHARTIARTL.NS",
-    "ITC": "ITC.NS",
-    "Larsen & Toubro": "LT.NS",
-    "Axis Bank": "AXISBANK.NS",
     "Tata Motors": "TATAMOTORS.NS",
     "Tata Power": "TATAPOWER.NS",
-    "Zomato": "ZOMATO.NS",
     "Suzlon Energy": "SUZLON.NS",
-    "IRCTC": "IRCTC.NS",
-    "Tata Steel": "TATASTEEL.NS",
+    "Zomato": "ZOMATO.NS",
+    "State Bank of India": "SBIN.NS",
     "Nifty 50 Index": "^NSEI",
-    "Bank Nifty Index": "^NSEBANK",
 }
 
-search_query = st.sidebar.selectbox(
-    "Quick Select Watchlist", list(default_watchlist.keys())
-)
-ticker_input = st.sidebar.text_input(
-    "Or Type Any Stock Symbol (e.g. RELIANCE, TATAPOWER, ZOMATO)",
-    value=default_watchlist[search_query],
+quick_select = st.sidebar.selectbox(
+    "Popular Watchlist Quick Select", list(popular_stocks.keys())
 )
 
-# Format ticker properly for Indian markets if user inputs plain text
+# Free-text input that accepts ANY stock ticker instantly (e.g. HEG, IOC, ITC)
+default_val = (
+    popular_stocks[quick_select]
+    if quick_select != "Select or Search..."
+    else "HEG.NS"
+)
+ticker_input = st.sidebar.text_input(
+    "🔍 Enter Any Stock Symbol (e.g. HEG, TATAPOWER, ZOMATO)", value=default_val
+)
+
+# Format ticker properly for Indian markets
 ticker_symbol = ticker_input.strip().upper()
 if (
     not ticker_symbol.endswith(".NS")
@@ -76,7 +73,6 @@ timeframe = st.sidebar.selectbox(
     "Select Timeframe / Interval", ["1m", "5m", "15m", "1h", "1d"], index=2
 )
 
-# Lookback Period Mapping based on interval limitations
 period_map = {
     "1m": "7d",
     "5m": "60d",
@@ -100,8 +96,8 @@ data = load_data(ticker_symbol, period, timeframe)
 
 if data.empty:
   st.error(
-      f"No market data found for '{ticker_symbol}'. Please verify the symbol or"
-      " market hours."
+      f"No market data found for '{ticker_symbol}'. Please verify the symbol"
+      " (e.g., HEG.NS) or market hours."
   )
   st.stop()
 
@@ -130,7 +126,7 @@ def compute_analytics(df):
   df["MACD"] = exp1 - exp2
   df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
 
-  # Algorithmic Buy / Sell Crossover Signals with Volume Confirmation
+  # Algorithmic Buy / Sell Crossover Signals
   df["Signal"] = 0
   df.loc[
       (df["EMA_9"] > df["EMA_21"])
@@ -199,7 +195,7 @@ col4.metric(
     "Volume Surge Events", int(df["Volume_Surge"].fillna(False).sum())
 )
 
-# --- ADVANCED PLOTLY CHART ---
+# --- 3-TIER ADVANCED SUBPLOTTED TRADING VIEW CHART ---
 fig = make_subplots(
     rows=3,
     cols=1,
@@ -208,7 +204,7 @@ fig = make_subplots(
     row_heights=[0.6, 0.2, 0.2],
 )
 
-# 1. Candlestick Chart
+# 1. Candlestick Chart (Row 1)
 fig.add_trace(
     go.Candlestick(
         x=df.index,
@@ -216,7 +212,7 @@ fig.add_trace(
         high=df["High"],
         low=df["Low"],
         close=df["Close"],
-        name="Price",
+        name="Price Action",
     ),
     row=1,
     col=1,
@@ -282,7 +278,7 @@ for idx, row in recent_df.iterrows():
         col=1,
     )
 
-# Buy / Sell Markers
+# Buy / Sell Execution Markers
 buy_signals = df[df["Signal"] == 1]
 sell_signals = df[df["Signal"] == -1]
 
@@ -309,7 +305,7 @@ fig.add_trace(
     col=1,
 )
 
-# 2. Volume Subplot with Surge Highlighting (Gold = Surge)
+# 2. Volume Subplot with Surge Highlighting (Row 2)
 vol_colors = [
     "#FFD700"
     if row["Volume_Surge"]
@@ -328,7 +324,7 @@ fig.add_trace(
     col=1,
 )
 
-# 3. RSI Subplot
+# 3. RSI Subplot (Row 3)
 fig.add_trace(
     go.Scatter(
         x=df.index,
@@ -355,8 +351,8 @@ fig.update_layout(
 
 st.plotly_chart(fig, use_container_width=True)
 
-# Data Inspect View
-if st.checkbox("🔍 Inspect Raw Intraday Data, SMC Phases & Signals"):
+# Data Table & SMC Inspect View
+if st.checkbox("🔍 Inspect Raw Data, SMC Phases & Signals"):
   st.dataframe(
       df[
           [
