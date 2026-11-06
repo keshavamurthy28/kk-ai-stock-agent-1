@@ -6,20 +6,20 @@ import streamlit as st
 import yfinance as yf
 
 st.set_page_config(
-    page_title="SuperTrend & Actionable Signal Terminal",
-    page_icon="📈",
+    page_title="Advanced Smart Money & SuperTrend Terminal",
+    page_icon="📊",
     layout="wide",
 )
 
-st.title("📈 Pro SuperTrend & Actionable Signal Trading Terminal")
+st.title("📊 Pro Smart Money Concepts (SMC) & SuperTrend Trading Terminal")
 st.markdown(
-    "Interactive TradingView-style terminal featuring **ATR SuperTrend Band Confluence**, **Dynamic Buy/Sell Signal Callouts**, and **Orderflow Delta**."
+    "Interactive TradingView-style terminal featuring **SuperTrend Strategy**, **Smart Money Order Blocks**, **CHoCH / BOS Structure Shifts**, and **Volume Delta**."
 )
 
 # -------------------------------------------------------------------
-# 1. SIDEBAR TRADING CONTROLS & STRATEGY PARAMETERS
+# 1. SIDEBAR TRADING CONTROLS
 # -------------------------------------------------------------------
-st.sidebar.header("🛠️ SuperTrend Strategy Controls")
+st.sidebar.header("🛠️ Terminal Controls")
 stock_input = st.sidebar.text_input(
     "Stock Ticker (e.g., HDFCBANK, INFY, RELIANCE)", value="HDFCBANK"
 ).upper()
@@ -33,19 +33,20 @@ timeframe = st.sidebar.selectbox(
 fetch_period = "60d" if timeframe in ["5m", "15m", "30m", "1h"] else "max"
 
 st.sidebar.markdown("---")
-st.sidebar.header("⚙️ SuperTrend Parameters")
-atr_period = st.sidebar.slider("ATR Period", 5, 20, 10)
-atr_multiplier = st.sidebar.slider("ATR Multiplier", 1.0, 5.0, 3.0, 0.1)
+st.sidebar.header("⚙️ Indicator Parameters")
+atr_period = st.sidebar.slider("SuperTrend ATR Period", 5, 20, 10)
+atr_multiplier = st.sidebar.slider("SuperTrend ATR Multiplier", 1.0, 5.0, 3.0, 0.1)
 
 show_candlestick = st.sidebar.checkbox("Show Candlesticks (OHLC)", value=True)
 show_supertrend = st.sidebar.checkbox("Show SuperTrend Band Line", value=True)
+show_smc = st.sidebar.checkbox("Show Smart Money Order Blocks & Structure", value=True)
 show_signals = st.sidebar.checkbox("Show Buy / Sell Signal Markers", value=True)
 
 # -------------------------------------------------------------------
-# 2. DATA FETCHER & SUPERTREND STRATEGY ENGINE
+# 2. DATA FETCHER & SMC + SUPERTREND ENGINE
 # -------------------------------------------------------------------
 @st.cache_data(ttl=300)
-def fetch_and_calculate_supertrend(ticker, period, interval, period_atr, mult):
+def fetch_and_calculate_indicators(ticker, period, interval, period_atr, mult):
     df = yf.download(
         ticker, period=period, interval=interval, progress=False, auto_adjust=True
     )
@@ -67,11 +68,6 @@ def fetch_and_calculate_supertrend(ticker, period, interval, period_atr, mult):
     df['Basic_Upper'] = hl2 + (mult * df['ATR'])
     df['Basic_Lower'] = hl2 - (mult * df['ATR'])
 
-    df['Final_Upper'] = 0.0
-    df['Final_Lower'] = 0.0
-    df['SuperTrend'] = 0.0
-    df['Trend'] = 1  # 1 = Bullish, -1 = Bearish
-
     upper_list = [0.0] * len(df)
     lower_list = [0.0] * len(df)
     st_list = [0.0] * len(df)
@@ -80,23 +76,18 @@ def fetch_and_calculate_supertrend(ticker, period, interval, period_atr, mult):
     close = df['Close'].values
     basic_upper = df['Basic_Upper'].values
     basic_lower = df['Basic_Lower'].values
-    final_upper = df['Final_Upper'].values
-    final_lower = df['Final_Lower'].values
-    
+
     for i in range(1, len(df)):
-        # Upper Band
-        if basic_upper[i] < final_upper[i-1] or close[i-1] > final_upper[i-1]:
+        if basic_upper[i] < upper_list[i-1] or close[i-1] > upper_list[i-1]:
             upper_list[i] = basic_upper[i]
         else:
-            upper_list[i] = final_upper[i-1]
+            upper_list[i] = upper_list[i-1]
 
-        # Lower Band
-        if basic_lower[i] > final_lower[i-1] or close[i-1] < final_lower[i-1]:
+        if basic_lower[i] > lower_list[i-1] or close[i-1] < lower_list[i-1]:
             lower_list[i] = basic_lower[i]
         else:
-            lower_list[i] = final_lower[i-1]
+            lower_list[i] = lower_list[i-1]
 
-        # Trend and SuperTrend assignment
         if trend_list[i-1] == 1:
             if close[i] <= lower_list[i]:
                 trend_list[i] = -1
@@ -115,31 +106,44 @@ def fetch_and_calculate_supertrend(ticker, period, interval, period_atr, mult):
     df['SuperTrend'] = st_list
     df['Trend'] = trend_list
 
-    # Generate Actionable Buy/Sell Crossover Signals
+    # --- Smart Money Concepts (SMC) Detection ---
+    # Bullish Order Block: Last down candle before a strong impulsive up move
+    # Bearish Order Block: Last up candle before a strong impulsive down move
+    df['SMC_Signal'] = "NONE"
+    df['SMC_Label'] = ""
+    
+    for i in range(3, len(df) - 1):
+        # Bullish CHoCH / Order Block formation
+        if df['Close'].iloc[i] > df['High'].iloc[i-1] and df['Close'].iloc[i-1] < df['Open'].iloc[i-1]:
+            df.loc[df.index[i], 'SMC_Signal'] = "BULLISH_OB"
+            df.loc[df.index[i], 'SMC_Label'] = "CHoCH / Bullish OB"
+        # Bearish CHoCH / Order Block formation
+        elif df['Close'].iloc[i] < df['Low'].iloc[i-1] and df['Close'].iloc[i-1] > df['Open'].iloc[i-1]:
+            df.loc[df.index[i], 'SMC_Signal'] = "BEARISH_OB"
+            df.loc[df.index[i], 'SMC_Label'] = "CHoCH / Bearish OB"
+
+    # --- SuperTrend Actionable Signals ---
     df['Signal'] = "HOLD"
-    df['Signal_Label'] = ""
     for i in range(1, len(df)):
         if df['Trend'].iloc[i] == 1 and df['Trend'].iloc[i-1] == -1:
             df.loc[df.index[i], 'Signal'] = "BUY"
-            df.loc[df.index[i], 'Signal_Label'] = "Buy long"
         elif df['Trend'].iloc[i] == -1 and df['Trend'].iloc[i-1] == 1:
             df.loc[df.index[i], 'Signal'] = "SELL"
-            df.loc[df.index[i], 'Signal_Label'] = "Sell short"
 
-    # Volume Delta for Subplot
+    # Volume Delta Subplot
     range_hl = (df['High'] - df['Low']).replace(0, 0.001)
     buy_ratio = (df['Close'] - df['Low']) / range_hl
     df['Delta'] = df['Volume'] * (2 * buy_ratio - 1)
     
     return df
 
-with st.spinner(f"Computing SuperTrend indicators for `{symbol_str}`..."):
-    df = fetch_and_calculate_supertrend(symbol_str, fetch_period, timeframe, atr_period, atr_multiplier)
+with st.spinner(f"Computing Smart Money & SuperTrend indicators for `{symbol_str}`..."):
+    df = fetch_and_calculate_indicators(symbol_str, fetch_period, timeframe, atr_period, atr_multiplier)
 
 if df.empty or len(df) < 10:
     st.error(f"Could not retrieve enough data for `{symbol_str}` on interval `{timeframe}`.")
 else:
-    latest = df.iloc.to_list()[-1] if hasattr(df.iloc[-1], 'to_list') else df.iloc[-1]
+    latest = df.iloc[-1]
     prev = df.iloc[-2]
     price_change = ((latest['Close'] - prev['Close']) / prev['Close']) * 100
 
@@ -148,13 +152,13 @@ else:
     # -------------------------------------------------------------------
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Last Traded Price", f"₹{latest['Close']:.2f}", f"{price_change:+.2f}%")
-    c2.metric("SuperTrend Status", "BULLISH (UP)" if latest['Trend'] == 1 else "BEARISH (DOWN)")
+    c2.metric("SuperTrend Trend", "BULLISH (UP)" if latest['Trend'] == 1 else "BEARISH (DOWN)")
     c3.metric("ATR Band Value", f"₹{latest['SuperTrend']:.2f}")
     c4.metric("Active ATR", f"₹{latest['ATR']:.2f}")
-    c5.metric("Trend Signal", "🟢 BUY Active" if latest['Trend'] == 1 else "🔴 SELL Active")
+    c5.metric("Smart Money Bias", "🟢 Bullish Accumulation" if latest['Trend'] == 1 else "🔴 Bearish Distribution")
 
     # -------------------------------------------------------------------
-    # 4. TRADINGVIEW-STYLE DYNAMIC PLOTLY CHART GENERATION
+    # 4. TRADINGVIEW-STYLE PLOTLY CHART GENERATION
     # -------------------------------------------------------------------
     fig = make_subplots(
         rows=2, cols=1,
@@ -162,7 +166,7 @@ else:
         vertical_spacing=0.03,
         row_heights=[0.75, 0.25],
         subplot_titles=(
-            f"{symbol_str} Price Action & SuperTrend Strategy Overlay",
+            f"{symbol_str} Price Action, SuperTrend & Smart Money Order Blocks",
             "Net Volume Delta (Orderflow Momentum)"
         )
     )
@@ -174,7 +178,7 @@ else:
             name="OHLC"
         ), row=1, col=1)
 
-    # SuperTrend Line Split into Bullish (Green) and Bearish (Red) Segments
+    # SuperTrend Line
     if show_supertrend:
         bullish_st = df.copy()
         bullish_st.loc[bullish_st['Trend'] == -1, 'SuperTrend'] = np.nan
@@ -194,56 +198,22 @@ else:
             line=dict(color='#FF1744', width=2.5)
         ), row=1, col=1)
 
-    # Plot Buy/Sell Signal Callout Markers (Matching your screenshot tags)
-    if show_signals:
-        buy_pts = df[df['Signal'] == 'BUY']
-        sell_pts = df[df['Signal'] == 'SELL']
+    # Smart Money Order Blocks (SMC) Markers
+    if show_smc:
+        bull_ob = df[df['SMC_Signal'] == 'BULLISH_OB']
+        bear_ob = df[df['SMC_Signal'] == 'BEARISH_OB']
 
-        if not buy_pts.empty:
+        if not bull_ob.empty:
             fig.add_trace(go.Scatter(
-                x=buy_pts.index, y=buy_pts['Low'] * 0.994,
+                x=bull_ob.index, y=bull_ob['Low'] * 0.995,
                 mode='text+markers',
-                text=['Buy long'] * len(buy_pts),
+                text=['CHoCH / Bullish OB'] * len(bull_ob),
                 textposition='bottom center',
-                textfont=dict(color='#00E676', size=11, family='Arial Black'),
-                marker=dict(symbol='triangle-up', size=14, color='#00E676'),
-                name='Buy Signal Marker'
+                textfont=dict(color='#00E676', size=10, family='Arial Black'),
+                marker=dict(symbol='square', size=10, color='#00E676'),
+                name='Smart Money Bullish OB'
             ), row=1, col=1)
 
-        if not sell_pts.empty:
+        if not bear_ob.empty:
             fig.add_trace(go.Scatter(
-                x=sell_pts.index, y=sell_pts['High'] * 1.006,
-                mode='text+markers',
-                text=['Sell short'] * len(sell_pts),
-                textposition='top center',
-                textfont=dict(color='#FF1744', size=11, family='Arial Black'),
-                marker=dict(symbol='triangle-down', size=14, color='#FF1744'),
-                name='Sell Signal Marker'
-            ), row=1, col=1)
-
-    # Orderflow Delta Subplot
-    delta_colors = ['#00E676' if v >= 0 else '#FF1744' for v in df['Delta']]
-    fig.add_trace(go.Bar(
-        x=df.index, y=df['Delta'], marker_color=delta_colors, name="Volume Delta"
-    ), row=2, col=1)
-
-    fig.update_layout(
-        template="plotly_dark",
-        xaxis_rangeslider_visible=False,
-        height=750,
-        margin=dict(l=20, r=20, t=40, b=20),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-    # -------------------------------------------------------------------
-    # 5. STRATEGY GUIDE
-    # -------------------------------------------------------------------
-    st.markdown("---")
-    st.markdown("### 📋 SuperTrend Execution & Strategy Guide")
-    st.markdown(
-        "- **Green SuperTrend Line:** Acts as an active trailing stop support. As long as price stays above the green line, hold your long position.\n"
-        "- **Red SuperTrend Line:** Acts as resistance. When price flips below, the line turns red, signaling short/sell momentum.\n"
-        "- **'Buy long' / 'Sell short' Callouts:** Automatically placed on candles where trend direction flips, exactly matching professional TradingView indicator layouts."
-    )
+                x=bear_ob.index, y=
