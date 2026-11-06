@@ -107,17 +107,13 @@ def fetch_and_calculate_indicators(ticker, period, interval, period_atr, mult):
     df['Trend'] = trend_list
 
     # --- Smart Money Concepts (SMC) Detection ---
-    # Bullish Order Block: Last down candle before a strong impulsive up move
-    # Bearish Order Block: Last up candle before a strong impulsive down move
     df['SMC_Signal'] = "NONE"
     df['SMC_Label'] = ""
     
     for i in range(3, len(df) - 1):
-        # Bullish CHoCH / Order Block formation
         if df['Close'].iloc[i] > df['High'].iloc[i-1] and df['Close'].iloc[i-1] < df['Open'].iloc[i-1]:
             df.loc[df.index[i], 'SMC_Signal'] = "BULLISH_OB"
             df.loc[df.index[i], 'SMC_Label'] = "CHoCH / Bullish OB"
-        # Bearish CHoCH / Order Block formation
         elif df['Close'].iloc[i] < df['Low'].iloc[i-1] and df['Close'].iloc[i-1] > df['Open'].iloc[i-1]:
             df.loc[df.index[i], 'SMC_Signal'] = "BEARISH_OB"
             df.loc[df.index[i], 'SMC_Label'] = "CHoCH / Bearish OB"
@@ -216,4 +212,65 @@ else:
 
         if not bear_ob.empty:
             fig.add_trace(go.Scatter(
-                x=bear_ob.index, y=
+                x=bear_ob.index, y=bear_ob['High'] * 1.005,
+                mode='text+markers',
+                text=['CHoCH / Bearish OB'] * len(bear_ob),
+                textposition='top center',
+                textfont=dict(color='#FF1744', size=10, family='Arial Black'),
+                marker=dict(symbol='square', size=10, color='#FF1744'),
+                name='Smart Money Bearish OB'
+            ), row=1, col=1)
+
+    # SuperTrend Buy/Sell Signals
+    if show_signals:
+        buy_pts = df[df['Signal'] == 'BUY']
+        sell_pts = df[df['Signal'] == 'SELL']
+
+        if not buy_pts.empty:
+            fig.add_trace(go.Scatter(
+                x=buy_pts.index, y=buy_pts['Low'] * 0.99,
+                mode='text+markers',
+                text=['Buy long'] * len(buy_pts),
+                textposition='bottom center',
+                textfont=dict(color='#00E676', size=11, family='Arial Black'),
+                marker=dict(symbol='triangle-up', size=14, color='#00E676'),
+                name='Buy Signal'
+            ), row=1, col=1)
+
+        if not sell_pts.empty:
+            fig.add_trace(go.Scatter(
+                x=sell_pts.index, y=sell_pts['High'] * 1.01,
+                mode='text+markers',
+                text=['Sell short'] * len(sell_pts),
+                textposition='top center',
+                textfont=dict(color='#FF1744', size=11, family='Arial Black'),
+                marker=dict(symbol='triangle-down', size=14, color='#FF1744'),
+                name='Sell Signal'
+            ), row=1, col=1)
+
+    # Orderflow Delta Subplot
+    delta_colors = ['#00E676' if v >= 0 else '#FF1744' for v in df['Delta']]
+    fig.add_trace(go.Bar(
+        x=df.index, y=df['Delta'], marker_color=delta_colors, name="Volume Delta"
+    ), row=2, col=1)
+
+    fig.update_layout(
+        template="plotly_dark",
+        xaxis_rangeslider_visible=False,
+        height=800,
+        margin=dict(l=20, r=20, t=40, b=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # -------------------------------------------------------------------
+    # 5. STRATEGY GUIDE
+    # -------------------------------------------------------------------
+    st.markdown("---")
+    st.markdown("### 📋 Smart Money Concepts & SuperTrend Execution Guide")
+    st.markdown(
+        "- **Smart Money Order Blocks (CHoCH / OB):** Squares marked on candles indicate institutional accumulation zones where smart money shifted market structure.\n"
+        "- **SuperTrend Trailing Lines:** Green indicates bullish trend support; red indicates bearish resistance.\n"
+        "- **'Buy long' / 'Sell short' Callouts:** Display exact entry triggers when trends flip."
+    )
