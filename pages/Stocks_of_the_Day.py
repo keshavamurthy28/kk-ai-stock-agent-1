@@ -106,23 +106,21 @@ def fetch_and_calculate_ict(ticker, period, interval):
     df['Trend'] = trend_list
 
     # --- Fair Value Gap (FVG) Detection ---
-    # Bullish FVG: Low of candle[i] > High of candle[i-2]
-    # Bearish FVG: High of candle[i] < Low of candle[i-2]
     df['FVG_Type'] = "NONE"
     df['FVG_Top'] = np.nan
     df['FVG_Bottom'] = np.nan
 
     for i in range(2, len(df)):
-        if df['Low'].iloc[i] > df['High'].iloc[i-2]: # Bullish Imbalance
+        if df['Low'].iloc[i] > df['High'].iloc[i-2]: 
             df.loc[df.index[i], 'FVG_Type'] = "BULLISH_FVG"
             df.loc[df.index[i], 'FVG_Bottom'] = df['High'].iloc[i-2]
             df.loc[df.index[i], 'FVG_Top'] = df['Low'].iloc[i]
-        elif df['High'].iloc[i] < df['Low'].iloc[i-2]: # Bearish Imbalance
+        elif df['High'].iloc[i] < df['Low'].iloc[i-2]: 
             df.loc[df.index[i], 'FVG_Type'] = "BEARISH_FVG"
             df.loc[df.index[i], 'FVG_Top'] = df['Low'].iloc[i-2]
             df.loc[df.index[i], 'FVG_Bottom'] = df['High'].iloc[i]
 
-    # --- SuperTrend Actionable Signals ---
+    # --- Actionable Signals ---
     df['Signal'] = "HOLD"
     for i in range(1, len(df)):
         if df['Trend'].iloc[i] == 1 and df['Trend'].iloc[i-1] == -1:
@@ -152,12 +150,9 @@ else:
     c4.metric("ICT Bias", "🟢 Premium Accumulation" if latest['Trend'] == 1 else "🔴 Discount Distribution")
 
     # -------------------------------------------------------------------
-    # 4. CHART GENERATION (TRADINGVIEW PAN/ZOOM + FVG + VOLUME PROFILE)
+    # 4. CHART GENERATION (SAFE SUBPLOT LAYOUT)
     # -------------------------------------------------------------------
-    fig = make_subplots(
-        rows=1, cols=1,
-        subplot_titles=(f"{symbol_str} Price Action, Fair Value Gaps (FVG) & Volume Profile",)
-    )
+    fig = go.Figure()
 
     # Candlestick Pane
     if show_candlestick:
@@ -200,10 +195,10 @@ else:
                     layer="below"
                 )
 
-    # Fixed Range Volume Profile (Volume at Price)
+    # Volume Profile Nodes
     if show_volume_profile and not df.empty:
         price_min, price_max = df['Low'].min(), df['High'].max()
-        bins = 20
+        bins = 15
         price_bins = np.linspace(price_min, price_max, bins)
         volume_bins = np.zeros(bins - 1)
         
@@ -216,17 +211,20 @@ else:
                     break
 
         max_vol = volume_bins.max() if volume_bins.max() > 0 else 1
-        normalized_vol = (volume_bins / max_vol) * (len(df) * 0.15) # Scale width
+        scaled_vol = (volume_bins / max_vol) * (df.index[-1] - df.index[0]) * 0.15 # Safe scaling
 
         bin_centers = (price_bins[:-1] + price_bins[1:]) / 2
-        fig.add_trace(go.Bar(
-            y=bin_centers,
-            x=normalized_vol,
-            orientation='h',
-            name='Volume Profile (VPVR)',
-            marker=dict(color='rgba(41, 182, 246, 0.4)', line=dict(color='rgba(41, 182, 246, 0.8)', width=1)),
-            xaxis='x2'
-        ))
+        
+        # Add volume nodes as horizontal lines / bars
+        for center, vol in zip(bin_centers, volume_bins):
+            if vol > 0:
+                fig.add_shape(
+                    type="rect",
+                    x0=df.index[0], y0=center - (price_max-price_min)/(bins*2),
+                    x1=df.index[0] + pd.Timedelta(days=int(len(df)*0.08)), y1=center + (price_max-price_min)/(bins*2),
+                    fillcolor="rgba(41, 182, 246, 0.5)", line=dict(width=0),
+                    layer="below"
+                )
 
     # Buy/Sell Signal Markers
     if show_signals:
@@ -250,19 +248,13 @@ else:
 
     # TradingView Navigation Layout (Hand Pan + Scroll Zoom)
     fig.update_layout(
+        title=f"{symbol_str} Price Action, Fair Value Gaps (FVG) & Volume Profile",
         template="plotly_dark",
         dragmode='pan',
         xaxis_rangeslider_visible=False,
         height=750,
         margin=dict(l=20, r=20, t=40, b=20),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        xaxis2=dict(
-            overlaying='x',
-            side='top',
-            showgrid=False,
-            showticklabels=False,
-            range=[0, len(df) * 0.3]
-        )
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
 
     chart_config = {
@@ -280,7 +272,7 @@ else:
     st.markdown("---")
     st.markdown("### 🎓 ICT & Smart Money Concept Guide")
     st.markdown(
-        "- **Fair Value Gaps (FVG - Shaded Boxes):** Green and red rectangular zones highlight price imbalances where institutional order flow left unfilled liquidity. Price frequently retraces back to fill these boxes before continuing its trend.\n"
-        "- **Fixed Range Volume Profile (VPVR - Blue Bars on Right):** Displays the heaviest volume concentration nodes where institutional participants transacted the most shares.\n"
+        "- **Fair Value Gaps (FVG - Shaded Boxes):** Green and red rectangular zones highlight price imbalances where institutional order flow left unfilled liquidity.\n"
+        "- **Volume Profile Nodes:** Blue density bars on the left highlight high-volume transaction nodes.\n"
         "- **Hand Icon Pan & Zoom:** Use your mouse wheel to zoom in/out and click + drag to move across the chart effortlessly."
     )
