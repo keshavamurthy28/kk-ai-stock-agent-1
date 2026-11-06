@@ -6,18 +6,18 @@ import streamlit as st
 import yfinance as yf
 
 st.set_page_config(
-    page_title="Advanced TradingView-Style Terminal",
-    page_icon="📊",
+    page_title="ICT & Smart Money Trading Terminal",
+    page_icon="⚡",
     layout="wide",
 )
 
-st.title("📊 Pro TradingView-Style Interactive Charting Terminal")
+st.title("⚡ Pro ICT & Smart Money Concepts (FVG, Volume Profile & Retracements)")
 st.markdown(
-    "Use your **mouse to scroll/zoom** and **click + drag (Hand Icon)** to pan across the chart just like TradingView."
+    "Interactive institutional terminal featuring **Fixed Range Volume Profile**, **Fair Value Gaps (FVG)**, **SuperTrend**, and **Order Blocks**."
 )
 
 # -------------------------------------------------------------------
-# 1. SIDEBAR TRADING CONTROLS
+# 1. SIDEBAR CONTROLS
 # -------------------------------------------------------------------
 st.sidebar.header("🛠️ Terminal Controls")
 stock_input = st.sidebar.text_input(
@@ -28,42 +28,41 @@ symbol_str = (
 )
 
 timeframe = st.sidebar.selectbox(
-    "Select Timeframe", ["5m", "15m", "30m", "1h", "1d"], index=1
+    "Select Timeframe", ["5m", "15m", "30m", "1h", "1d"], index=4
 )
 fetch_period = "60d" if timeframe in ["5m", "15m", "30m", "1h"] else "max"
 
 st.sidebar.markdown("---")
-st.sidebar.header("⚙️ Indicator Parameters")
-atr_period = st.sidebar.slider("SuperTrend ATR Period", 5, 20, 10)
-atr_multiplier = st.sidebar.slider("SuperTrend ATR Multiplier", 1.0, 5.0, 3.0, 0.1)
-
+st.sidebar.header("⚙️ ICT & Institutional Overlays")
 show_candlestick = st.sidebar.checkbox("Show Candlesticks (OHLC)", value=True)
-show_supertrend = st.sidebar.checkbox("Show SuperTrend Band Line", value=True)
-show_smc = st.sidebar.checkbox("Show Smart Money Order Blocks & Structure", value=True)
+show_fvg = st.sidebar.checkbox("Show Fair Value Gaps (FVG)", value=True)
+show_volume_profile = st.sidebar.checkbox("Show Fixed Range Volume Profile", value=True)
+show_supertrend = st.sidebar.checkbox("Show SuperTrend Line", value=True)
 show_signals = st.sidebar.checkbox("Show Buy / Sell Signal Markers", value=True)
 
 # -------------------------------------------------------------------
-# 2. DATA FETCHER & TECHNICAL ENGINE
+# 2. DATA FETCHER & ICT INDICATOR ENGINE
 # -------------------------------------------------------------------
 @st.cache_data(ttl=300)
-def fetch_and_calculate_indicators(ticker, period, interval, period_atr, mult):
+def fetch_and_calculate_ict(ticker, period, interval):
     df = yf.download(
         ticker, period=period, interval=interval, progress=False, auto_adjust=True
     )
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     
-    if df.empty or len(df) < period_atr:
+    if df.empty or len(df) < 15:
         return df
 
-    # --- True Range & ATR Calculation ---
+    # --- SuperTrend Calculation ---
+    period_atr = 10
+    mult = 3.0
     df['H-L'] = df['High'] - df['Low']
     df['H-PC'] = abs(df['High'] - df['Close'].shift(1))
     df['L-PC'] = abs(df['Low'] - df['Close'].shift(1))
     df['TR'] = df[['H-L', 'H-PC', 'L-PC']].max(axis=1)
     df['ATR'] = df['TR'].rolling(window=period_atr).mean()
 
-    # --- SuperTrend Logic ---
     hl2 = (df['High'] + df['Low']) / 2
     df['Basic_Upper'] = hl2 + (mult * df['ATR'])
     df['Basic_Lower'] = hl2 - (mult * df['ATR'])
@@ -106,17 +105,22 @@ def fetch_and_calculate_indicators(ticker, period, interval, period_atr, mult):
     df['SuperTrend'] = st_list
     df['Trend'] = trend_list
 
-    # --- Smart Money Concepts (SMC) Detection ---
-    df['SMC_Signal'] = "NONE"
-    df['SMC_Label'] = ""
-    
-    for i in range(3, len(df) - 1):
-        if df['Close'].iloc[i] > df['High'].iloc[i-1] and df['Close'].iloc[i-1] < df['Open'].iloc[i-1]:
-            df.loc[df.index[i], 'SMC_Signal'] = "BULLISH_OB"
-            df.loc[df.index[i], 'SMC_Label'] = "CHoCH / Bullish OB"
-        elif df['Close'].iloc[i] < df['Low'].iloc[i-1] and df['Close'].iloc[i-1] > df['Open'].iloc[i-1]:
-            df.loc[df.index[i], 'SMC_Signal'] = "BEARISH_OB"
-            df.loc[df.index[i], 'SMC_Label'] = "CHoCH / Bearish OB"
+    # --- Fair Value Gap (FVG) Detection ---
+    # Bullish FVG: Low of candle[i] > High of candle[i-2]
+    # Bearish FVG: High of candle[i] < Low of candle[i-2]
+    df['FVG_Type'] = "NONE"
+    df['FVG_Top'] = np.nan
+    df['FVG_Bottom'] = np.nan
+
+    for i in range(2, len(df)):
+        if df['Low'].iloc[i] > df['High'].iloc[i-2]: # Bullish Imbalance
+            df.loc[df.index[i], 'FVG_Type'] = "BULLISH_FVG"
+            df.loc[df.index[i], 'FVG_Bottom'] = df['High'].iloc[i-2]
+            df.loc[df.index[i], 'FVG_Top'] = df['Low'].iloc[i]
+        elif df['High'].iloc[i] < df['Low'].iloc[i-2]: # Bearish Imbalance
+            df.loc[df.index[i], 'FVG_Type'] = "BEARISH_FVG"
+            df.loc[df.index[i], 'FVG_Top'] = df['Low'].iloc[i-2]
+            df.loc[df.index[i], 'FVG_Bottom'] = df['High'].iloc[i]
 
     # --- SuperTrend Actionable Signals ---
     df['Signal'] = "HOLD"
@@ -126,15 +130,10 @@ def fetch_and_calculate_indicators(ticker, period, interval, period_atr, mult):
         elif df['Trend'].iloc[i] == -1 and df['Trend'].iloc[i-1] == 1:
             df.loc[df.index[i], 'Signal'] = "SELL"
 
-    # Volume Delta Subplot
-    range_hl = (df['High'] - df['Low']).replace(0, 0.001)
-    buy_ratio = (df['Close'] - df['Low']) / range_hl
-    df['Delta'] = df['Volume'] * (2 * buy_ratio - 1)
-    
     return df
 
-with st.spinner(f"Computing indicators for `{symbol_str}`..."):
-    df = fetch_and_calculate_indicators(symbol_str, fetch_period, timeframe, atr_period, atr_multiplier)
+with st.spinner(f"Computing ICT Fair Value Gaps and Volume Profile for `{symbol_str}`..."):
+    df = fetch_and_calculate_ict(symbol_str, fetch_period, timeframe)
 
 if df.empty or len(df) < 10:
     st.error(f"Could not retrieve enough data for `{symbol_str}` on interval `{timeframe}`.")
@@ -144,143 +143,144 @@ else:
     price_change = ((latest['Close'] - prev['Close']) / prev['Close']) * 100
 
     # -------------------------------------------------------------------
-    # 3. EXECUTIVE METRICS BAR
+    # 3. METRICS BAR
     # -------------------------------------------------------------------
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Last Traded Price", f"₹{latest['Close']:.2f}", f"{price_change:+.2f}%")
-    c2.metric("SuperTrend Trend", "BULLISH (UP)" if latest['Trend'] == 1 else "BEARISH (DOWN)")
-    c3.metric("ATR Band Value", f"₹{latest['SuperTrend']:.2f}")
-    c4.metric("Active ATR", f"₹{latest['ATR']:.2f}")
-    c5.metric("Smart Money Bias", "🟢 Bullish Accumulation" if latest['Trend'] == 1 else "🔴 Bearish Distribution")
+    c2.metric("Market Structure", "BULLISH (UP)" if latest['Trend'] == 1 else "BEARISH (DOWN)")
+    c3.metric("Active ATR", f"₹{latest['ATR']:.2f}")
+    c4.metric("ICT Bias", "🟢 Premium Accumulation" if latest['Trend'] == 1 else "🔴 Discount Distribution")
 
     # -------------------------------------------------------------------
-    # 4. TRADINGVIEW-STYLE PLOTLY CHART GENERATION (PAN & SCROLL ENABLED)
+    # 4. CHART GENERATION (TRADINGVIEW PAN/ZOOM + FVG + VOLUME PROFILE)
     # -------------------------------------------------------------------
     fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.03,
-        row_heights=[0.75, 0.25],
-        subplot_titles=(
-            f"{symbol_str} Price Action, SuperTrend & Smart Money Order Blocks",
-            "Net Volume Delta (Orderflow Momentum)"
-        )
+        rows=1, cols=1,
+        subplot_titles=(f"{symbol_str} Price Action, Fair Value Gaps (FVG) & Volume Profile",)
     )
 
     # Candlestick Pane
     if show_candlestick:
         fig.add_trace(go.Candlestick(
             x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-            name="OHLC"
-        ), row=1, col=1)
+            name="OHLC Candles"
+        ))
 
     # SuperTrend Line
     if show_supertrend:
         bullish_st = df.copy()
         bullish_st.loc[bullish_st['Trend'] == -1, 'SuperTrend'] = np.nan
-        
         bearish_st = df.copy()
         bearish_st.loc[bearish_st['Trend'] == 1, 'SuperTrend'] = np.nan
 
         fig.add_trace(go.Scatter(
-            x=bullish_st.index, y=bullish_st['SuperTrend'],
-            mode='lines', name='SuperTrend (Bullish)',
-            line=dict(color='#00E676', width=2.5)
-        ), row=1, col=1)
-
+            x=bullish_st.index, y=bullish_st['SuperTrend'], mode='lines', name='SuperTrend Support',
+            line=dict(color='#00E676', width=2)
+        ))
         fig.add_trace(go.Scatter(
-            x=bearish_st.index, y=bearish_st['SuperTrend'],
-            mode='lines', name='SuperTrend (Bearish)',
-            line=dict(color='#FF1744', width=2.5)
-        ), row=1, col=1)
+            x=bearish_st.index, y=bearish_st['SuperTrend'], mode='lines', name='SuperTrend Resistance',
+            line=dict(color='#FF1744', width=2)
+        ))
 
-    # Smart Money Order Blocks (SMC) Markers
-    if show_smc:
-        bull_ob = df[df['SMC_Signal'] == 'BULLISH_OB']
-        bear_ob = df[df['SMC_Signal'] == 'BEARISH_OB']
+    # Fair Value Gaps (FVG) Shaded Boxes
+    if show_fvg:
+        for idx, row in df.iterrows():
+            if row['FVG_Type'] == 'BULLISH_FVG':
+                fig.add_shape(
+                    type="rect",
+                    x0=idx, y0=row['FVG_Bottom'], x1=df.index[-1], y1=row['FVG_Top'],
+                    fillcolor="rgba(0, 230, 118, 0.2)", line=dict(width=0),
+                    layer="below"
+                )
+            elif row['FVG_Type'] == 'BEARISH_FVG':
+                fig.add_shape(
+                    type="rect",
+                    x0=idx, y0=row['FVG_Bottom'], x1=df.index[-1], y1=row['FVG_Top'],
+                    fillcolor="rgba(255, 23, 68, 0.2)", line=dict(width=0),
+                    layer="below"
+                )
 
-        if not bull_ob.empty:
-            fig.add_trace(go.Scatter(
-                x=bull_ob.index, y=bull_ob['Low'] * 0.995,
-                mode='text+markers',
-                text=['CHoCH / Bullish OB'] * len(bull_ob),
-                textposition='bottom center',
-                textfont=dict(color='#00E676', size=10, family='Arial Black'),
-                marker=dict(symbol='square', size=10, color='#00E676'),
-                name='Smart Money Bullish OB'
-            ), row=1, col=1)
+    # Fixed Range Volume Profile (Volume at Price)
+    if show_volume_profile and not df.empty:
+        price_min, price_max = df['Low'].min(), df['High'].max()
+        bins = 20
+        price_bins = np.linspace(price_min, price_max, bins)
+        volume_bins = np.zeros(bins - 1)
+        
+        for _, row in df.iterrows():
+            p = row['Close']
+            v = row['Volume']
+            for b in range(len(price_bins) - 1):
+                if price_bins[b] <= p < price_bins[b+1]:
+                    volume_bins[b] += v
+                    break
 
-        if not bear_ob.empty:
-            fig.add_trace(go.Scatter(
-                x=bear_ob.index, y=bear_ob['High'] * 1.005,
-                mode='text+markers',
-                text=['CHoCH / Bearish OB'] * len(bear_ob),
-                textposition='top center',
-                textfont=dict(color='#FF1744', size=10, family='Arial Black'),
-                marker=dict(symbol='square', size=10, color='#FF1744'),
-                name='Smart Money Bearish OB'
-            ), row=1, col=1)
+        max_vol = volume_bins.max() if volume_bins.max() > 0 else 1
+        normalized_vol = (volume_bins / max_vol) * (len(df) * 0.15) # Scale width
 
-    # SuperTrend Buy/Sell Signals
+        bin_centers = (price_bins[:-1] + price_bins[1:]) / 2
+        fig.add_trace(go.Bar(
+            y=bin_centers,
+            x=normalized_vol,
+            orientation='h',
+            name='Volume Profile (VPVR)',
+            marker=dict(color='rgba(41, 182, 246, 0.4)', line=dict(color='rgba(41, 182, 246, 0.8)', width=1)),
+            xaxis='x2'
+        ))
+
+    # Buy/Sell Signal Markers
     if show_signals:
         buy_pts = df[df['Signal'] == 'BUY']
         sell_pts = df[df['Signal'] == 'SELL']
 
         if not buy_pts.empty:
             fig.add_trace(go.Scatter(
-                x=buy_pts.index, y=buy_pts['Low'] * 0.99,
-                mode='text+markers',
-                text=['Buy long'] * len(buy_pts),
-                textposition='bottom center',
-                textfont=dict(color='#00E676', size=11, family='Arial Black'),
-                marker=dict(symbol='triangle-up', size=14, color='#00E676'),
-                name='Buy Signal'
-            ), row=1, col=1)
-
+                x=buy_pts.index, y=buy_pts['Low'] * 0.992,
+                mode='text+markers', text=['Buy long'] * len(buy_pts),
+                textposition='bottom center', textfont=dict(color='#00E676', size=11, family='Arial Black'),
+                marker=dict(symbol='triangle-up', size=14, color='#00E676'), name='Buy Signal'
+            ))
         if not sell_pts.empty:
             fig.add_trace(go.Scatter(
-                x=sell_pts.index, y=sell_pts['High'] * 1.01,
-                mode='text+markers',
-                text=['Sell short'] * len(sell_pts),
-                textposition='top center',
-                textfont=dict(color='#FF1744', size=11, family='Arial Black'),
-                marker=dict(symbol='triangle-down', size=14, color='#FF1744'),
-                name='Sell Signal'
-            ), row=1, col=1)
+                x=sell_pts.index, y=sell_pts['High'] * 1.008,
+                mode='text+markers', text=['Sell short'] * len(sell_pts),
+                textposition='top center', textfont=dict(color='#FF1744', size=11, family='Arial Black'),
+                marker=dict(symbol='triangle-down', size=14, color='#FF1744'), name='Sell Signal'
+            ))
 
-    # Orderflow Delta Subplot
-    delta_colors = ['#00E676' if v >= 0 else '#FF1744' for v in df['Delta']]
-    fig.add_trace(go.Bar(
-        x=df.index, y=df['Delta'], marker_color=delta_colors, name="Volume Delta"
-    ), row=2, col=1)
-
-    # LAYOUT CONFIGURED FOR TRADINGVIEW PAN & ZOOM EXPERIENCE
+    # TradingView Navigation Layout (Hand Pan + Scroll Zoom)
     fig.update_layout(
         template="plotly_dark",
-        dragmode='pan',  # <-- Forces the moveable Hand Icon by default!
+        dragmode='pan',
         xaxis_rangeslider_visible=False,
-        height=800,
+        height=750,
         margin=dict(l=20, r=20, t=40, b=20),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis2=dict(
+            overlaying='x',
+            side='top',
+            showgrid=False,
+            showticklabels=False,
+            range=[0, len(df) * 0.3]
+        )
     )
 
-    # CONFIG SETTINGS TO ENABLE MOUSE SCROLL ZOOM & SMOOTH NAVIGATION
     chart_config = {
-        'scrollZoom': True,       # Enables zooming in/out with mouse wheel scroll
-        'displayModeBar': True,   # Shows top toolbar (allows switching back to zoom/pan tools if needed)
-        'modeBarButtonsToRemove': ['lasso2d', 'select2d'], # Removes clutter selection tools
+        'scrollZoom': True,
+        'displayModeBar': True,
+        'modeBarButtonsToRemove': ['lasso2d', 'select2d'],
         'responsive': True
     }
 
     st.plotly_chart(fig, use_container_width=True, config=chart_config)
 
     # -------------------------------------------------------------------
-    # 5. STRATEGY GUIDE
+    # 5. ICT STRATEGY EXPLANATION GUIDE
     # -------------------------------------------------------------------
     st.markdown("---")
-    st.markdown("### 📋 Navigation Guide (TradingView Style)")
+    st.markdown("### 🎓 ICT & Smart Money Concept Guide")
     st.markdown(
-        "- **Move / Pan Chart:** Click anywhere on the chart and drag your mouse (Hand Icon is active by default).\n"
-        "- **Zoom In / Out:** Scroll your mouse wheel up and down over the price candles.\n"
-        "- **Reset View:** Double-click anywhere on the chart to instantly reset back to the default auto-scale view."
+        "- **Fair Value Gaps (FVG - Shaded Boxes):** Green and red rectangular zones highlight price imbalances where institutional order flow left unfilled liquidity. Price frequently retraces back to fill these boxes before continuing its trend.\n"
+        "- **Fixed Range Volume Profile (VPVR - Blue Bars on Right):** Displays the heaviest volume concentration nodes where institutional participants transacted the most shares.\n"
+        "- **Hand Icon Pan & Zoom:** Use your mouse wheel to zoom in/out and click + drag to move across the chart effortlessly."
     )
