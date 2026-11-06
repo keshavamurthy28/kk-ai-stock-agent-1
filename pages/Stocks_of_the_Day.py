@@ -59,7 +59,7 @@ with st.spinner(f"Loading live data & calculating indicators for `{symbol_str}`.
     df = fetch_intraday_data(symbol_str, fetch_period, timeframe)
 
 if df.empty or len(df) < 10:
-    st.error(f"Could not retrieve data for `{symbol_str}` on interval `{timeframe}`.")
+    st.error(f"Could not retrieve data for `{symbol_str}` on interval `{timeframe}`. Please check the ticker symbol.")
 else:
     # Technical Calculations
     df["EMA_20"] = df["Close"].ewm(span=20, adjust=False).mean()
@@ -135,18 +135,19 @@ else:
     )
 
     # Pane 1: Price Action
-    fig.add_trace(
-        go.Candlestick(
-            x=df.index,
-            open=df["Open"],
-            high=df["High"],
-            low=df["Low"],
-            close=df["Close"],
-            name="OHLC",
-        ),
-        row=1,
-        col=1,
-    )
+    if show_candlestick:
+        fig.add_trace(
+            go.Candlestick(
+                x=df.index,
+                open=df["Open"],
+                high=df["High"],
+                low=df["Low"],
+                close=df["Close"],
+                name="OHLC",
+            ),
+            row=1,
+            col=1,
+        )
 
     if show_vwap:
         fig.add_trace(
@@ -170,27 +171,29 @@ else:
         buy_signals = df[df["Signal_Type"] == "BUY"]
         sell_signals = df[df["Signal_Type"] == "SELL"]
 
-        fig.add_trace(
-            go.Scatter(
-                x=buy_signals.index,
-                y=buy_signals["Low"] * 0.995,
-                mode="markers",
-                marker=dict(symbol="triangle-up", size=12, color="#00E676"),
-                name="🟢 Learn: BUY Signal (VWAP Cross + Delta)",
-            ),
-            row=1, col=1,
-        )
+        if not buy_signals.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=buy_signals.index,
+                    y=buy_signals["Low"] * 0.995,
+                    mode="markers",
+                    marker=dict(symbol="triangle-up", size=12, color="#00E676"),
+                    name="🟢 Learn: BUY Signal (VWAP Cross + Delta)",
+                ),
+                row=1, col=1,
+            )
 
-        fig.add_trace(
-            go.Scatter(
-                x=sell_signals.index,
-                y=sell_signals["High"] * 1.005,
-                mode="markers",
-                marker=dict(symbol="triangle-down", size=12, color="#FF1744"),
-                name="🔴 Learn: SELL Signal (VWAP Breakdown)",
-            ),
-            row=1, col=1,
-        )
+        if not sell_signals.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=sell_signals.index,
+                    y=sell_signals["High"] * 1.005,
+                    mode="markers",
+                    marker=dict(symbol="triangle-down", size=12, color="#FF1744"),
+                    name="🔴 Learn: SELL Signal (VWAP Breakdown)",
+                ),
+                row=1, col=1,
+            )
 
     # Pane 2: Orderflow Delta Bar Chart
     bar_colors = ["#00E676" if v >= 0 else "#FF1744" for v in df["Delta"]]
@@ -205,3 +208,4 @@ else:
         row=3, col=1,
     )
     fig.add_hline(y=70, line_dash="dash", line_color="#EF5350", row=3, col=1, annotation_text="Overbought (70)")
+    fig.add_hline(y=30, line_dash
