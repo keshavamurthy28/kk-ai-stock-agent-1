@@ -6,12 +6,15 @@ from plotly.subplots import make_subplots
 import streamlit as st
 import yfinance as yf
 
-# Page Configuration
-st.set_page_config(
-    page_title="Institutional Trading Terminal - SMC & Advanced Analytics",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+# Page Configuration (Compatible with Multi-page apps)
+try:
+  st.set_page_config(
+      page_title="Institutional Trading Terminal - SMC & Advanced Analytics",
+      layout="wide",
+      initial_sidebar_state="expanded",
+  )
+except:
+  pass
 
 # Custom Styling for Speed & Readability
 st.markdown(
@@ -26,7 +29,7 @@ st.markdown(
 
 st.title("⚡ Institutional Terminal: SMC, FVG & Intraday Engine")
 
-# Expanded Stock Universe (Nifty 50 & High Liquidity Equities)
+# Expanded Comprehensive Stock Universe (Nifty 50, Bank Nifty & Liquid Equities)
 DEFAULT_STOCKS = {
     "RELIANCE - Reliance Industries Ltd": "RELIANCE.NS",
     "TCS - Tata Consultancy Services Ltd": "TCS.NS",
@@ -48,6 +51,36 @@ DEFAULT_STOCKS = {
     "NTPC - NTPC Ltd": "NTPC.NS",
     "ONGC - Oil & Natural Gas Corporation": "ONGC.NS",
     "TATASTEEL - Tata Steel Ltd": "TATASTEEL.NS",
+    "WIPRO - Wipro Ltd": "WIPRO.NS",
+    "BAJAJFINSV - Bajaj Finserv Ltd": "BAJAJFINSV.NS",
+    "ASIANPAINT - Asian Paints Ltd": "ASIANPAINT.NS",
+    "ADANIENT - Adani Enterprises Ltd": "ADANIENT.NS",
+    "ADANIPORTS - Adani Ports & SEZ Ltd": "ADANIPORTS.NS",
+    "POWERGRID - Power Grid Corp": "POWERGRID.NS",
+    "JSWSTEEL - JSW Steel Ltd": "JSWSTEEL.NS",
+    "GRASIM - Grasim Industries Ltd": "GRASIM.NS",
+    "HINDALCO - Hindalco Industries Ltd": "HINDALCO.NS",
+    "TECHM - Tech Mahindra Ltd": "TECHM.NS",
+    "NESTLEIND - Nestle India Ltd": "NESTLEIND.NS",
+    "CIPLA - Cipla Ltd": "CIPLA.NS",
+    "DRREDDY - Dr. Reddy's Laboratories": "DRREDDY.NS",
+    "SBILIFE - SBI Life Insurance Co Ltd": "SBILIFE.NS",
+    "BPCL - Bharat Petroleum Corp Ltd": "BPCL.NS",
+    "EICHERMOT - Eicher Motors Ltd": "EICHERMOT.NS",
+    "TATACONSUM - Tata Consumer Products": "TATACONSUM.NS",
+    "DIVISLAB - Divi's Laboratories Ltd": "DIVISLAB.NS",
+    "APOLLOHOSP - Apollo Hospitals Enterprise": "APOLLOHOSP.NS",
+    "HEROMOTOCO - Hero MotoCorp Ltd": "HEROMOTOCO.NS",
+    "UPL - UPL Ltd": "UPL.NS",
+    "INDUSINDBK - IndusInd Bank Ltd": "INDUSINDBK.NS",
+    "HDFCLIFE - HDFC Life Insurance": "HDFCLIFE.NS",
+    "BRITANNIA - Britannia Industries Ltd": "BRITANNIA.NS",
+    "SHRIRAMFIN - Shriram Finance Ltd": "SHRIRAMFIN.NS",
+    "LTIM - LTIMindtree Ltd": "LTIM.NS",
+    "TRENT - Trent Ltd": "TRENT.NS",
+    "BEL - Bharat Electronics Ltd": "BEL.NS",
+    "ZOMATO - Zomato Ltd": "ZOMATO.NS",
+    "HAL - Hindustan Aeronautics Ltd": "HAL.NS",
 }
 
 # Sidebar Controls
@@ -63,7 +96,7 @@ custom_ticker = st.sidebar.text_input(
     "Or Enter Yahoo Ticker (e.g., ^NSEI, TATAPOWER.NS)"
 )
 if custom_ticker:
-    ticker_symbol = custom_ticker.strip().upper()
+  ticker_symbol = custom_ticker.strip().upper()
 
 timeframe = st.sidebar.selectbox(
     "Select Timeframe / Interval", ["1m", "5m", "15m", "1h", "1d"], index=2
@@ -105,7 +138,7 @@ def compute_analytics(df):
   df["EMA_21"] = df["Close"].ewm(span=21, adjust=False).mean()
   df["EMA_50"] = df["Close"].ewm(span=50, adjust=False).mean()
 
-  # Volume Surge (2x of 20-period volume average)
+  # Volume Surge (1.5x of 20-period volume average)
   df["Vol_SMA20"] = df["Volume"].rolling(window=20).mean()
   df["Volume_Surge"] = df["Volume"] > (1.5 * df["Vol_SMA20"])
 
@@ -137,19 +170,39 @@ def compute_analytics(df):
       "Signal",
   ] = -1
 
-  # Fair Value Gap (FVG) Detection Logic
-  # Bullish FVG: Low of candle [i+1] > High of candle [i-1]
-  df["Bull_FVG"] = np.nan
-  df["Bear_FVG"] = np.nan
+  # Smart Money Concepts: Fair Value Gaps (FVG)
+  df["Bull_FVG_Low"] = np.nan
+  df["Bull_FVG_High"] = np.nan
+  df["Bear_FVG_Low"] = np.nan
+  df["Bear_FVG_High"] = np.nan
+
   for i in range(1, len(df) - 1):
+    # Bullish FVG: Low of candle i+1 > High of candle i-1
     if df["Low"].iloc[i + 1] > df["High"].iloc[i - 1]:
-      df.loc[df.index[i], "Bull_FVG"] = (
-          df["Low"].iloc[i + 1] + df["High"].iloc[i - 1]
-      ) / 2
+      df.iloc[i, df.columns.get_loc("Bull_FVG_Low")] = df["High"].iloc[i - 1]
+      df.iloc[i, df.columns.get_loc("Bull_FVG_High")] = df["Low"].iloc[i + 1]
+    # Bearish FVG: High of candle i+1 < Low of candle i-1
     elif df["High"].iloc[i + 1] < df["Low"].iloc[i - 1]:
-      df.loc[df.index[i], "Bear_FVG"] = (
-          df["High"].iloc[i + 1] + df["Low"].iloc[i - 1]
-      ) / 2
+      df.iloc[i, df.columns.get_loc("Bear_FVG_Low")] = df["High"].iloc[i + 1]
+      df.iloc[i, df.columns.get_loc("Bear_FVG_High")] = df["Low"].iloc[i - 1]
+
+  # SMC Accumulation / Distribution Phase Detection
+  df["Price_Range"] = df["High"] - df["Low"]
+  df["Avg_Range"] = df["Price_Range"].rolling(window=20).mean()
+  df["Phase"] = "Normal"
+  # Accumulation: Tight range contraction with high volume accumulation
+  df.loc[
+      (df["Price_Range"] < 0.7 * df["Avg_Range"])
+      & (df["Volume"] > df["Vol_SMA20"]),
+      "Phase",
+  ] = "Accumulation"
+  # Distribution: High volatility range expansion near highs with selling volume
+  df.loc[
+      (df["Price_Range"] > 1.4 * df["Avg_Range"])
+      & (df["Close"] < df["Open"])
+      & (df["Volume"] > df["Vol_SMA20"]),
+      "Phase",
+  ] = "Distribution"
 
   return df
 
@@ -175,7 +228,7 @@ col4.metric(
     "Volume Surge Events", int(df["Volume_Surge"].fillna(False).sum())
 )
 
-# --- ADVANCED PLOTLY CHART ---
+# --- ADVANCED PLOTLY CHART SETUP ---
 fig = make_subplots(
     rows=3,
     cols=1,
@@ -184,7 +237,7 @@ fig = make_subplots(
     row_heights=[0.6, 0.2, 0.2],
 )
 
-# 1. Candlestick & Overlays
+# 1. Candlestick Chart
 fig.add_trace(
     go.Candlestick(
         x=df.index,
@@ -192,12 +245,13 @@ fig.add_trace(
         high=df["High"],
         low=df["Low"],
         close=df["Close"],
-        name="Price",
+        name="Price Action",
     ),
     row=1,
     col=1,
 )
 
+# EMAs Overlays
 fig.add_trace(
     go.Scatter(
         x=df.index,
@@ -229,6 +283,34 @@ fig.add_trace(
     col=1,
 )
 
+# Plot Fair Value Gaps (FVG) as Rectangles / Zones
+recent_df = df.tail(100)  # Render recent FVGs for chart clarity
+for idx, row in recent_df.iterrows():
+  if not np.isnan(row["Bull_FVG_Low"]):
+    fig.add_shape(
+        type="rect",
+        x0=idx,
+        x1=df.index[-1],
+        y0=row["Bull_FVG_Low"],
+        y1=row["Bull_FVG_High"],
+        fillcolor="rgba(0, 230, 118, 0.15)",
+        line=dict(width=0),
+        row=1,
+        col=1,
+    )
+  if not np.isnan(row["Bear_FVG_Low"]):
+    fig.add_shape(
+        type="rect",
+        x0=idx,
+        x1=df.index[-1],
+        y0=row["Bear_FVG_Low"],
+        y1=row["Bear_FVG_High"],
+        fillcolor="rgba(255, 23, 68, 0.15)",
+        line=dict(width=0),
+        row=1,
+        col=1,
+    )
+
 # Buy / Sell Execution Markers
 buy_signals = df[df["Signal"] == 1]
 sell_signals = df[df["Signal"] == -1]
@@ -238,7 +320,7 @@ fig.add_trace(
         x=buy_signals.index,
         y=buy_signals["Low"] * 0.995,
         mode="markers",
-        marker=dict(symbol="triangle-up", size=12, color="#00E676"),
+        marker=dict(symbol="triangle-up", size=14, color="#00E676"),
         name="BUY Signal",
     ),
     row=1,
@@ -249,31 +331,33 @@ fig.add_trace(
         x=sell_signals.index,
         y=sell_signals["High"] * 1.005,
         mode="markers",
-        marker=dict(symbol="triangle-down", size=12, color="#FF1744"),
+        marker=dict(symbol="triangle-down", size=14, color="#FF1744"),
         name="SELL Signal",
     ),
     row=1,
     col=1,
 )
 
-# 2. Volume & Volume Surge Colors
-colors = [
-    "#00E676" if row["Close"] >= row["Open"] else "#FF1744"
-    for index, row in df.iterrows()
+# 2. Volume & Volume Surge Highlight
+vol_colors = [
+    "#FFD700"
+    if row["Volume_Surge"]
+    else ("#00E676" if row["Close"] >= row["Open"] else "#FF1744")
+    for _, row in df.iterrows()
 ]
 fig.add_trace(
     go.Bar(
         x=df.index,
         y=df["Volume"],
-        marker_color=colors,
-        name="Volume",
-        opacity=0.8,
+        marker_color=vol_colors,
+        name="Volume (Gold = Surge)",
+        opacity=0.85,
     ),
     row=2,
     col=1,
 )
 
-# 3. RSI Indicator
+# 3. RSI Indicator Subplot
 fig.add_trace(
     go.Scatter(
         x=df.index,
@@ -304,8 +388,8 @@ fig.update_layout(
 
 st.plotly_chart(fig, use_container_width=True)
 
-# Data Table view expansion
-if st.checkbox("🔍 Inspect Raw OHLCV Data & SMC Signals"):
+# Data Table & Phase Insights
+if st.checkbox("🔍 Inspect Raw OHLCV Data, SMC Phases & Signals"):
   st.dataframe(
       df[
           [
@@ -316,6 +400,7 @@ if st.checkbox("🔍 Inspect Raw OHLCV Data & SMC Signals"):
               "Volume",
               "RSI",
               "Volume_Surge",
+              "Phase",
               "Signal",
           ]
       ].tail(100),
