@@ -1,19 +1,19 @@
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import streamlit as st
 import yfinance as yf
 
 st.set_page_config(
-    page_title="ICT & Smart Money Trading Terminal",
-    page_icon="⚡",
+    page_title="Integrated Institutional Charting Terminal",
+    page_icon="📈",
     layout="wide",
 )
 
-st.title("⚡ Pro ICT & Smart Money Concepts (FVG, Volume Profile & Retracements)")
+st.title("📈 Pro Integrated Institutional Terminal (Color-Graded Candles & Embedded Volume)")
 st.markdown(
-    "Interactive institutional terminal featuring **Fixed Range Volume Profile**, **Fair Value Gaps (FVG)**, **SuperTrend**, and **Order Blocks**."
+    "All-in-one institutional view: Candlesticks are color-graded by volume strength, "
+    "with embedded volume footprint and Fair Value Gaps directly on the main price action."
 )
 
 # -------------------------------------------------------------------
@@ -33,18 +33,16 @@ timeframe = st.sidebar.selectbox(
 fetch_period = "60d" if timeframe in ["5m", "15m", "30m", "1h"] else "max"
 
 st.sidebar.markdown("---")
-st.sidebar.header("⚙️ ICT & Institutional Overlays")
-show_candlestick = st.sidebar.checkbox("Show Candlesticks (OHLC)", value=True)
+st.sidebar.header("⚙️ Visual Overlays")
 show_fvg = st.sidebar.checkbox("Show Fair Value Gaps (FVG)", value=True)
-show_volume_profile = st.sidebar.checkbox("Show Fixed Range Volume Profile", value=True)
 show_supertrend = st.sidebar.checkbox("Show SuperTrend Line", value=True)
 show_signals = st.sidebar.checkbox("Show Buy / Sell Signal Markers", value=True)
 
 # -------------------------------------------------------------------
-# 2. DATA FETCHER & ICT INDICATOR ENGINE
+# 2. DATA FETCHER & VOLUME COLOR-GRADING ENGINE
 # -------------------------------------------------------------------
 @st.cache_data(ttl=300)
-def fetch_and_calculate_ict(ticker, period, interval):
+def fetch_and_grade_data(ticker, period, interval):
     df = yf.download(
         ticker, period=period, interval=interval, progress=False, auto_adjust=True
     )
@@ -120,6 +118,27 @@ def fetch_and_calculate_ict(ticker, period, interval):
             df.loc[df.index[i], 'FVG_Top'] = df['Low'].iloc[i-2]
             df.loc[df.index[i], 'FVG_Bottom'] = df['High'].iloc[i]
 
+    # --- Volume Intensity & Color Grading ---
+    # Normalizing volume between 0 and 1 for color scaling (Weak to Strong)
+    vol_min = df['Volume'].min()
+    vol_max = df['Volume'].max()
+    df['Vol_Ratio'] = (df['Volume'] - vol_min) / (vol_max - vol_min if vol_max != vol_min else 1)
+
+    # Assign dynamic hex colors based on weakness (dim) to strength (bright)
+    candle_colors = []
+    for idx, row in df.iterrows():
+        ratio = row['Vol_Ratio']
+        if row['Close'] >= row['Open']:
+            # Bullish: Scale from soft mint (#69F0AE) to intense neon green (#00E676)
+            intensity = 0.3 + (0.7 * ratio)
+            candle_colors.append(f"rgba(0, 230, 118, {intensity})")
+        else:
+            # Bearish: Scale from soft pink (#FF8A80) to intense neon red (#FF1744)
+            intensity = 0.3 + (0.7 * ratio)
+            candle_colors.append(f"rgba(255, 23, 68, {intensity})")
+
+    df['Candle_Color'] = candle_colors
+
     # --- Actionable Signals ---
     df['Signal'] = "HOLD"
     for i in range(1, len(df)):
@@ -130,8 +149,8 @@ def fetch_and_calculate_ict(ticker, period, interval):
 
     return df
 
-with st.spinner(f"Computing ICT Fair Value Gaps and Volume Profile for `{symbol_str}`..."):
-    df = fetch_and_calculate_ict(symbol_str, fetch_period, timeframe)
+with st.spinner(f"Processing color-graded volume candles for `{symbol_str}`..."):
+    df = fetch_and_grade_data(symbol_str, fetch_period, timeframe)
 
 if df.empty or len(df) < 10:
     st.error(f"Could not retrieve enough data for `{symbol_str}` on interval `{timeframe}`.")
@@ -146,20 +165,40 @@ else:
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Last Traded Price", f"₹{latest['Close']:.2f}", f"{price_change:+.2f}%")
     c2.metric("Market Structure", "BULLISH (UP)" if latest['Trend'] == 1 else "BEARISH (DOWN)")
-    c3.metric("Active ATR", f"₹{latest['ATR']:.2f}")
-    c4.metric("ICT Bias", "🟢 Premium Accumulation" if latest['Trend'] == 1 else "🔴 Discount Distribution")
+    c3.metric("Current Volume", f"{int(latest['Volume']):,}")
+    c4.metric("Volume Strength", "🔥 High Conviction" if latest['Vol_Ratio'] > 0.6 else "⚖️ Normal Activity")
 
     # -------------------------------------------------------------------
-    # 4. CHART GENERATION (SAFE SUBPLOT LAYOUT)
+    # 4. UNIFIED SINGLE-PANE CHART (EMBEDDED VOLUME & COLOR-GRADED CANDLES)
     # -------------------------------------------------------------------
     fig = go.Figure()
 
-    # Candlestick Pane
-    if show_candlestick:
-        fig.add_trace(go.Candlestick(
-            x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-            name="OHLC Candles"
-        ))
+    # Embedded Volume Footprint Bars (Rendered softly in the background behind candles)
+    max_vol = df['Volume'].max()
+    price_span = df['High'].max() - df['Low'].min()
+    vol_height_scale = price_span * 0.25 # Occupies bottom 25% of visual chart space
+    scaled_vol_y = df['Low'].min() + (df['Volume'] / (max_vol if max_vol > 0 else 1)) * vol_height_scale
+
+    fig.add_trace(go.Bar(
+        x=df.index,
+        y=scaled_vol_y - df['Low'].min(),
+        base=df['Low'].min(),
+        name='Embedded Volume Footprint',
+        marker=dict(color=df['Candle_Color']),
+        hoverinfo='skip'
+    ))
+
+    # Color-Graded Candlesticks (Weak to Strong Momentum)
+    fig.add_trace(go.Candlestick(
+        x=df.index,
+        open=df['Open'],
+        high=df['High'],
+        low=df['Low'],
+        close=df['Close'],
+        name="Color-Graded Candles",
+        increasing=dict(line=dict(color="#00E676", width=1.5), fillcolor="rgba(0, 230, 118, 0.7)"),
+        decreasing=dict(line=dict(color="#FF1744", width=1.5), fillcolor="rgba(255, 23, 68, 0.7)")
+    ))
 
     # SuperTrend Line
     if show_supertrend:
@@ -184,45 +223,14 @@ else:
                 fig.add_shape(
                     type="rect",
                     x0=idx, y0=row['FVG_Bottom'], x1=df.index[-1], y1=row['FVG_Top'],
-                    fillcolor="rgba(0, 230, 118, 0.2)", line=dict(width=0),
+                    fillcolor="rgba(0, 230, 118, 0.15)", line=dict(width=0),
                     layer="below"
                 )
             elif row['FVG_Type'] == 'BEARISH_FVG':
                 fig.add_shape(
                     type="rect",
                     x0=idx, y0=row['FVG_Bottom'], x1=df.index[-1], y1=row['FVG_Top'],
-                    fillcolor="rgba(255, 23, 68, 0.2)", line=dict(width=0),
-                    layer="below"
-                )
-
-    # Volume Profile Nodes
-    if show_volume_profile and not df.empty:
-        price_min, price_max = df['Low'].min(), df['High'].max()
-        bins = 15
-        price_bins = np.linspace(price_min, price_max, bins)
-        volume_bins = np.zeros(bins - 1)
-        
-        for _, row in df.iterrows():
-            p = row['Close']
-            v = row['Volume']
-            for b in range(len(price_bins) - 1):
-                if price_bins[b] <= p < price_bins[b+1]:
-                    volume_bins[b] += v
-                    break
-
-        max_vol = volume_bins.max() if volume_bins.max() > 0 else 1
-        scaled_vol = (volume_bins / max_vol) * (df.index[-1] - df.index[0]) * 0.15 # Safe scaling
-
-        bin_centers = (price_bins[:-1] + price_bins[1:]) / 2
-        
-        # Add volume nodes as horizontal lines / bars
-        for center, vol in zip(bin_centers, volume_bins):
-            if vol > 0:
-                fig.add_shape(
-                    type="rect",
-                    x0=df.index[0], y0=center - (price_max-price_min)/(bins*2),
-                    x1=df.index[0] + pd.Timedelta(days=int(len(df)*0.08)), y1=center + (price_max-price_min)/(bins*2),
-                    fillcolor="rgba(41, 182, 246, 0.5)", line=dict(width=0),
+                    fillcolor="rgba(255, 23, 68, 0.15)", line=dict(width=0),
                     layer="below"
                 )
 
@@ -248,7 +256,7 @@ else:
 
     # TradingView Navigation Layout (Hand Pan + Scroll Zoom)
     fig.update_layout(
-        title=f"{symbol_str} Price Action, Fair Value Gaps (FVG) & Volume Profile",
+        title=f"{symbol_str} Unified View: Color-Graded Volume Candles & ICT FVG",
         template="plotly_dark",
         dragmode='pan',
         xaxis_rangeslider_visible=False,
@@ -267,12 +275,12 @@ else:
     st.plotly_chart(fig, use_container_width=True, config=chart_config)
 
     # -------------------------------------------------------------------
-    # 5. ICT STRATEGY EXPLANATION GUIDE
+    # 5. GUIDE
     # -------------------------------------------------------------------
     st.markdown("---")
-    st.markdown("### 🎓 ICT & Smart Money Concept Guide")
+    st.markdown("### 🎓 How to Read Your Unified Institutional Chart")
     st.markdown(
-        "- **Fair Value Gaps (FVG - Shaded Boxes):** Green and red rectangular zones highlight price imbalances where institutional order flow left unfilled liquidity.\n"
-        "- **Volume Profile Nodes:** Blue density bars on the left highlight high-volume transaction nodes.\n"
-        "- **Hand Icon Pan & Zoom:** Use your mouse wheel to zoom in/out and click + drag to move across the chart effortlessly."
+        "- **Color-Graded Volume Intensity (Weak to Strong):** Translucent or dim candle colors indicate low volume (weak momentum), while bright neon green/red candles indicate massive volume conviction and institutional participation.\n"
+        "- **Embedded Volume Footprint:** Volume bars are embedded right into the base of the price action, letting you see volume directly aligned with every time frame candle without looking at a bottom sub-pane.\n"
+        "- **Fair Value Gaps (FVG):** Shaded zones show institutional imbalance footprints."
     )
