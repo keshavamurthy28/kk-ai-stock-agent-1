@@ -169,7 +169,8 @@ elif app_mode == "⚡ Volume Surge Scanner & Intraday Setup":
                     return 'background-color: rgba(248, 81, 73, 0.2); color: #f85149;'
                 return ''
 
-            styled_df = res_df.style.applymap(color_coding, subset=['Action Setup'])
+            # Updated to .map() to match modern pandas versions
+            styled_df = res_df.style.map(color_coding, subset=['Action Setup'])
             st.dataframe(styled_df, use_container_width=True)
             
             st.info("💡 **Risk Rule Reminder:** Always place your broker Stop-Loss order right at the suggested price to protect your capital against sudden reversals.")
