@@ -119,4 +119,61 @@ elif app_mode == "⚡ Volume Surge Scanner & Intraday Setup":
                         action = "🔴 SELL (Short)"
                         stop_loss = round(day_high * 1.005, 2) # SL just above day's high
                         risk = stop_loss - latest_close
-                        mult = 2.0 if "2.0" in risk_reward_ratio else (1.5 if "1.
+                        mult = 2.0 if "2.0" in risk_reward_ratio else (1.5 if "1.5" in risk_reward_ratio else 3.0)
+                        target = round(latest_close - (risk * mult), 2)
+
+                    return {
+                        "Ticker": ticker,
+                        "Action Setup": action,
+                        "LTP (₹)": round(latest_close, 2),
+                        "Change (%)": round(price_change, 2),
+                        "Suggested Stop-Loss (₹)": stop_loss,
+                        "Suggested Target (₹)": target,
+                        "Surge Ratio (x)": round(latest_vol / avg_vol, 2),
+                    }
+        except Exception:
+            pass
+        return None
+
+    if st.button("🚀 Run Intraday Setup Scanner", type="primary"):
+        results = []
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        total = len(tickers)
+        completed = 0
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_tick = {executor.submit(analyze_intravay_setup_helper if 'analyze_intravay_setup_helper' else analyze_intraday_setup, t, volume_multiplier): t for t in tickers}
+            
+            for future in as_completed(future_to_tick):
+                completed += 1
+                progress_bar.progress(completed / total)
+                status_text.text(f"Scanning market... {completed}/{total}")
+                res = future.result()
+                if res:
+                    results.append(res)
+
+        progress_bar.empty()
+        status_text.empty()
+
+        if results:
+            res_df = pd.DataFrame(results)
+            res_df = res_df.sort_values(by="Surge Ratio (x)", ascending=False).reset_index(drop=True)
+            
+            st.success(f"🎯 Generated risk-managed setups for **{len(res_df)}** stocks!")
+            
+            # Styling function to highlight rows based on Buy/Sell
+            def color_coding(val):
+                if "BUY" in str(val):
+                    return 'background-color: rgba(46, 160, 67, 0.2); color: #3fb950;'
+                elif "SELL" in str(val):
+                    return 'background-color: rgba(248, 81, 73, 0.2); color: #f85149;'
+                return ''
+
+            styled_df = res_df.style.applymap(color_coding, subset=['Action Setup'])
+            st.dataframe(styled_df, use_container_width=True)
+            
+            st.info("💡 **How to avoid losses with this table:** Only click and buy stocks marked with **🟢 BUY (Long)** where the **Change (%)** is positive and the volume surge is high. **Always place your Stop-Loss order immediately** at the suggested Stop-Loss price so that if the stock reverses unexpectedly at 10:00 AM, your trade auto-closes with a tiny, controlled loss instead of a major hit.")
+        else:
+            st.warning("No stocks matched the exact intraday surge criteria right now.")
