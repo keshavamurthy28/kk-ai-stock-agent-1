@@ -16,6 +16,9 @@ try:
 except:
   pass
 
+# Clear cache to prevent old versions from persisting on Streamlit Cloud
+st.cache_data.clear()
+
 # Custom Styling for Speed & Readability
 st.markdown(
     """
@@ -27,39 +30,19 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("⚡ Institutional Terminal: SMC, FVG & Intraday Engine")
+st.title(
+    "⚡ Institutional Terminal: SMC, FVG, Volume Surge & Intraday Engine"
+)
 
 # Sidebar Controls
 st.sidebar.header("🛠️ Terminal Controls")
 
-# Popular Quick Picks
-popular_stocks = {
-    "Select or Search...": "RELIANCE.NS",
-    "HEG Ltd": "HEG.NS",
-    "Reliance Industries": "RELIANCE.NS",
-    "Tata Motors": "TATAMOTORS.NS",
-    "Tata Power": "TATAPOWER.NS",
-    "Suzlon Energy": "SUZLON.NS",
-    "Zomato": "ZOMATO.NS",
-    "State Bank of India": "SBIN.NS",
-    "Nifty 50 Index": "^NSEI",
-}
-
-quick_select = st.sidebar.selectbox(
-    "Popular Watchlist Quick Select", list(popular_stocks.keys())
-)
-
-# Free-text input that accepts ANY stock ticker instantly (e.g. HEG, IOC, ITC)
-default_val = (
-    popular_stocks[quick_select]
-    if quick_select != "Select or Search..."
-    else "HEG.NS"
-)
+# Universal Free-Text Stock Symbol Input (Type ANY stock: HEG, TATAPOWER, ZOMATO, etc.)
 ticker_input = st.sidebar.text_input(
-    "🔍 Enter Any Stock Symbol (e.g. HEG, TATAPOWER, ZOMATO)", value=default_val
+    "🔍 Type Any Stock Symbol (Press Enter)", value="HEG"
 )
 
-# Format ticker properly for Indian markets
+# Clean and format ticker for Yahoo Finance (NSE/BSE handling)
 ticker_symbol = ticker_input.strip().upper()
 if (
     not ticker_symbol.endswith(".NS")
@@ -83,7 +66,7 @@ period_map = {
 period = period_map.get(timeframe, "60d")
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=30)
 def load_data(symbol, period, interval):
   df = yf.download(symbol, period=period, interval=interval, progress=False)
   if isinstance(df.columns, pd.MultiIndex):
@@ -97,7 +80,7 @@ data = load_data(ticker_symbol, period, timeframe)
 if data.empty:
   st.error(
       f"No market data found for '{ticker_symbol}'. Please verify the symbol"
-      " (e.g., HEG.NS) or market hours."
+      " (e.g., HEG or HEG.NS) or market hours."
   )
   st.stop()
 
@@ -218,7 +201,7 @@ fig.add_trace(
     col=1,
 )
 
-# EMAs
+# EMAs Overlays
 fig.add_trace(
     go.Scatter(
         x=df.index,
