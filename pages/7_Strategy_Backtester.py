@@ -1,3 +1,4 @@
+import datetime
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -5,221 +6,195 @@ from plotly.subplots import make_subplots
 import streamlit as st
 import yfinance as yf
 
+# Page Configuration
 st.set_page_config(
-    page_title="NSE Strategy Backtester", page_icon="🧪", layout="wide"
+    page_title="NSE Strategy Backtester",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 st.title("🧪 NSE Historical Strategy & Orderflow Backtester")
 st.markdown(
-    "Backtest custom setups on any NSE equity across **Minute, Hourly, or Daily** timeframes for any date range you desire."
+    "Backtest custom setups on any NSE equity across *Minute, Hourly, or Daily*"
+    " timeframes for any date range you desire."
 )
 
-# -------------------------------------------------------------------
-# SIDEBAR CONTROLS FOR BACKTESTING
-# -------------------------------------------------------------------
+# --- SIDEBAR CONTROLS ---
 st.sidebar.header("⚙️ Backtest Parameters")
-
-stock_symbol = st.sidebar.text_input(
+ticker_input = st.sidebar.text_input(
     "Enter NSE Ticker Symbol", value="RELIANCE"
-).upper()
-ticker_string = (
-    f"{stock_symbol}.NS"
-    if not stock_symbol.endswith(".NS")
-    else stock_symbol
+)
+ticker_symbol = (
+    ticker_input.strip().upper()
+    if ticker_input.strip().upper().endswith(".NS")
+    else ticker_input.strip().upper() + ".NS"
 )
 
-timeframe_option = st.sidebar.selectbox(
-    "Select Timeframe", ["1m", "5m", "15m", "1h", "1d"]
+timeframe = st.sidebar.selectbox(
+    "Select Timeframe", ["1m", "5m", "15m", "1h", "1d"], index=4
 )
 
-if timeframe_option == "1m":
-    st.sidebar.warning(
-        "⚠️ 1-minute data via free APIs is restricted to the last 7 days max."
+today_date = datetime.date.today()
+default_start = today_date - datetime.timedelta(days=365)
+
+start_date = st.sidebar.date_input("Start Date", value=default_start)
+end_date = st.sidebar.date_input("End Date", value=today_date)
+
+st.sidebar.markdown("### Strategy Rules")
+ema_period = st.sidebar.slider("EMA Trend Filter", 10, 50, 20, 5)
+vol_threshold = st.sidebar.slider(
+    "Volume Surge Threshold", 1.0, 3.0, 1.5, 0.1
+)
+
+
+@st.cache_data(ttl=60)
+def load_backtest_data(symbol, start, end, interval):
+  df = yf.download(
+      symbol, start=start, end=end, interval=interval, progress=False
+  )
+  if isinstance(df.columns, pd.MultiIndex):
+    df.columns = df.columns.get_level_values(0)
+  df.dropna(inplace=True)
+  return df
+
+
+if st.sidebar.button("🚀 Run Backtest Simulation", type="primary"):
+  df = load_backtest_data(
+      ticker_symbol, str(start_date), str(end_date), timeframe
+  )
+
+  if df.empty or len(df) < ema_period:
+    st.error(
+        "Insufficient data found for the selected ticker and date range."
+        " Please adjust your filters."
     )
-    default_days = 5
-elif timeframe_option in ["5m", "15m", "1h"]:
-    st.sidebar.warning(
-        "⚠️ Intraday data (5m/15m/1h) is restricted to the last 60 days max."
+  else:
+    # Strategy calculations
+    df["EMA"] = df["Close"].ewm(span=ema_period, adjust=False).mean()
+    df["Vol_SMA"] = df["Volume"].rolling(window=20).mean()
+    df["Vol_Surge"] = df["Volume"] > (vol_threshold * df["Vol_SMA"])
+
+    # Simulate Signals & Returns
+    df["Signal"] = 0
+    df.loc[(df["Close"] > df["EMA"]) & (df["Vol_Surge"]), "Signal"] = 1
+    df.loc[(df["Close"] < df["EMA"]) & (df["Vol_Surge"]), "Signal"] = -1
+
+    df["Market_Return"] = df["Close"].pct_change().fillna(0)
+    df["Strategy_Return"] = df["Market_Return"] * df["Signal"].shift(1).fillna(0)
+
+    df["Cumulative_Strategy"] = (1 + df["Strategy_Return"]).cumprod() - 1
+    df["Cumulative_Benchmark"] = (1 + df["Market_Return"]).cumprod() - 1
+
+    df["Delta_Return"] = (
+        df["Cumulative_Strategy"] - df["Cumulative_Benchmark"]
     )
-    default_days = 30
-else:
-    default_days = 365
+    df["Orderflow_Delta"] = (df["Close"] - df["Open"]) * df["Volume"]
 
-col_d1, col_d2 = st.sidebar.columns(2)
-end_date = pd.Timestamp.today().date()
-start_date = end_date - pd.Timedelta(days=default_days)
+    total_strat_ret = float(df["Cumulative_Strategy"].iloc[-1] * 100)
+    total_bench_ret = float(df["Cumulative_Benchmark"].iloc[-1] * 100)
+    total_signals = int((df["Signal"] != 0).sum())
 
-user_start_date = st.sidebar.date_input("Start Date", value=start_date)
-user_end_date = st.sidebar.date_input("End Date", value=end_date)
+    st.success("Backtest Completed Successfully!")
 
-st.sidebar.subheader("Strategy Rules")
-ema_period = st.sidebar.slider("EMA Trend Filter", 10, 50, 20)
-vol_multiplier = st.sidebar.slider("Volume Surge Threshold", 1.0, 3.0, 1.5, 0.1)
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Strategy Return", f"{total_strat_ret:+.2f}%")
+    col2.metric("Benchmark Buy & Hold Return", f"{total_bench_ret:+.2f}%")
+    col3.metric("Total Signals Generated", f"{total_signals}")
 
-run_backtest = st.sidebar.button("🚀 Run Backtest Simulation")
+    # --- INTERACTIVE 2-TIER SUBPLOT CHART ---
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.05,
+        row_heights=[0.7, 0.3],
+    )
 
-# -------------------------------------------------------------------
-# BACKTEST EXECUTION ENGINE
-# -------------------------------------------------------------------
+    # 1. Cumulative Performance (Row 1)
+    fig.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=df["Cumulative_Strategy"] * 100,
+            line=dict(color="#00E676", width=2),
+            name="Strategy Return (%)",
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=df["Cumulative_Benchmark"] * 100,
+            line=dict(color="#FF5252", width=1.5, dash="dash"),
+            name="Benchmark (Buy & Hold)",
+        ),
+        row=1,
+        col=1,
+    )
 
+    # 2. Orderflow Delta & Volume Breakdown (Row 2)
+    bar_colors = [
+        "#00E676" if val >= 0 else "#FF1744" for val in df["Orderflow_Delta"]
+    ]
+    fig.add_trace(
+        go.Bar(
+            x=df.index,
+            y=df["Volume"],
+            marker_color=bar_colors,
+            name="Orderflow Delta & Volume Breakdown",
+        ),
+        row=2,
+        col=1,
+    )
 
-@st.cache_data(ttl=600)
-def fetch_backtest_data(ticker, interval, start, end):
-    try:
-        df = yf.download(
-            ticker,
-            start=start,
-            end=end + pd.Timedelta(days=1),
-            interval=interval,
-            progress=False,
-        )
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        return df
-    except Exception as e:
-        return pd.DataFrame()
+    # TradingView-Like Global Layout
+    fig.update_layout(
+        template="plotly_dark",
+        height=650,
+        xaxis_rangeslider_visible=False,
+        dragmode="zoom",
+        hovermode="x unified",
+        margin=dict(l=10, r=10, t=30, b=10),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+        ),
+    )
 
+    # Crosshair configuration
+    fig.update_xaxes(
+        showspikes=True,
+        spikemode="across",
+        spikesnap="cursor",
+        spikecolor="#888888",
+        spikethickness=1,
+    )
+    fig.update_yaxes(
+        side="right",
+        showspikes=True,
+        spikecolor="#888888",
+        spikethickness=1,
+    )
 
-if run_backtest:
-    with st.spinner(f"Running historical simulation for {ticker_string}..."):
-        df_data = fetch_backtest_data(
-            ticker_string, timeframe_option, user_start_date, user_end_date
-        )
+    # Display fully interactive chart
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={
+            "scrollZoom": True,
+            "displayModeBar": True,
+            "modeBarButtonsToAdd": ["drawline", "drawrect", "eraseshape"],
+        },
+    )
 
-        if df_data.empty or len(df_data) < 20:
-            st.error(
-                f"No data returned for {ticker_string} on interval '{timeframe_option}'. "
-                "Please shorten your date range or choose a larger timeframe (like 1d)."
-            )
-        else:
-            df_data = df_data.dropna()
-
-            df_data["EMA"] = (
-                df_data["Close"].ewm(span=ema_period, adjust=False).mean()
-            )
-            df_data["Avg_Vol"] = (
-                df_data["Volume"].rolling(window=20).mean().fillna(1)
-            )
-            df_data["Vol_Surge"] = df_data["Volume"] / df_data["Avg_Vol"]
-
-            hl_range = (df_data["High"] - df_data["Low"]).replace(0, 0.01)
-            clv = (
-                2 * df_data["Close"] - df_data["High"] - df_data["Low"]
-            ) / hl_range
-            df_data["Delta"] = df_data["Volume"] * clv
-
-            df_data["Signal"] = 0
-            buy_condition = (
-                (df_data["Close"] > df_data["EMA"])
-                & (df_data["Vol_Surge"] >= vol_multiplier)
-                & (df_data["Delta"] > 0)
-            )
-            df_data.loc[buy_condition, "Signal"] = 1
-
-            df_data["Market_Return"] = df_data["Close"].pct_change()
-            df_data["Strategy_Return"] = (
-                df_data["Signal"].shift(1) * df_data["Market_Return"]
-            )
-
-            cumulative_market = (
-                (1 + df_data["Market_Return"].fillna(0)).cumprod() - 1
-            ) * 100
-            cumulative_strategy = (
-                (1 + df_data["Strategy_Return"].fillna(0)).cumprod() - 1
-            ) * 100
-
-            st.success("Backtest Completed Successfully!")
-
-            m1, m2, m3 = st.columns(3)
-            m1.metric(
-                "Total Strategy Return",
-                f"{cumulative_strategy.iloc[-1]:.2f}%",
-            )
-            m2.metric(
-                "Benchmark Buy & Hold Return",
-                f"{cumulative_market.iloc[-1]:.2f}%",
-            )
-            total_trades = int(df_data["Signal"].sum())
-            m3.metric("Total Signals Generated", f"{total_trades}")
-
-            # -------------------------------------------------------------------
-            # UNIFIED MASTER CHART (Performance Top Pane + Delta Bottom Pane)
-            # -------------------------------------------------------------------
-            st.subheader("📈 Unified Backtest Performance & Orderflow Master Chart")
-
-            fig = make_subplots(
-                rows=2,
-                cols=1,
-                shared_xaxes=True,
-                vertical_spacing=0.08,
-                row_heights=[0.65, 0.35],
-                subplot_titles=(
-                    "Cumulative Strategy vs Benchmark Return (%)",
-                    "Orderflow Delta & Volume Breakdown",
-                ),
-            )
-
-            # Row 1: Strategy & Benchmark Returns
-            fig.add_trace(
-                go.Scatter(
-                    x=df_data.index,
-                    y=cumulative_strategy,
-                    name="Strategy Return",
-                    line=dict(color="#26a69a", width=2),
-                ),
-                row=1,
-                col=1,
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=df_data.index,
-                    y=cumulative_market,
-                    name="Benchmark (Buy & Hold)",
-                    line=dict(color="gray", width=1.5, dash="dash"),
-                ),
-                row=1,
-                col=1,
-            )
-
-            # Row 2: Delta Volume Bars
-            bar_colors = [
-                "#26a69a" if val >= 0 else "#ef5350"
-                for val in df_data["Delta"]
-            ]
-            fig.add_trace(
-                go.Bar(
-                    x=df_data.index,
-                    y=df_data["Delta"],
-                    name="Period Delta (Buy - Sell)",
-                    marker_color=bar_colors,
-                ),
-                row=2,
-                col=1,
-            )
-
-            fig.update_layout(
-                height=550,
-                margin=dict(l=10, r=10, t=30, b=10),
-                template="plotly_white",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
-            )
-            fig.update_yaxes(title_text="Return (%)", row=1, col=1)
-            fig.update_yaxes(title_text="Delta Volume", row=2, col=1)
-
-            st.plotly_chart(fig, use_container_width=True)
-
-            # Signal Logs Table
-            st.subheader("📋 Signal Execution Logs")
-            trades_df = df_data[df_data["Signal"] == 1][
-                ["Close", "Volume", "Vol_Surge", "Delta", "EMA"]
-            ]
-            if not trades_df.empty:
-                st.dataframe(trades_df, use_container_width=True)
-            else:
-                st.info(
-                    "No trade signals met the exact criteria during this date range. Try relaxing the filters."
-                )
+    # --- SIGNAL EXECUTION LOGS ---
+    st.subheader("📋 Signal Execution Logs")
+    exec_logs = df[df["Signal"] != 0][
+        ["Close", "Volume", "Vol_Surge", "Orderflow_Delta", "EMA"]
+    ].tail(50)
+    st.dataframe(exec_logs, use_container_width=True)
 else:
     st.info(
-        "👈 Configure your stock symbol, date range, and timeframe in the sidebar, then click **Run Backtest Simulation**."
+        "👈 Configure your parameters in the sidebar and click **Run Backtest"
+        " Simulation** to load the interactive backtest."
     )
