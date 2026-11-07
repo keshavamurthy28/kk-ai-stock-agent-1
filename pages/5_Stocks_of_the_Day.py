@@ -204,7 +204,6 @@ if not df.empty and len(df) >= 15:
 
   st.markdown("---")
 
-  # --- MULTI-PANE SUBPLOTS ---
   fig = make_subplots(
       rows=2,
       cols=1,
@@ -212,7 +211,6 @@ if not df.empty and len(df) >= 15:
       vertical_spacing=0.03,
       row_heights=[0.8, 0.2],
   )
-
   fig.add_trace(
       go.Candlestick(
           x=df.index,
@@ -224,50 +222,3 @@ if not df.empty and len(df) >= 15:
           increasing=dict(line=dict(color="#00E676", width=1.2)),
           decreasing=dict(line=dict(color="#FF1744", width=1.2)),
       ),
-      row=1,
-      col=1,
-  )
-
-  if show_vwap:
-    fig.add_trace(
-        go.Scatter(
-            x=df.index,
-            y=df["VWAP"],
-            mode="lines",
-            name="Institutional VWAP",
-            line=dict(color="#2962FF", width=1.8),
-        ),
-        row=1,
-        col=1,
-    )
-
-  if show_fvg:
-    for idx, row in df.tail(100).iterrows():
-      if row["FVG_Type"] == "BULLISH_FVG":
-        fig.add_shape(
-            type="rect",
-            x0=idx,
-            y0=row["FVG_Bottom"],
-            x1=df.index[-1],
-            y1=row["FVG_Top"],
-            fillcolor="rgba(0, 230, 118, 0.12)",
-            line=dict(width=0),
-            row=1,
-            col=1,
-        )
-      elif row["FVG_Type"] == "BEARISH_FVG":
-        fig.add_shape(
-            type="rect",
-            x0=idx,
-            y0=row["FVG_Bottom"],
-            x1=df.index[-1],
-            y1=row["FVG_Top"],
-            fillcolor="rgba(255, 23, 68, 0.12)",
-            line=dict(width=0),
-            row=1,
-            col=1,
-        )
-
-  if show_ob:
-    for idx, row in df[df["OB_Type"] != "NONE"].tail(30).iterrows():
-      color = "#00E676" if row["
