@@ -140,16 +140,46 @@ else:
     prev = df.iloc[-2]
     price_change = ((float(latest['Close']) - float(prev['Close'])) / float(prev['Close'])) * 100
 
+    # --- CALCULATE TRADING SETUP & LEVELS ---
+    filtered_signals = df[df['Signal'] != 'HOLD']
+    last_signal_row = filtered_signals.iloc[-1] if not filtered_signals.empty else latest
+    action_type = last_signal_row['Signal']
+    stop_loss_val = last_signal_row.get('Stop_Loss', float(latest['Close']) * 0.98)
+    target_val = last_signal_row.get('Target', float(latest['Close']) * 1.04)
+
+    # Dynamic Support & Resistance based on recent 20 periods
+    support_level = round(float(df['Low'].tail(20).min()), 2)
+    resistance_level = round(float(df['High'].tail(20).max()), 2)
+
+    # Active FVG Range Extraction
+    valid_fvg = df[df['FVG_Type'] != 'NONE']
+    if not valid_fvg.empty:
+        last_fvg = valid_fvg.iloc[-1]
+        fvg_range_str = f"₹{last_fvg['FVG_Bottom']:.2f} - ₹{last_fvg['FVG_Top']:.2f}"
+    else:
+        fvg_range_str = "None Active"
+
     # -------------------------------------------------------------------
-    # 3. EXECUTIVE METRICS BAR
+    # 3. TOP EXECUTIVE METRICS & TRADING SETUP BAR
     # -------------------------------------------------------------------
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Last Traded Price", f"₹{float(latest['Close']):.2f}", f"{price_change:+.2f}%")
+    st.markdown("### 📊 Live Executive Pricing & Institutional Setup")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Last Traded Price", f"₹{float(latest['Close']):.2f}", f"{price_change:+.2f}%")
+    col2.metric("Action Setup", action_type)
+    col3.metric("Stop-Loss Anchor", f"₹{float(stop_loss_val):.2f}")
+    col4.metric("Profit Objective", f"₹{float(target_val):.2f}")
+    col5.metric("ATR Volatility", f"₹{float(latest['ATR']):.2f}")
+
+    # Secondary Support, Resistance & FVG Strip
+    sup_col1, sup_col2, sup_col3, sup_col4 = st.columns(4)
+    sup_col1.metric("Support Level", f"₹{support_level:,.2f}")
+    sup_col2.metric("Resistance Level", f"₹{resistance_level:,.2f}")
+    sup_col3.metric("Active FVG Range", fvg_range_str)
     
-    bias_text = "🟢 BULLISH INSTITUTIONAL ACCUMULATION" if float(latest['Close']) > float(latest['EMA_50']) else "🔴 BEARISH DISTRIBUTION / MARKDOWN"
-    c2.metric("Market Bias & Flow", bias_text)
-    c3.metric("ATR Volatility", f"₹{float(latest['ATR']):.2f}")
-    c4.metric("Smart Money Phase", "Markup / Expansion" if float(latest['Close']) > float(latest['EMA_50']) else "Markdown / Trap")
+    bias_text = "🟢 BULLISH ACCUMULATION" if float(latest['Close']) > float(latest['EMA_50']) else "🔴 BEARISH DISTRIBUTION"
+    sup_col4.metric("Market Bias Flow", bias_text)
+
+    st.markdown("---")
 
     # -------------------------------------------------------------------
     # 4. MULTI-PANE INSTITUTIONAL PLOTLY CHART
@@ -159,114 +189,4 @@ else:
         vertical_spacing=0.03, row_heights=[0.8, 0.2]
     )
 
-    fig.add_trace(go.Candlestick(
-        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-        name="Institutional OHLC",
-        increasing=dict(line=dict(color="#00E676", width=1.2), fillcolor="#00E676"),
-        decreasing=dict(line=dict(color="#FF1744", width=1.2), fillcolor="#FF1744")
-    ), row=1, col=1)
-
-    if show_vwap:
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df['VWAP'], mode='lines', name='Institutional VWAP',
-            line=dict(color='#2962FF', width=1.8)
-        ), row=1, col=1)
-
-    if show_fvg:
-        for idx, row in df.tail(100).iterrows():
-            if row['FVG_Type'] == 'BULLISH_FVG':
-                fig.add_shape(type="rect", x0=idx, y0=row['FVG_Bottom'], x1=df.index[-1], y1=row['FVG_Top'],
-                              fillcolor="rgba(0, 230, 118, 0.12)", line=dict(width=0), layer="below", row=1, col=1)
-            elif row['FVG_Type'] == 'BEARISH_FVG':
-                fig.add_shape(type="rect", x0=idx, y0=row['FVG_Bottom'], x1=df.index[-1], y1=row['FVG_Top'],
-                              fillcolor="rgba(255, 23, 68, 0.12)", line=dict(width=0), layer="below", row=1, col=1)
-
-    if show_ob:
-        obs = df[df['OB_Type'] != 'NONE'].tail(30)
-        for idx, row in obs.iterrows():
-            color = "#00E676" if row['OB_Type'] == 'BULLISH_OB' else "#FF1744"
-            fig.add_shape(type="line", x0=idx, y0=row['OB_Level'], x1=df.index[-1], y1=row['OB_Level'],
-                          line=dict(color=color, width=1.5, dash="dash"), row=1, col=1)
-
-    if show_liquidity:
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df['Swing_High'], mode='markers', name='Sell-Side Liquidity',
-            marker=dict(symbol='circle-open', size=8, color='#FFD700')
-        ), row=1, col=1)
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df['Swing_Low'], mode='markers', name='Buy-Side Liquidity',
-            marker=dict(symbol='circle-open', size=8, color='#00FFFF')
-        ), row=1, col=1)
-
-    if show_signals:
-        buy_pts = df[df['Signal'] == 'BUY']
-        sell_pts = df[df['Signal'] == 'SELL']
-
-        if not buy_pts.empty:
-            fig.add_trace(go.Scatter(
-                x=buy_pts.index, y=buy_pts['Low'] * 0.992, mode='text+markers',
-                text=['BOS BUY'] * len(buy_pts), textposition='bottom center',
-                textfont=dict(color='#00E676', size=10, family='Arial Black'),
-                marker=dict(symbol='triangle-up', size=14, color='#00E676'), name='Institutional Buy'
-            ), row=1, col=1)
-
-        if not sell_pts.empty:
-            fig.add_trace(go.Scatter(
-                x=sell_pts.index, y=sell_pts['High'] * 1.008, mode='text+markers',
-                text=['BOS SELL'] * len(sell_pts), textposition='top center',
-                textfont=dict(color='#FF1744', size=10, family='Arial Black'),
-                marker=dict(symbol='triangle-down', size=14, color='#FF1744'), name='Institutional Sell'
-            ), row=1, col=1)
-
-    vol_colors = ["#00E676" if row['Close'] >= row['Open'] else "#FF1744" for _, row in df.iterrows()]
-    fig.add_trace(go.Bar(
-        x=df.index, y=df['Volume'], marker_color=vol_colors, name="Session Volume"
-    ), row=2, col=1)
-
-    fig.update_layout(
-        title=f"{symbol_str} Institutional Order Flow & Liquidity Suite",
-        template="plotly_dark",
-        dragmode='pan',
-        xaxis_rangeslider_visible=False,
-        height=820,
-        margin=dict(l=20, r=20, t=40, b=20),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
-
-    chart_config = {
-        'scrollZoom': True,
-        'displayModeBar': True,
-        'modeBarButtonsToRemove': ['lasso2d', 'select2d'],
-        'responsive': True
-    }
-
-    st.plotly_chart(fig, use_container_width=True, config=chart_config)
-
-    # -------------------------------------------------------------------
-    # 5. PROFESSIONAL RISK-MANAGEMENT MATRIX
-    # -------------------------------------------------------------------
-    st.markdown("---")
-    st.subheader("🎯 Institutional Risk & Position Sizing Matrix")
-    
-    filtered_signals = df[df['Signal'] != 'HOLD']
-    last_signal_row = filtered_signals.iloc[-1] if not filtered_signals.empty else latest
-    action_type = last_signal_row['Signal']
-    stop_loss_val = last_signal_row.get('Stop_Loss', float(latest['Close']) * 0.98)
-    target_val = last_signal_row.get('Target', float(latest['Close']) * 1.04)
-
-    col_a, col_b, col_c, col_d = st.columns(4)
-    col_a.metric("Dominant Setup", action_type)
-    col_b.metric("Stop-Loss Anchor (₹)", f"₹{float(stop_loss_val):.2f}")
-    col_c.metric("Profit Objective (₹)", f"₹{float(target_val):.2f}")
-    
-    risk_per_share = abs(float(latest['Close']) - float(stop_loss_val))
-    reward_per_share = abs(float(target_val) - float(latest['Close']))
-    rr_ratio = reward_per_share / risk_per_share if risk_per_share > 0 else 0.0
-    col_d.metric("Risk-Reward Ratio", f"1 : {rr_ratio:.2f}")
-
-    st.markdown(
-        "### 🧠 Expert Strategist Notes:\n"
-        f"- **Institutional VWAP Interaction:** Price is currently trading {'above' if float(latest['Close']) > float(latest['VWAP']) else 'below'} the institutional VWAP benchmark.\n"
-        "- **Liquidity Pools (Yellow/Cyan Circles):** Stop-hunt targets where algorithmic trading desks absorb retail liquidity.\n"
-        "- **Fair Value Gaps (Colored Blocks):** Imbalance zones where unmitigated institutional orders reside."
-    )
+    fig.add
