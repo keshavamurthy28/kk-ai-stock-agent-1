@@ -8,21 +8,30 @@ import yfinance as yf
 st.set_page_config(
     page_title="Advanced Intraday NSE Engine", page_icon="📈", layout="wide"
 )
+
+# --- ROBUST CSS TO ELIMINATE WHITE LINES & FIX TEXT CONTRAST ---
 st.markdown(
     """
     <style>
-    /* Force high-contrast text inside Streamlit dataframe and table cells */
+    /* Force consistent background and high-contrast text on all dataframe rows/cells */
     .stDataFrame td, .stTable td, .stDataFrame th, .stTable th {
         color: #E2E8F0 !important;
+        background-color: #0E1117 !important;
     }
-    /* Ensure highlighted rows maintain high contrast */
-    .stDataFrame tr {
-        color: #E2E8F0 !important;
+    /* Eliminate default white separator lines/striping in tables */
+    .stDataFrame tr, .stTable tr {
+        background-color: #0E1117 !important;
+        border-bottom: 1px solid #262730 !important;
+    }
+    /* Style container overrides for clean dark mode alignment */
+    div[data-testid="stDataFrame"] {
+        background-color: #0E1117;
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
 st.title(
     "📈 High-Performance Intraday NSE Scanner & Execution Engine (Optimized)"
 )
@@ -105,12 +114,30 @@ extended_list = nifty_50_core + [
     "BANKBARODA",
 ]
 
+nifty_500_bulk = extended_list + [
+    "RECLTD",
+    "PFC",
+    "CANBK",
+    "TVSMOTOR",
+    "CHOLAFIN",
+    "SBICARD",
+    "SRF",
+    "NAUKRI",
+    "PIDILITE",
+    "HAVELLS",
+    "ABB",
+    "GODREJCP",
+    "TORNTPHARM",
+    "ICICIGI",
+    "CHOLAFIN",
+]
+
 if scan_scope == "Top Liquid Nifty 50 (Instant)":
   symbols = nifty_50_core
 elif scan_scope == "Extended Liquid Watchlist":
   symbols = extended_list
 else:
-  symbols = extended_list + ["RECLTD", "PFC", "CANBK", "TVSMOTOR", "CHOLAFIN"]
+  symbols = nifty_500_bulk
 
 st.sidebar.info(
     f"🚀 Pipeline loaded with **{len(symbols)}** high-liquidity stocks."
@@ -118,7 +145,7 @@ st.sidebar.info(
 
 
 # --- ULTRA-FAST VECTORIZED BATCH FETCH ENGINE ---
-@st.cache_data(ttl=900)  # Caches data for 15 minutes to eliminate lag
+@st.cache_data(ttl=900)
 def fetch_bulk_market_data(symbol_list):
   formatted_tickers = [
       f"{s}.NS" if not s.endswith(".NS") else s for s in symbol_list
@@ -126,9 +153,14 @@ def fetch_bulk_market_data(symbol_list):
   results = []
 
   try:
-    # Vectorized bulk download downloads all symbols in a single multi-threaded query
+    # 1mo period ensures 14-period technical indicators compute cleanly without returning None
     raw_data = yf.download(
-        formatted_tickers, period="5d", interval="1d", group_by="ticker", threads=True, progress=False
+        formatted_tickers,
+        period="1mo",
+        interval="1d",
+        group_by="ticker",
+        threads=True,
+        progress=False,
     )
 
     for sym in symbol_list:
@@ -139,12 +171,11 @@ def fetch_bulk_market_data(symbol_list):
         else:
           df_sym = raw_data[t_key]
 
-        if df_sym.empty or len(df_sym) < 4:
+        if df_sym.empty or len(df_sym) < 15:
           continue
 
-        # Drop rows with NaN values in close
         df_sym = df_sym.dropna(subset=["Close"])
-        if len(df_sym) < 3:
+        if len(df_sym) < 15:
           continue
 
         ltp = float(round(df_sym["Close"].iloc[-1], 2))
@@ -153,7 +184,7 @@ def fetch_bulk_market_data(symbol_list):
             round(((ltp - prev_close) / prev_close) * 100, 2)
         )
 
-        # Technical Indicators calculation
+        # Technical Indicators calculation (14-period RSI)
         close_prices = df_sym["Close"]
         delta = close_prices.diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean().iloc[-1]
@@ -161,9 +192,9 @@ def fetch_bulk_market_data(symbol_list):
             (-delta.where(delta < 0, 0)).rolling(window=14).mean().iloc[-1]
         )
 
-        if loss == 0:
-          rsi = 100.0
-        elif gain == 0:
+        if pd.isna(loss) or loss == 0:
+          rsi = 100.0 if (gain > 0) else 50.0
+        elif pd.isna(gain) or gain == 0:
           rsi = 0.0
         else:
           rs = gain / loss
@@ -171,11 +202,11 @@ def fetch_bulk_market_data(symbol_list):
 
         # Volume Multiplier
         vol_series = df_sym["Volume"]
-        vol_ma = float(vol_series.rolling(3).mean().iloc[-1])
+        vol_ma = float(vol_series.rolling(5).mean().iloc[-1])
         latest_vol = float(vol_series.iloc[-1])
         vol_x = (
             float(round(latest_vol / vol_ma, 2))
-            if vol_ma > 0
+            if (vol_ma > 0 and not pd.isna(vol_ma))
             else 1.0
         )
 
@@ -195,10 +226,8 @@ def fetch_bulk_market_data(symbol_list):
         signal = "BUY" if score >= 3 else "WAIT"
 
         # Risk Management (ATR calculation)
-        tr = (
-            df_sym["High"] - df_sym["Low"]
-        ).abs()  # Simplified true range proxy
-        atr = float(round(tr.rolling(3).mean().iloc[-1], 2))
+        tr = (df_sym["High"] - df_sym["Low"]).abs()
+        atr = float(round(tr.rolling(14).mean().iloc[-1], 2))
         if pd.isna(atr) or atr <= 0:
           atr = float(round(ltp * 0.012, 2))
 
@@ -288,7 +317,7 @@ with tab_scan:
 
   def highlight_spikes(row):
     if row["Vol x"] >= 2.0:
-      return ["background-color: rgba(0, 255, 120, 0.18)]"] * len(row)
+      return ["background-color: rgba(16, 185, 129, 0.2)"] * len(row)
     return [""] * len(row)
 
   if not filtered_df.empty:
