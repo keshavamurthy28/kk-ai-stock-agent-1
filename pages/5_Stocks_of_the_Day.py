@@ -119,29 +119,4 @@ def fetch_and_calculate_institutional_smc(ticker, period, interval):
         if df['Structure'].iloc[i] == "BULLISH_BOS" and df['Structure'].iloc[i-1] != "BULLISH_BOS":
             df.loc[df.index[i], 'Signal'] = "BUY"
             df.loc[df.index[i], 'Stop_Loss'] = df['Low'].iloc[i] - (1.5 * df['ATR'].iloc[i])
-            df.loc[df.index[i], 'Target'] = df['Close'].iloc[i] + (3.0 * df['ATR'].iloc[i])
-        elif df['Structure'].iloc[i] == "BEARISH_BOS" and df['Structure'].iloc[i-1] != "BEARISH_BOS":
-            df.loc[df.index[i], 'Signal'] = "SELL"
-            df.loc[df.index[i], 'Stop_Loss'] = df['High'].iloc[i] + (1.5 * df['ATR'].iloc[i])
-            df.loc[df.index[i], 'Target'] = df['Close'].iloc[i] - (3.0 * df['ATR'].iloc[i])
-
-    return df
-
-with st.spinner(f"Running Institutional Order Flow & SMC Analysis for `{symbol_str}`..."):
-    df = fetch_and_calculate_institutional_smc(symbol_str, fetch_period, timeframe)
-
-if df.empty or len(df) < 20:
-    st.error(f"Insufficient historical data retrieved for `{symbol_str}` on interval `{timeframe}`.")
-else:
-    latest = df.iloc[-1]
-    prev = df.iloc[-2]
-    price_change = ((latest['Close'] - prev['Close']) / prev['Close']) * 100
-
-    # -------------------------------------------------------------------
-    # 3. EXECUTIVE METRICS BAR
-    # -------------------------------------------------------------------
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Last Traded Price", f"₹{latest['Close']:.2f}", f"{price_change:+.2f}%")
-    
-    bias_text = "🟢 BULLISH INSTITUTIONAL ACCUMULATION" if latest['Close'] > latest['EMA_50'] else "🔴 BEARISH DISTRIBUTION / MARKDOWN"
-    c2.metric("Market Bias & Flow", bias
+            df.
