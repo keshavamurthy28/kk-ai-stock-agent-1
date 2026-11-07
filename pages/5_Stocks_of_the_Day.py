@@ -189,4 +189,39 @@ else:
         vertical_spacing=0.03, row_heights=[0.8, 0.2]
     )
 
-    fig.add
+    fig.add_trace(go.Candlestick(
+        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+        name="Institutional OHLC",
+        increasing=dict(line=dict(color="#00E676", width=1.2), fillcolor="#00E676"),
+        decreasing=dict(line=dict(color="#FF1744", width=1.2), fillcolor="#FF1744")
+    ), row=1, col=1)
+
+    if show_vwap:
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df['VWAP'], mode='lines', name='Institutional VWAP',
+            line=dict(color='#2962FF', width=1.8)
+        ), row=1, col=1)
+
+    if show_fvg:
+        for idx, row in df.tail(100).iterrows():
+            if row['FVG_Type'] == 'BULLISH_FVG':
+                fig.add_shape(type="rect", x0=idx, y0=row['FVG_Bottom'], x1=df.index[-1], y1=row['FVG_Top'],
+                              fillcolor="rgba(0, 230, 118, 0.12)", line=dict(width=0), layer="below", row=1, col=1)
+            elif row['FVG_Type'] == 'BEARISH_FVG':
+                fig.add_shape(type="rect", x0=idx, y0=row['FVG_Bottom'], x1=df.index[-1], y1=row['FVG_Top'],
+                              fillcolor="rgba(255, 23, 68, 0.12)", line=dict(width=0), layer="below", row=1, col=1)
+
+    if show_ob:
+        obs = df[df['OB_Type'] != 'NONE'].tail(30)
+        for idx, row in obs.iterrows():
+            color = "#00E676" if row['OB_Type'] == 'BULLISH_OB' else "#FF1744"
+            fig.add_shape(type="line", x0=idx, y0=row['OB_Level'], x1=df.index[-1], y1=row['OB_Level'],
+                          line=dict(color=color, width=1.5, dash="dash"), row=1, col=1)
+
+    if show_liquidity:
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df['Swing_High'], mode='markers', name='Sell-Side Liquidity',
+            marker=dict(symbol='circle-open', size=8, color='#FFD700')
+        ), row=1, col=1)
+        fig.add_trace(go.Scatter(
+            x=df.index, y
