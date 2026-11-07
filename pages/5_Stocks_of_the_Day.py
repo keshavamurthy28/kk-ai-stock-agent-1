@@ -1,414 +1,286 @@
-from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import streamlit as st
 import yfinance as yf
 
-# Page Configuration
 st.set_page_config(
-    page_title="Institutional Trading Terminal - SMC & Advanced Analytics",
+    page_title="Integrated Institutional Charting Terminal",
+    page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded",
 )
 
-# Force clear cache to instantly flush out old versions on Streamlit Cloud
-st.cache_data.clear()
-
-# Custom Styling for Institutional Terminal
+st.title("📈 Pro Integrated Institutional Terminal (Color-Graded Candles & Embedded Volume)")
 st.markdown(
-    """
-    <style>
-    .main { background-color: #0e1117; color: #c9d1d9; }
-    .stSidebar { background-color: #161b22; }
-    </style>
-""",
-    unsafe_allow_html=True,
+    "All-in-one institutional view: Candlesticks are color-graded by volume strength, "
+    "with embedded volume footprint and Fair Value Gaps directly on the main price action."
 )
 
-st.title(
-    "⚡ Advanced Institutional Terminal: SMC, FVG, Volume Surge & Intraday"
-)
-
-# Comprehensive Stock Universe (Nifty 50, Bank Nifty, Midcaps, and High Liquidity Equities)
-ALL_STOCKS = {
-    "RELIANCE - Reliance Industries Ltd": "RELIANCE.NS",
-    "TCS - Tata Consultancy Services Ltd": "TCS.NS",
-    "HDFCBANK - HDFC Bank Ltd": "HDFCBANK.NS",
-    "INFY - Infosys Ltd": "INFY.NS",
-    "ICICIBANK - ICICI Bank Ltd": "ICICIBANK.NS",
-    "SBIN - State Bank of India": "SBIN.NS",
-    "BHARTIARTL - Bharti Airtel Ltd": "BHARTIARTL.NS",
-    "ITC - ITC Ltd": "ITC.NS",
-    "KOTAKBANK - Kotak Mahindra Bank Ltd": "KOTAKBANK.NS",
-    "LT - Larsen & Toubro Ltd": "LT.NS",
-    "AXISBANK - Axis Bank Ltd": "AXISBANK.NS",
-    "HINDUNILVR - Hindustan Unilever Ltd": "HINDUNILVR.NS",
-    "BAJFINANCE - Bajaj Finance Ltd": "BAJFINANCE.NS",
-    "MARUTI - Maruti Suzuki India Ltd": "MARUTI.NS",
-    "TATAMOTORS - Tata Motors Ltd": "TATAMOTORS.NS",
-    "SUNPHARMA - Sun Pharmaceutical Industries": "SUNPHARMA.NS",
-    "TITAN - Titan Company Ltd": "TITAN.NS",
-    "NTPC - NTPC Ltd": "NTPC.NS",
-    "ONGC - Oil & Natural Gas Corporation": "ONGC.NS",
-    "TATASTEEL - Tata Steel Ltd": "TATASTEEL.NS",
-    "HEG - HEG Ltd": "HEG.NS",
-    "TATAPOWER - Tata Power Co Ltd": "TATAPOWER.NS",
-    "ZOMATO - Zomato Ltd": "ZOMATO.NS",
-    "SUZLON - Suzlon Energy Ltd": "SUZLON.NS",
-    "IRCTC - IRCTC Ltd": "IRCTC.NS",
-    "WIPRO - Wipro Ltd": "WIPRO.NS",
-    "BAJAJFINSV - Bajaj Finserv Ltd": "BAJAJFINSV.NS",
-    "ASIANPAINT - Asian Paints Ltd": "ASIANPAINT.NS",
-    "ADANIENT - Adani Enterprises Ltd": "ADANIENT.NS",
-    "ADANIPORTS - Adani Ports & SEZ Ltd": "ADANIPORTS.NS",
-    "POWERGRID - Power Grid Corp": "POWERGRID.NS",
-    "JSWSTEEL - JSW Steel Ltd": "JSWSTEEL.NS",
-    "GRASIM - Grasim Industries Ltd": "GRASIM.NS",
-    "HINDALCO - Hindalco Industries Ltd": "HINDALCO.NS",
-    "TECHM - Tech Mahindra Ltd": "TECHM.NS",
-    "NESTLEIND - Nestle India Ltd": "NESTLEIND.NS",
-    "CIPLA - Cipla Ltd": "CIPLA.NS",
-    "DRREDDY - Dr. Reddy's Laboratories": "DRREDDY.NS",
-    "SBILIFE - SBI Life Insurance Co Ltd": "SBILIFE.NS",
-    "BPCL - Bharat Petroleum Corp Ltd": "BPCL.NS",
-    "EICHERMOT - Eicher Motors Ltd": "EICHERMOT.NS",
-    "TATACONSUM - Tata Consumer Products": "TATACONSUM.NS",
-    "DIVISLAB - Divi's Laboratories Ltd": "DIVISLAB.NS",
-    "APOLLOHOSP - Apollo Hospitals Enterprise": "APOLLOHOSP.NS",
-    "HEROMOTOCO - Hero MotoCorp Ltd": "HEROMOTOCO.NS",
-    "INDUSINDBK - IndusInd Bank Ltd": "INDUSINDBK.NS",
-    "HDFCLIFE - HDFC Life Insurance": "HDFCLIFE.NS",
-    "BRITANNIA - Britannia Industries Ltd": "BRITANNIA.NS",
-    "SHRIRAMFIN - Shriram Finance Ltd": "SHRIRAMFIN.NS",
-    "LTIM - LTIMindtree Ltd": "LTIM.NS",
-    "TRENT - Trent Ltd": "TRENT.NS",
-    "BEL - Bharat Electronics Ltd": "BEL.NS",
-    "HAL - Hindustan Aeronautics Ltd": "HAL.NS",
-    "NIFTY 50 - Index": "^NSEI",
-    "BANK NIFTY - Index": "^NSEBANK",
-}
-
-# Sidebar Controls
+# -------------------------------------------------------------------
+# 1. SIDEBAR CONTROLS
+# -------------------------------------------------------------------
 st.sidebar.header("🛠️ Terminal Controls")
-
-# Searchable Dropdown with ALL stocks populated
-selected_stock_name = st.sidebar.selectbox(
-    "Search & Select Stock", list(ALL_STOCKS.keys()), index=20
-)  # Defaults to HEG if index 20, or search any
-ticker_symbol = ALL_STOCKS[selected_stock_name]
-
-# Alternative custom ticker fallback text box
-custom_input = st.sidebar.text_input(
-    "Or Type Ticker Manually (e.g., HEG.NS, IOC.NS)"
+stock_input = st.sidebar.text_input(
+    "Stock Ticker (e.g., HDFCBANK, INFY, RELIANCE)", value="HDFCBANK"
+).upper()
+symbol_str = (
+    f"{stock_input}.NS" if not stock_input.endswith(".NS") else stock_input
 )
-if custom_input:
-  ticker_symbol = custom_input.strip().upper()
-  if (
-      not ticker_symbol.endswith(".NS")
-      and not ticker_symbol.endswith(".BO")
-      and not ticker_symbol.startswith("^")
-  ):
-    ticker_symbol += ".NS"
 
-# Timeframe Controls
 timeframe = st.sidebar.selectbox(
-    "Select Timeframe / Interval", ["1m", "5m", "15m", "1h", "1d"], index=2
+    "Select Timeframe", ["5m", "15m", "30m", "1h", "1d"], index=4
 )
+fetch_period = "60d" if timeframe in ["5m", "15m", "30m", "1h"] else "max"
 
-period_map = {
-    "1m": "7d",
-    "5m": "60d",
-    "15m": "60d",
-    "1h": "730d",
-    "1d": "max",
-}
-period = period_map.get(timeframe, "60d")
+st.sidebar.markdown("---")
+st.sidebar.header("⚙️ Visual Overlays")
+show_fvg = st.sidebar.checkbox("Show Fair Value Gaps (FVG)", value=True)
+show_supertrend = st.sidebar.checkbox("Show SuperTrend Line", value=True)
+show_signals = st.sidebar.checkbox("Show Buy / Sell Signal Markers", value=True)
 
-
-@st.cache_data(ttl=30)
-def load_data(symbol, period, interval):
-  df = yf.download(symbol, period=period, interval=interval, progress=False)
-  if isinstance(df.columns, pd.MultiIndex):
-    df.columns = df.columns.get_level_values(0)
-  df.dropna(inplace=True)
-  return df
-
-
-data = load_data(ticker_symbol, period, timeframe)
-
-if data.empty:
-  st.error(
-      f"No market data found for {ticker_symbol}. Check symbol or market hours."
-  )
-  st.stop()
-
-
-# --- TECHNICAL INDICATORS & SMC CALCULATIONS ---
-def compute_analytics(df):
-  # Moving Averages
-  df["EMA_9"] = df["Close"].ewm(span=9, adjust=False).mean()
-  df["EMA_21"] = df["Close"].ewm(span=21, adjust=False).mean()
-  df["EMA_50"] = df["Close"].ewm(span=50, adjust=False).mean()
-
-  # Volume Surge (1.5x of 20-period volume average)
-  df["Vol_SMA20"] = df["Volume"].rolling(window=20).mean()
-  df["Volume_Surge"] = df["Volume"] > (1.5 * df["Vol_SMA20"])
-
-  # RSI (14)
-  delta = df["Close"].diff()
-  gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-  loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-  rs = gain / loss
-  df["RSI"] = 100 - (100 / (1 + rs))
-
-  # MACD
-  exp1 = df["Close"].ewm(span=12, adjust=False).mean()
-  exp2 = df["Close"].ewm(span=26, adjust=False).mean()
-  df["MACD"] = exp1 - exp2
-  df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
-
-  # Algorithmic Buy / Sell Crossover Signals with Volume Confirmation
-  df["Signal"] = 0
-  df.loc[
-      (df["EMA_9"] > df["EMA_21"])
-      & (df["EMA_9"].shift(1) <= df["EMA_21"].shift(1))
-      & (df["Volume_Surge"]),
-      "Signal",
-  ] = 1
-  df.loc[
-      (df["EMA_9"] < df["EMA_21"])
-      & (df["EMA_9"].shift(1) >= df["EMA_21"].shift(1))
-      & (df["Volume_Surge"]),
-      "Signal",
-  ] = -1
-
-  # Smart Money Concepts: Fair Value Gaps (FVG)
-  df["Bull_FVG_Low"] = np.nan
-  df["Bull_FVG_High"] = np.nan
-  df["Bear_FVG_Low"] = np.nan
-  df["Bear_FVG_High"] = np.nan
-
-  for i in range(1, len(df) - 1):
-    if df["Low"].iloc[i + 1] > df["High"].iloc[i - 1]:
-      df.iloc[i, df.columns.get_loc("Bull_FVG_Low")] = df["High"].iloc[i - 1]
-      df.iloc[i, df.columns.get_loc("Bull_FVG_High")] = df["Low"].iloc[i + 1]
-    elif df["High"].iloc[i + 1] < df["Low"].iloc[i - 1]:
-      df.iloc[i, df.columns.get_loc("Bear_FVG_Low")] = df["High"].iloc[i + 1]
-      df.iloc[i, df.columns.get_loc("Bear_FVG_High")] = df["Low"].iloc[i - 1]
-
-  # SMC Accumulation / Distribution Phase Detection
-  df["Price_Range"] = df["High"] - df["Low"]
-  df["Avg_Range"] = df["Price_Range"].rolling(window=20).mean()
-  df["Phase"] = "Normal"
-  df.loc[
-      (df["Price_Range"] < 0.7 * df["Avg_Range"])
-      & (df["Volume"] > df["Vol_SMA20"]),
-      "Phase",
-  ] = "Accumulation"
-  df.loc[
-      (df["Price_Range"] > 1.4 * df["Avg_Range"])
-      & (df["Close"] < df["Open"])
-      & (df["Volume"] > df["Vol_SMA20"]),
-      "Phase",
-  ] = "Distribution"
-
-  return df
-
-
-df = compute_analytics(data)
-
-# Dashboard Metrics Bar
-latest_close = float(df["Close"].iloc[-1])
-prev_close = float(df["Close"].iloc[-2])
-price_change = latest_close - prev_close
-pct_change = (price_change / prev_close) * 100
-
-col1, col2, col3, col4 = st.columns(4)
-col1.metric(
-    "Active Ticker",
-    ticker_symbol,
-    f"{pct_change:+.2f}%",
-    delta_color="normal",
-)
-col2.metric("Latest Price", f"₹{latest_close:,.2f}")
-col3.metric("Total Bars Loaded", f"{len(df):,}")
-col4.metric(
-    "Volume Surge Events", int(df["Volume_Surge"].fillna(False).sum())
-)
-
-# --- 3-TIER ADVANCED SUBPLOTTED TRADING VIEW CHART ---
-fig = make_subplots(
-    rows=3,
-    cols=1,
-    shared_xaxes=True,
-    vertical_spacing=0.03,
-    row_heights=[0.6, 0.2, 0.2],
-)
-
-# 1. Candlestick Chart (Row 1)
-fig.add_trace(
-    go.Candlestick(
-        x=df.index,
-        open=df["Open"],
-        high=df["High"],
-        low=df["Low"],
-        close=df["Close"],
-        name="Price Action",
-    ),
-    row=1,
-    col=1,
-)
-
-# EMAs Overlays
-fig.add_trace(
-    go.Scatter(
-        x=df.index,
-        y=df["EMA_9"],
-        line=dict(color="#2962FF", width=1),
-        name="EMA 9",
-    ),
-    row=1,
-    col=1,
-)
-fig.add_trace(
-    go.Scatter(
-        x=df.index,
-        y=df["EMA_21"],
-        line=dict(color="#FF6D00", width=1),
-        name="EMA 21",
-    ),
-    row=1,
-    col=1,
-)
-fig.add_trace(
-    go.Scatter(
-        x=df.index,
-        y=df["EMA_50"],
-        line=dict(color="#9C27B0", width=1.5),
-        name="EMA 50",
-    ),
-    row=1,
-    col=1,
-)
-
-# Fair Value Gaps (FVG Zones)
-recent_df = df.tail(150)
-for idx, row in recent_df.iterrows():
-  if not np.isnan(row["Bull_FVG_Low"]):
-    fig.add_shape(
-        type="rect",
-        x0=idx,
-        x1=df.index[-1],
-        y0=row["Bull_FVG_Low"],
-        y1=row["Bull_FVG_High"],
-        fillcolor="rgba(0, 230, 118, 0.15)",
-        line=dict(width=0),
-        row=1,
-        col=1,
+# -------------------------------------------------------------------
+# 2. DATA FETCHER & VOLUME COLOR-GRADING ENGINE
+# -------------------------------------------------------------------
+@st.cache_data(ttl=300)
+def fetch_and_grade_data(ticker, period, interval):
+    df = yf.download(
+        ticker, period=period, interval=interval, progress=False, auto_adjust=True
     )
-  if not np.isnan(row["Bear_FVG_Low"]):
-    fig.add_shape(
-        type="rect",
-        x0=idx,
-        x1=df.index[-1],
-        y0=row["Bear_FVG_Low"],
-        y1=row["Bear_FVG_High"],
-        fillcolor="rgba(255, 23, 68, 0.15)",
-        line=dict(width=0),
-        row=1,
-        col=1,
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    
+    if df.empty or len(df) < 15:
+        return df
+
+    # --- SuperTrend Calculation ---
+    period_atr = 10
+    mult = 3.0
+    df['H-L'] = df['High'] - df['Low']
+    df['H-PC'] = abs(df['High'] - df['Close'].shift(1))
+    df['L-PC'] = abs(df['Low'] - df['Close'].shift(1))
+    df['TR'] = df[['H-L', 'H-PC', 'L-PC']].max(axis=1)
+    df['ATR'] = df['TR'].rolling(window=period_atr).mean()
+
+    hl2 = (df['High'] + df['Low']) / 2
+    df['Basic_Upper'] = hl2 + (mult * df['ATR'])
+    df['Basic_Lower'] = hl2 - (mult * df['ATR'])
+
+    upper_list = [0.0] * len(df)
+    lower_list = [0.0] * len(df)
+    st_list = [0.0] * len(df)
+    trend_list = [1] * len(df)
+
+    close = df['Close'].values
+    basic_upper = df['Basic_Upper'].values
+    basic_lower = df['Basic_Lower'].values
+
+    for i in range(1, len(df)):
+        if basic_upper[i] < upper_list[i-1] or close[i-1] > upper_list[i-1]:
+            upper_list[i] = basic_upper[i]
+        else:
+            upper_list[i] = upper_list[i-1]
+
+        if basic_lower[i] > lower_list[i-1] or close[i-1] < lower_list[i-1]:
+            lower_list[i] = basic_lower[i]
+        else:
+            lower_list[i] = lower_list[i-1]
+
+        if trend_list[i-1] == 1:
+            if close[i] <= lower_list[i]:
+                trend_list[i] = -1
+                st_list[i] = upper_list[i]
+            else:
+                trend_list[i] = 1
+                st_list[i] = lower_list[i]
+        else:
+            if close[i] >= upper_list[i]:
+                trend_list[i] = 1
+                st_list[i] = lower_list[i]
+            else:
+                trend_list[i] = -1
+                st_list[i] = upper_list[i]
+
+    df['SuperTrend'] = st_list
+    df['Trend'] = trend_list
+
+    # --- Fair Value Gap (FVG) Detection ---
+    df['FVG_Type'] = "NONE"
+    df['FVG_Top'] = np.nan
+    df['FVG_Bottom'] = np.nan
+
+    for i in range(2, len(df)):
+        if df['Low'].iloc[i] > df['High'].iloc[i-2]: 
+            df.loc[df.index[i], 'FVG_Type'] = "BULLISH_FVG"
+            df.loc[df.index[i], 'FVG_Bottom'] = df['High'].iloc[i-2]
+            df.loc[df.index[i], 'FVG_Top'] = df['Low'].iloc[i]
+        elif df['High'].iloc[i] < df['Low'].iloc[i-2]: 
+            df.loc[df.index[i], 'FVG_Type'] = "BEARISH_FVG"
+            df.loc[df.index[i], 'FVG_Top'] = df['Low'].iloc[i-2]
+            df.loc[df.index[i], 'FVG_Bottom'] = df['High'].iloc[i]
+
+    # --- Volume Intensity & Color Grading ---
+    # Normalizing volume between 0 and 1 for color scaling (Weak to Strong)
+    vol_min = df['Volume'].min()
+    vol_max = df['Volume'].max()
+    df['Vol_Ratio'] = (df['Volume'] - vol_min) / (vol_max - vol_min if vol_max != vol_min else 1)
+
+    # Assign dynamic hex colors based on weakness (dim) to strength (bright)
+    candle_colors = []
+    for idx, row in df.iterrows():
+        ratio = row['Vol_Ratio']
+        if row['Close'] >= row['Open']:
+            # Bullish: Scale from soft mint (#69F0AE) to intense neon green (#00E676)
+            intensity = 0.3 + (0.7 * ratio)
+            candle_colors.append(f"rgba(0, 230, 118, {intensity})")
+        else:
+            # Bearish: Scale from soft pink (#FF8A80) to intense neon red (#FF1744)
+            intensity = 0.3 + (0.7 * ratio)
+            candle_colors.append(f"rgba(255, 23, 68, {intensity})")
+
+    df['Candle_Color'] = candle_colors
+
+    # --- Actionable Signals ---
+    df['Signal'] = "HOLD"
+    for i in range(1, len(df)):
+        if df['Trend'].iloc[i] == 1 and df['Trend'].iloc[i-1] == -1:
+            df.loc[df.index[i], 'Signal'] = "BUY"
+        elif df['Trend'].iloc[i] == -1 and df['Trend'].iloc[i-1] == 1:
+            df.loc[df.index[i], 'Signal'] = "SELL"
+
+    return df
+
+with st.spinner(f"Processing color-graded volume candles for `{symbol_str}`..."):
+    df = fetch_and_grade_data(symbol_str, fetch_period, timeframe)
+
+if df.empty or len(df) < 10:
+    st.error(f"Could not retrieve enough data for `{symbol_str}` on interval `{timeframe}`.")
+else:
+    latest = df.iloc[-1]
+    prev = df.iloc[-2]
+    price_change = ((latest['Close'] - prev['Close']) / prev['Close']) * 100
+
+    # -------------------------------------------------------------------
+    # 3. METRICS BAR
+    # -------------------------------------------------------------------
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Last Traded Price", f"₹{latest['Close']:.2f}", f"{price_change:+.2f}%")
+    c2.metric("Market Structure", "BULLISH (UP)" if latest['Trend'] == 1 else "BEARISH (DOWN)")
+    c3.metric("Current Volume", f"{int(latest['Volume']):,}")
+    c4.metric("Volume Strength", "🔥 High Conviction" if latest['Vol_Ratio'] > 0.6 else "⚖️ Normal Activity")
+
+    # -------------------------------------------------------------------
+    # 4. UNIFIED SINGLE-PANE CHART (EMBEDDED VOLUME & COLOR-GRADED CANDLES)
+    # -------------------------------------------------------------------
+    fig = go.Figure()
+
+    # Embedded Volume Footprint Bars (Rendered softly in the background behind candles)
+    max_vol = df['Volume'].max()
+    price_span = df['High'].max() - df['Low'].min()
+    vol_height_scale = price_span * 0.25 # Occupies bottom 25% of visual chart space
+    scaled_vol_y = df['Low'].min() + (df['Volume'] / (max_vol if max_vol > 0 else 1)) * vol_height_scale
+
+    fig.add_trace(go.Bar(
+        x=df.index,
+        y=scaled_vol_y - df['Low'].min(),
+        base=df['Low'].min(),
+        name='Embedded Volume Footprint',
+        marker=dict(color=df['Candle_Color']),
+        hoverinfo='skip'
+    ))
+
+    # Color-Graded Candlesticks (Weak to Strong Momentum)
+    fig.add_trace(go.Candlestick(
+        x=df.index,
+        open=df['Open'],
+        high=df['High'],
+        low=df['Low'],
+        close=df['Close'],
+        name="Color-Graded Candles",
+        increasing=dict(line=dict(color="#00E676", width=1.5), fillcolor="rgba(0, 230, 118, 0.7)"),
+        decreasing=dict(line=dict(color="#FF1744", width=1.5), fillcolor="rgba(255, 23, 68, 0.7)")
+    ))
+
+    # SuperTrend Line
+    if show_supertrend:
+        bullish_st = df.copy()
+        bullish_st.loc[bullish_st['Trend'] == -1, 'SuperTrend'] = np.nan
+        bearish_st = df.copy()
+        bearish_st.loc[bearish_st['Trend'] == 1, 'SuperTrend'] = np.nan
+
+        fig.add_trace(go.Scatter(
+            x=bullish_st.index, y=bullish_st['SuperTrend'], mode='lines', name='SuperTrend Support',
+            line=dict(color='#00E676', width=2)
+        ))
+        fig.add_trace(go.Scatter(
+            x=bearish_st.index, y=bearish_st['SuperTrend'], mode='lines', name='SuperTrend Resistance',
+            line=dict(color='#FF1744', width=2)
+        ))
+
+    # Fair Value Gaps (FVG) Shaded Boxes
+    if show_fvg:
+        for idx, row in df.iterrows():
+            if row['FVG_Type'] == 'BULLISH_FVG':
+                fig.add_shape(
+                    type="rect",
+                    x0=idx, y0=row['FVG_Bottom'], x1=df.index[-1], y1=row['FVG_Top'],
+                    fillcolor="rgba(0, 230, 118, 0.15)", line=dict(width=0),
+                    layer="below"
+                )
+            elif row['FVG_Type'] == 'BEARISH_FVG':
+                fig.add_shape(
+                    type="rect",
+                    x0=idx, y0=row['FVG_Bottom'], x1=df.index[-1], y1=row['FVG_Top'],
+                    fillcolor="rgba(255, 23, 68, 0.15)", line=dict(width=0),
+                    layer="below"
+                )
+
+    # Buy/Sell Signal Markers
+    if show_signals:
+        buy_pts = df[df['Signal'] == 'BUY']
+        sell_pts = df[df['Signal'] == 'SELL']
+
+        if not buy_pts.empty:
+            fig.add_trace(go.Scatter(
+                x=buy_pts.index, y=buy_pts['Low'] * 0.992,
+                mode='text+markers', text=['Buy long'] * len(buy_pts),
+                textposition='bottom center', textfont=dict(color='#00E676', size=11, family='Arial Black'),
+                marker=dict(symbol='triangle-up', size=14, color='#00E676'), name='Buy Signal'
+            ))
+        if not sell_pts.empty:
+            fig.add_trace(go.Scatter(
+                x=sell_pts.index, y=sell_pts['High'] * 1.008,
+                mode='text+markers', text=['Sell short'] * len(sell_pts),
+                textposition='top center', textfont=dict(color='#FF1744', size=11, family='Arial Black'),
+                marker=dict(symbol='triangle-down', size=14, color='#FF1744'), name='Sell Signal'
+            ))
+
+    # TradingView Navigation Layout (Hand Pan + Scroll Zoom)
+    fig.update_layout(
+        title=f"{symbol_str} Unified View: Color-Graded Volume Candles & ICT FVG",
+        template="plotly_dark",
+        dragmode='pan',
+        xaxis_rangeslider_visible=False,
+        height=750,
+        margin=dict(l=20, r=20, t=40, b=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
 
-# Buy / Sell Execution Markers
-buy_signals = df[df["Signal"] == 1]
-sell_signals = df[df["Signal"] == -1]
+    chart_config = {
+        'scrollZoom': True,
+        'displayModeBar': True,
+        'modeBarButtonsToRemove': ['lasso2d', 'select2d'],
+        'responsive': True
+    }
 
-fig.add_trace(
-    go.Scatter(
-        x=buy_signals.index,
-        y=buy_signals["Low"] * 0.995,
-        mode="markers",
-        marker=dict(symbol="triangle-up", size=14, color="#00E676"),
-        name="BUY Signal",
-    ),
-    row=1,
-    col=1,
-)
-fig.add_trace(
-    go.Scatter(
-        x=sell_signals.index,
-        y=sell_signals["High"] * 1.005,
-        mode="markers",
-        marker=dict(symbol="triangle-down", size=14, color="#FF1744"),
-        name="SELL Signal",
-    ),
-    row=1,
-    col=1,
-)
+    st.plotly_chart(fig, use_container_width=True, config=chart_config)
 
-# 2. Volume Subplot with Surge Highlighting (Row 2)
-vol_colors = [
-    "#FFD700"
-    if row["Volume_Surge"]
-    else ("#00E676" if row["Close"] >= row["Open"] else "#FF1744")
-    for _, row in df.iterrows()
-]
-fig.add_trace(
-    go.Bar(
-        x=df.index,
-        y=df["Volume"],
-        marker_color=vol_colors,
-        name="Volume (Gold = Surge)",
-        opacity=0.85,
-    ),
-    row=2,
-    col=1,
-)
-
-# 3. RSI Subplot (Row 3)
-fig.add_trace(
-    go.Scatter(
-        x=df.index,
-        y=df["RSI"],
-        line=dict(color="#26A69A", width=1.5),
-        name="RSI (14)",
-    ),
-    row=3,
-    col=1,
-)
-fig.add_hline(y=70, line_dash="dash", line_color="#FF5252", row=3, col=1)
-fig.add_hline(y=30, line_dash="dash", line_color="#69F0AE", row=3, col=1)
-
-# Layout Configuration
-fig.update_layout(
-    template="plotly_dark",
-    height=850,
-    xaxis_rangeslider_visible=False,
-    margin=dict(l=10, r=10, t=30, b=10),
-    legend=dict(
-        orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
-    ),
-)
-
-st.plotly_chart(fig, use_container_width=True)
-
-# Data Inspect View
-if st.checkbox("🔍 Inspect Raw Data, SMC Phases & Signals"):
-  st.dataframe(
-      df[
-          [
-              "Open",
-              "High",
-              "Low",
-              "Close",
-              "Volume",
-              "RSI",
-              "Volume_Surge",
-              "Phase",
-              "Signal",
-          ]
-      ].tail(100),
-      use_container_width=True,
-  )
+    # -------------------------------------------------------------------
+    # 5. GUIDE
+    # -------------------------------------------------------------------
+    st.markdown("---")
+    st.markdown("### 🎓 How to Read Your Unified Institutional Chart")
+    st.markdown(
+        "- **Color-Graded Volume Intensity (Weak to Strong):** Translucent or dim candle colors indicate low volume (weak momentum), while bright neon green/red candles indicate massive volume conviction and institutional participation.\n"
+        "- **Embedded Volume Footprint:** Volume bars are embedded right into the base of the price action, letting you see volume directly aligned with every time frame candle without looking at a bottom sub-pane.\n"
+        "- **Fair Value Gaps (FVG):** Shaded zones show institutional imbalance footprints."
+    )
