@@ -204,7 +204,7 @@ if not df.empty and len(df) >= 15:
 
   st.markdown("---")
 
-  # --- MULTI-PANE SUBPLOTS WITH PROPER TRADINGVIEW LAYOUT ---
+  # --- MULTI-PANE SUBPLOTS ---
   fig = make_subplots(
       rows=2,
       cols=1,
@@ -213,7 +213,6 @@ if not df.empty and len(df) >= 15:
       row_heights=[0.8, 0.2],
   )
 
-  # Professional Candlesticks
   fig.add_trace(
       go.Candlestick(
           x=df.index,
@@ -271,113 +270,4 @@ if not df.empty and len(df) >= 15:
 
   if show_ob:
     for idx, row in df[df["OB_Type"] != "NONE"].tail(30).iterrows():
-      color = "#00E676" if row["OB_Type"] == "BULLISH_OB" else "#FF1744"
-      fig.add_shape(
-          type="line",
-          x0=idx,
-          y0=row["OB_Level"],
-          x1=df.index[-1],
-          y1=row["OB_Level"],
-          line=dict(color=color, width=1.5, dash="dash"),
-          row=1,
-          col=1,
-      )
-
-  if show_liquidity:
-    fig.add_trace(
-        go.Scatter(
-            x=df.index,
-            y=df["Swing_High"],
-            mode="markers",
-            name="Sell-Side Liquidity",
-            marker=dict(symbol="circle-open", size=8, color="#FFD700"),
-        ),
-        row=1,
-        col=1,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=df.index,
-            y=df["Swing_Low"],
-            mode="markers",
-            name="Buy-Side Liquidity",
-            marker=dict(symbol="circle-open", size=8, color="#00FFFF"),
-        ),
-        row=1,
-        col=1,
-    )
-
-  vol_colors = [
-      "#00E676" if r["Close"] >= r["Open"] else "#FF1744"
-      for _, r in df.iterrows()
-  ]
-  fig.add_trace(
-      go.Bar(
-          x=df.index,
-          y=df["Volume"],
-          marker_color=vol_colors,
-          name="Session Volume",
-      ),
-      row=2,
-      col=1,
-  )
-
-  # Fully Interactive TradingView Layout Configuration with Crosshairs & Toolbars
-  fig.update_layout(
-      template="plotly_dark",
-      height=820,
-      xaxis_rangeslider_visible=False,
-      dragmode="zoom",
-      hovermode="x unified",
-      margin=dict(l=20, r=20, t=40, b=20),
-      legend=dict(
-          orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
-      ),
-  )
-
-  fig.update_xaxes(
-      showspikes=True,
-      spikemode="across",
-      spikesnap="cursor",
-      spikecolor="#888888",
-      spikethickness=1,
-  )
-  fig.update_yaxes(
-      side="right",
-      showspikes=True,
-      spikecolor="#888888",
-      spikethickness=1,
-  )
-
-  chart_config = {
-      "scrollZoom": True,
-      "displayModeBar": True,
-      "modeBarButtonsToAdd": ["drawline", "drawrect", "eraseshape"],
-      "responsive": True,
-  }
-
-  st.plotly_chart(fig, use_container_width=True, config=chart_config)
-
-  st.markdown("---")
-  st.subheader("🎯 Institutional Risk & Position Sizing Matrix")
-
-  risk_per_share = abs(float(latest["Close"]) - float(stop_loss_val))
-  reward_per_share = abs(float(target_val) - float(latest["Close"]))
-  rr_ratio = reward_per_share / risk_per_share if risk_per_share > 0 else 0.0
-
-  st.markdown(
-      f"### 🧠 Expert Strategist Notes:\n"
-      f"- **Action Setup & Risk:** Dominant signal indicates **{action_type}** with"
-      f" a stop-loss anchored at **₹{float(stop_loss_val):.2f}** and target at"
-      f" **₹{float(target_val):.2f}** (Risk-Reward Ratio **1 : {rr_ratio:.2f}**).\n"
-      f"- **Key Support & Resistance:** Immediate support sits at"
-      f" **₹{support_level:,.2f}** and overhead resistance at"
-      f" **₹{resistance_level:,.2f}**.\n"
-      f"- **Active Fair Value Gap (FVG):** Current unmitigated imbalance zone"
-      f" spans between **{fvg_range_str}**."
-  )
-else:
-  st.warning(
-      "Please enter a valid stock ticker symbol or select a different"
-      " timeframe."
-  )
+      color = "#00E676" if row["
