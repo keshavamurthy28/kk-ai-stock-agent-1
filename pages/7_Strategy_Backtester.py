@@ -107,7 +107,7 @@ if st.sidebar.button("🚀 Run Backtest Simulation", type="primary"):
         rows=2,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.05,
+        vertical_spacing=0.08,
         row_heights=[0.7, 0.3],
     )
 
@@ -148,16 +148,21 @@ if st.sidebar.button("🚀 Run Backtest Simulation", type="primary"):
         col=1,
     )
 
-    # TradingView-Like Global Layout
+    # TradingView-Like Global Layout with Adjusted Legend Position
     fig.update_layout(
         template="plotly_dark",
-        height=650,
+        height=680,
         xaxis_rangeslider_visible=False,
         dragmode="zoom",
         hovermode="x unified",
-        margin=dict(l=10, r=10, t=30, b=10),
+        margin=dict(l=10, r=10, t=50, b=10),
         legend=dict(
-            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+            orientation="h",
+            yanchor="bottom",
+            y=1.08,  # Pushes legend slightly above the top chart line boundary
+            xanchor="left",
+            x=0.0,
+            bgcolor="rgba(0,0,0,0.5)",
         ),
     )
 
