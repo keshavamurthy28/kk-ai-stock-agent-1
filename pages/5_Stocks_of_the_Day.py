@@ -144,27 +144,4 @@ else:
     c1.metric("Last Traded Price", f"₹{latest['Close']:.2f}", f"{price_change:+.2f}%")
     
     bias_text = "🟢 BULLISH INSTITUTIONAL ACCUMULATION" if latest['Close'] > latest['EMA_50'] else "🔴 BEARISH DISTRIBUTION / MARKDOWN"
-    c2.metric("Market Bias & Flow", bias_text)
-    c3.metric("ATR Volatility", f"₹{latest['ATR']:.2f}")
-    c4.metric("Smart Money Phase", "Markup / Expansion" if latest['Close'] > latest['EMA_50'] else "Markdown / Trap")
-
-    # -------------------------------------------------------------------
-    # 4. MULTI-PANE INSTITUTIONAL PLOTLY CHART
-    # -------------------------------------------------------------------
-    fig = make_subplots(
-        rows=2, cols=1, shared_xaxes=True, 
-        vertical_spacing=0.03, row_heights=[0.8, 0.2]
-    )
-
-    # --- Pane 1: Price Action, OB, FVG, VWAP ---
-    fig.add_trace(go.Candlestick(
-        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-        name="Institutional OHLC",
-        increasing=dict(line=dict(color="#00E676", width=1.2), fillcolor="#00E676"),
-        decreasing=dict(line=dict(color="#FF1744", width=1.2), fillcolor="#FF1744")
-    ), row=1, col=1)
-
-    # VWAP Line
-    if show_vwap:
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df['VWAP'], mode='lines
+    c2.metric("Market Bias & Flow", bias
