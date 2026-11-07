@@ -8,7 +8,21 @@ import yfinance as yf
 st.set_page_config(
     page_title="Advanced Intraday NSE Engine", page_icon="📈", layout="wide"
 )
-
+st.markdown(
+    """
+    <style>
+    /* Force high-contrast text inside Streamlit dataframe and table cells */
+    .stDataFrame td, .stTable td, .stDataFrame th, .stTable th {
+        color: #E2E8F0 !important;
+    }
+    /* Ensure highlighted rows maintain high contrast */
+    .stDataFrame tr {
+        color: #E2E8F0 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 st.title(
     "📈 High-Performance Intraday NSE Scanner & Execution Engine (Optimized)"
 )
