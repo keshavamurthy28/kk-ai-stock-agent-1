@@ -312,9 +312,4 @@ fig.add_trace(
     col=1,
 )
 fig.add_trace(
-    go.Scatter(
-        x=sell_signals.index,
-        y=sell_signals["High"] * 1.005,
-        mode="markers",
-        marker=dict(symbol="triangle-down", size=14, color="#FF1744"),
-        name="Bearish Volume Crossover",
+    go
