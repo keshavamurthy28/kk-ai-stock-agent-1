@@ -190,4 +190,131 @@ def compute_analytics(df):
             df.iloc[i, df.columns.get_loc("Bear_FVG_Low")] = df["High"].iloc[
                 i + 1
             ]
-            df.iloc[i, df.
+            df.iloc[i, df.columns.get_loc("Bear_FVG_High")] = df["Low"].iloc[
+                i - 1
+            ]
+
+    return df
+
+
+df = compute_analytics(data)
+
+# --- DASHBOARD METRICS BAR ---
+latest_close = float(df["Close"].iloc[-1])
+prev_close = float(df["Close"].iloc[-2])
+price_change = latest_close - prev_close
+pct_change = (price_change / prev_close) * 100
+
+col1, col2, col3, col4 = st.columns(4)
+col1.metric(
+    "Active Security", ticker_symbol, f"{pct_change:+.2f}%", delta_color="normal"
+)
+col2.metric("Latest Close", f"₹{latest_close:,.2f}")
+col3.metric("Candle Bars Analyzed", f"{len(df):,}")
+col4.metric(
+    "Volume Surge Count", int(df["Volume_Surge"].fillna(False).sum())
+)
+
+# --- INTERACTIVE TRADINGVIEW-STYLE PLOTLY CHART ---
+fig = make_subplots(
+    rows=4,
+    cols=1,
+    shared_xaxes=True,
+    vertical_spacing=0.03,
+    row_heights=[0.5, 0.18, 0.16, 0.16],
+)
+
+# 1. Price Action & EMAs (Row 1)
+fig.add_trace(
+    go.Candlestick(
+        x=df.index,
+        open=df["Open"],
+        high=df["High"],
+        low=df["Low"],
+        close=df["Close"],
+        name="OHLC Price",
+    ),
+    row=1,
+    col=1,
+)
+fig.add_trace(
+    go.Scatter(
+        x=df.index,
+        y=df["EMA_9"],
+        line=dict(color="#2962FF", width=1.2),
+        name="EMA 9",
+    ),
+    row=1,
+    col=1,
+)
+fig.add_trace(
+    go.Scatter(
+        x=df.index,
+        y=df["EMA_21"],
+        line=dict(color="#FF6D00", width=1.2),
+        name="EMA 21",
+    ),
+    row=1,
+    col=1,
+)
+fig.add_trace(
+    go.Scatter(
+        x=df.index,
+        y=df["EMA_50"],
+        line=dict(color="#9C27B0", width=1.5),
+        name="EMA 50",
+    ),
+    row=1,
+    col=1,
+)
+
+# Fair Value Gap Zones Overlay (Recent 150 bars)
+recent_df = df.tail(150)
+for idx, row in recent_df.iterrows():
+    if not np.isnan(row["Bull_FVG_Low"]):
+        fig.add_shape(
+            type="rect",
+            x0=idx,
+            x1=df.index[-1],
+            y0=row["Bull_FVG_Low"],
+            y1=row["Bull_FVG_High"],
+            fillcolor="rgba(0, 230, 118, 0.15)",
+            line=dict(width=0),
+            row=1,
+            col=1,
+        )
+    if not np.isnan(row["Bear_FVG_Low"]):
+        fig.add_shape(
+            type="rect",
+            x0=idx,
+            x1=df.index[-1],
+            y0=row["Bear_FVG_Low"],
+            y1=row["Bear_FVG_High"],
+            fillcolor="rgba(255, 23, 68, 0.15)",
+            line=dict(width=0),
+            row=1,
+            col=1,
+        )
+
+# Buy/Sell Signals Execution Markers
+buy_signals = df[df["Signal"] == 1]
+sell_signals = df[df["Signal"] == -1]
+
+fig.add_trace(
+    go.Scatter(
+        x=buy_signals.index,
+        y=buy_signals["Low"] * 0.995,
+        mode="markers",
+        marker=dict(symbol="triangle-up", size=14, color="#00E676"),
+        name="Bullish Volume Crossover",
+    ),
+    row=1,
+    col=1,
+)
+fig.add_trace(
+    go.Scatter(
+        x=sell_signals.index,
+        y=sell_signals["High"] * 1.005,
+        mode="markers",
+        marker=dict(symbol="triangle-down", size=14, color="#FF1744"),
+        name="Bearish Volume Crossover",
