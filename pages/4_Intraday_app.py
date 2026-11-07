@@ -9,21 +9,18 @@ st.set_page_config(
     page_title="Advanced Intraday NSE Engine", page_icon="📈", layout="wide"
 )
 
-# --- ROBUST CSS TO ELIMINATE WHITE LINES & FIX TEXT CONTRAST ---
+# --- CLEAN DARK MODE CSS FIX (Eliminates white lines & contrast bugs) ---
 st.markdown(
     """
     <style>
-    /* Force consistent background and high-contrast text on all dataframe rows/cells */
     .stDataFrame td, .stTable td, .stDataFrame th, .stTable th {
         color: #E2E8F0 !important;
         background-color: #0E1117 !important;
     }
-    /* Eliminate default white separator lines/striping in tables */
     .stDataFrame tr, .stTable tr {
         background-color: #0E1117 !important;
         border-bottom: 1px solid #262730 !important;
     }
-    /* Style container overrides for clean dark mode alignment */
     div[data-testid="stDataFrame"] {
         background-color: #0E1117;
     }
@@ -129,7 +126,6 @@ nifty_500_bulk = extended_list + [
     "GODREJCP",
     "TORNTPHARM",
     "ICICIGI",
-    "CHOLAFIN",
 ]
 
 if scan_scope == "Top Liquid Nifty 50 (Instant)":
@@ -153,7 +149,6 @@ def fetch_bulk_market_data(symbol_list):
   results = []
 
   try:
-    # 1mo period ensures 14-period technical indicators compute cleanly without returning None
     raw_data = yf.download(
         formatted_tickers,
         period="1mo",
@@ -254,7 +249,6 @@ def fetch_bulk_market_data(symbol_list):
             )
         )
 
-        # Position Sizing Calculation
         risk_amount = capital * (risk_pct / 100.0)
         risk_per_share = abs(ltp - stoploss)
         qty = (
