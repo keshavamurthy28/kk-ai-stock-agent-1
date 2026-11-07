@@ -17,9 +17,6 @@ st.markdown(
     "**Liquidity Pools (Stop Hunts)**, **Fair Value Gaps (FVG)**, **VWAP Order Flow**, and **Automated Risk Management**."
 )
 
-# -------------------------------------------------------------------
-# 1. SIDEBAR CONTROLS
-# -------------------------------------------------------------------
 st.sidebar.header("🛠️ Terminal Controls")
 stock_input = st.sidebar.text_input(
     "Stock Ticker (e.g., RELIANCE, TCS, HDFCBANK)", value="RELIANCE"
@@ -41,9 +38,6 @@ show_liquidity = st.sidebar.checkbox("Show Liquidity Pools (Equal Highs/Lows)", 
 show_vwap = st.sidebar.checkbox("Show Institutional VWAP", value=True)
 show_signals = st.sidebar.checkbox("Show BOS / CHoCH & Entry Triggers", value=True)
 
-# -------------------------------------------------------------------
-# 2. ROBUST DATA & INSTITUTIONAL SMC ENGINE
-# -------------------------------------------------------------------
 @st.cache_data(ttl=300)
 def fetch_and_calculate_institutional_smc(ticker, period, interval):
     try:
@@ -58,24 +52,20 @@ def fetch_and_calculate_institutional_smc(ticker, period, interval):
 
         df = df.dropna(subset=["Close", "Volume", "High", "Low"])
         
-        # --- True Range & ATR ---
         df['H-L'] = df['High'] - df['Low']
         df['H-PC'] = abs(df['High'] - df['Close'].shift(1))
         df['L-PC'] = abs(df['Low'] - df['Close'].shift(1))
         df['TR'] = df[['H-L', 'H-PC', 'L-PC']].max(axis=1)
         df['ATR'] = df['TR'].rolling(window=14).mean()
 
-        # --- Institutional VWAP ---
         q = df['Volume']
         tp = (df['High'] + df['Low'] + df['Close']) / 3
         df['VWAP'] = (tp * q).cumsum() / q.cumsum()
 
-        # --- Swing Highs & Lows ---
         window = 5
         df['Swing_High'] = df['High'][(df['High'] == df['High'].rolling(window*2+1, center=True).max())]
         df['Swing_Low'] = df['Low'][(df['Low'] == df['Low'].rolling(window*2+1, center=True).min())]
 
-        # --- Market Structure & Trend ---
         df['Structure'] = "NEUTRAL"
         df['Signal'] = "HOLD"
         df['Stop_Loss'] = np.nan
@@ -90,7 +80,6 @@ def fetch_and_calculate_institutional_smc(ticker, period, interval):
             elif df['Close'].iloc[i] < df['EMA_50'].iloc[i] and df['EMA_50'].iloc[i] < df['EMA_200'].iloc[i]:
                 df.loc[df.index[i], 'Structure'] = "BEARISH_BOS"
 
-        # --- Fair Value Gaps (FVG) ---
         df['FVG_Type'] = "NONE"
         df['FVG_Top'] = np.nan
         df['FVG_Bottom'] = np.nan
@@ -105,7 +94,6 @@ def fetch_and_calculate_institutional_smc(ticker, period, interval):
                 df.loc[df.index[i], 'FVG_Top'] = df['Low'].iloc[i-2]
                 df.loc[df.index[i], 'FVG_Bottom'] = df['High'].iloc[i]
 
-        # --- Order Blocks ---
         df['OB_Type'] = "NONE"
         df['OB_Level'] = np.nan
         for i in range(5, len(df) - 1):
@@ -116,7 +104,6 @@ def fetch_and_calculate_institutional_smc(ticker, period, interval):
                 df.loc[df.index[i], 'OB_Type'] = "BEARISH_OB"
                 df.loc[df.index[i], 'OB_Level'] = df['High'].iloc[i-1]
 
-        # --- Execution Signals ---
         for i in range(1, len(df)):
             if df['Structure'].iloc[i] == "BULLISH_BOS" and df['Structure'].iloc[i-1] != "BULLISH_BOS":
                 df.loc[df.index[i], 'Signal'] = "BUY"
@@ -134,24 +121,21 @@ def fetch_and_calculate_institutional_smc(ticker, period, interval):
 df = fetch_and_calculate_institutional_smc(symbol_str, fetch_period, timeframe)
 
 if df.empty or len(df) < 15:
-    st.error(f"Could not retrieve enough data for `{symbol_str}` on interval `{timeframe}`. Please check the ticker symbol or try a different timeframe.")
+    st.error(f"Could not retrieve enough data for `{symbol_str}` on interval `{timeframe}`.")
 else:
     latest = df.iloc[-1]
     prev = df.iloc[-2]
     price_change = ((float(latest['Close']) - float(prev['Close'])) / float(prev['Close'])) * 100
 
-    # --- CALCULATE TRADING SETUP & LEVELS ---
     filtered_signals = df[df['Signal'] != 'HOLD']
     last_signal_row = filtered_signals.iloc[-1] if not filtered_signals.empty else latest
     action_type = last_signal_row['Signal']
     stop_loss_val = last_signal_row.get('Stop_Loss', float(latest['Close']) * 0.98)
     target_val = last_signal_row.get('Target', float(latest['Close']) * 1.04)
 
-    # Dynamic Support & Resistance based on recent 20 periods
     support_level = round(float(df['Low'].tail(20).min()), 2)
     resistance_level = round(float(df['High'].tail(20).max()), 2)
 
-    # Active FVG Range Extraction
     valid_fvg = df[df['FVG_Type'] != 'NONE']
     if not valid_fvg.empty:
         last_fvg = valid_fvg.iloc[-1]
@@ -159,9 +143,6 @@ else:
     else:
         fvg_range_str = "None Active"
 
-    # -------------------------------------------------------------------
-    # 3. TOP EXECUTIVE METRICS & TRADING SETUP BAR
-    # -------------------------------------------------------------------
     st.markdown("### 📊 Live Executive Pricing & Institutional Setup")
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Last Traded Price", f"₹{float(latest['Close']):.2f}", f"{price_change:+.2f}%")
@@ -170,7 +151,42 @@ else:
     col4.metric("Profit Objective", f"₹{float(target_val):.2f}")
     col5.metric("ATR Volatility", f"₹{float(latest['ATR']):.2f}")
 
-    # Secondary Support, Resistance & FVG Strip
     sup_col1, sup_col2, sup_col3, sup_col4 = st.columns(4)
     sup_col1.metric("Support Level", f"₹{support_level:,.2f}")
-    sup_col2.metric("Resistance Level", f"₹{resistance_level:
+    sup_col2.metric("Resistance Level", f"₹{resistance_level:,.2f}")
+    sup_col3.metric("Active FVG Range", fvg_range_str)
+    
+    bias_text = "🟢 BULLISH ACCUMULATION" if float(latest['Close']) > float(latest['EMA_50']) else "🔴 BEARISH DISTRIBUTION"
+    sup_col4.metric("Market Bias Flow", bias_text)
+
+    st.markdown("---")
+
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True, 
+        vertical_spacing=0.03, row_heights=[0.8, 0.2]
+    )
+
+    fig.add_trace(go.Candlestick(
+        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+        name="Institutional OHLC",
+        increasing=dict(line=dict(color="#00E676", width=1.2), fillcolor="#00E676"),
+        decreasing=dict(line=dict(color="#FF1744", width=1.2), fillcolor="#FF1744")
+    ), row=1, col=1)
+
+    if show_vwap:
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df['VWAP'], mode='lines', name='Institutional VWAP',
+            line=dict(color='#2962FF', width=1.8)
+        ), row=1, col=1)
+
+    if show_fvg:
+        for idx, row in df.tail(100).iterrows():
+            if row['FVG_Type'] == 'BULLISH_FVG':
+                fig.add_shape(type="rect", x0=idx, y0=row['FVG_Bottom'], x1=df.index[-1], y1=row['FVG_Top'],
+                              fillcolor="rgba(0, 230, 118, 0.12)", line=dict(width=0), layer="below", row=1, col=1)
+            elif row['FVG_Type'] == 'BEARISH_FVG':
+                fig.add_shape(type="rect", x0=idx, y0=row['FVG_Bottom'], x1=df.index[-1], y1=row['FVG_Top'],
+                              fillcolor="rgba(255, 23, 68, 0.12)", line=dict(width=0), layer="below", row=1, col=1)
+
+    if show_ob:
+        obs = df[df['OB_Type']
