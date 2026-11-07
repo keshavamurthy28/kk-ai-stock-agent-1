@@ -134,4 +134,5 @@ def load_data(ticker, period, interval):
         )
       elif (
           df["Structure"].iloc[i] == "BEARISH_BOS"
-          and df["Structure"].iloc[i - 1] != "BEARISH
+          and df["Structure"].iloc[i - 1] != "BEARISH_BOS"
+      ):
