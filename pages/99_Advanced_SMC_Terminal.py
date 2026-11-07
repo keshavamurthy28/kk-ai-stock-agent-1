@@ -171,6 +171,7 @@ def compute_analytics(df):
         (df["EMA_9"] < df["EMA_21"])
         & (df["EMA_9"].shift(1) >= df["EMA_21"].shift(1))
         & (df["Volume_Surge"]),
+        "Signal",
     ] = -1
 
     df["Bull_FVG_Low"] = np.nan
@@ -280,4 +281,203 @@ fig.add_trace(
         x=df.index,
         y=df["EMA_21"],
         line=dict(color="#FF6D00", width=1.2),
-        name="EMA
+        name="EMA 21",
+    ),
+    row=1,
+    col=1,
+)
+fig.add_trace(
+    go.Scatter(
+        x=df.index,
+        y=df["EMA_50"],
+        line=dict(color="#9C27B0", width=1.5),
+        name="EMA 50",
+    ),
+    row=1,
+    col=1,
+)
+
+# Fair Value Gap Zones Overlay (Recent 150 bars)
+recent_df = df.tail(150)
+for idx, row in recent_df.iterrows():
+    if not np.isnan(row["Bull_FVG_Low"]):
+        fig.add_shape(
+            type="rect",
+            x0=idx,
+            x1=df.index[-1],
+            y0=row["Bull_FVG_Low"],
+            y1=row["Bull_FVG_High"],
+            fillcolor="rgba(0, 230, 118, 0.15)",
+            line=dict(width=0),
+            row=1,
+            col=1,
+        )
+    if not np.isnan(row["Bear_FVG_Low"]):
+        fig.add_shape(
+            type="rect",
+            x0=idx,
+            x1=df.index[-1],
+            y0=row["Bear_FVG_Low"],
+            y1=row["Bear_FVG_High"],
+            fillcolor="rgba(255, 23, 68, 0.15)",
+            line=dict(width=0),
+            row=1,
+            col=1,
+        )
+
+# Buy/Sell Signals Execution Markers
+buy_signals = df[df["Signal"] == 1]
+sell_signals = df[df["Signal"] == -1]
+
+fig.add_trace(
+    go.Scatter(
+        x=buy_signals.index,
+        y=buy_signals["Low"] * 0.995,
+        mode="markers",
+        marker=dict(symbol="triangle-up", size=14, color="#00E676"),
+        name="Bullish Volume Crossover",
+    ),
+    row=1,
+    col=1,
+)
+fig.add_trace(
+    go.Scatter(
+        x=sell_signals.index,
+        y=sell_signals["High"] * 1.005,
+        mode="markers",
+        marker=dict(symbol="triangle-down", size=14, color="#FF1744"),
+        name="Bearish Volume Crossover",
+    ),
+    row=1,
+    col=1,
+)
+
+# 2. Volume Profile with Surge Highlighting (Row 2)
+vol_colors = [
+    "#FFD700"
+    if row["Volume_Surge"]
+    else ("#00E676" if row["Close"] >= row["Open"] else "#FF1744")
+    for _, row in df.iterrows()
+]
+fig.add_trace(
+    go.Bar(
+        x=df.index,
+        y=df["Volume"],
+        marker_color=vol_colors,
+        name="Volume (Gold=Surge)",
+    ),
+    row=2,
+    col=1,
+)
+
+# 3. RSI Oscillator Subplot (Row 3)
+fig.add_trace(
+    go.Scatter(
+        x=df.index,
+        y=df["RSI"],
+        line=dict(color="#26A69A", width=1.5),
+        name="RSI (14)",
+    ),
+    row=3,
+    col=1,
+)
+fig.add_hline(y=70, line_dash="dash", line_color="#FF5252", row=3, col=1)
+fig.add_hline(y=30, line_dash="dash", line_color="#69F0AE", row=3, col=1)
+
+# 4. MACD Subplot (Row 4)
+fig.add_trace(
+    go.Scatter(
+        x=df.index,
+        y=df["MACD"],
+        line=dict(color="#2962FF", width=1.2),
+        name="MACD Line",
+    ),
+    row=4,
+    col=1,
+)
+fig.add_trace(
+    go.Scatter(
+        x=df.index,
+        y=df["MACD_Signal"],
+        line=dict(color="#FF6D00", width=1.2),
+        name="Signal Line",
+    ),
+    row=4,
+    col=1,
+)
+hist_colors = [
+    "#00E676" if val >= 0 else "#FF1744" for val in df["MACD_Hist"]
+]
+fig.add_trace(
+    go.Bar(
+        x=df.index,
+        y=df["MACD_Hist"],
+        marker_color=hist_colors,
+        name="MACD Histogram",
+    ),
+    row=4,
+    col=1,
+)
+
+# Interactive TradingView-Like Global Layout Configuration (With Lowered Legend)
+fig.update_layout(
+    template="plotly_dark",
+    height=950,
+    xaxis_rangeslider_visible=False,
+    dragmode="zoom",
+    hovermode="x unified",
+    margin=dict(l=10, r=10, t=50, b=10),
+    legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.06,  # Sits neatly above the chart without overlapping metrics
+        xanchor="left",
+        x=0.0,
+        bgcolor="rgba(0,0,0,0.4)",
+    ),
+)
+
+# Configure Axis Tooltips & Spikelines
+fig.update_xaxes(
+    showspikes=True,
+    spikemode="across",
+    spikesnap="cursor",
+    spikecolor="#888888",
+    spikethickness=1,
+)
+fig.update_yaxes(
+    side="right",
+    showspikes=True,
+    spikecolor="#888888",
+    spikethickness=1,
+)
+
+# Display interactive chart
+st.plotly_chart(
+    fig,
+    use_container_width=True,
+    config={
+        "scrollZoom": True,
+        "displayModeBar": True,
+        "modeBarButtonsToAdd": ["drawline", "drawrect", "eraseshape"],
+    },
+)
+
+# --- RAW DATA & ANALYTICS INSPECTOR ---
+if st.checkbox("🔍 Inspect Underlying DataFrame, SMC Zones & Signals"):
+    st.dataframe(
+        df[
+            [
+                "Open",
+                "High",
+                "Low",
+                "Close",
+                "Volume",
+                "RSI",
+                "MACD",
+                "Volume_Surge",
+                "Signal",
+            ]
+        ].tail(100),
+        use_container_width=True,
+    )
