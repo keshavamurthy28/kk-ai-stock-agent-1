@@ -72,13 +72,12 @@ def fetch_and_calculate_institutional_smc(ticker, period, interval):
     df['Swing_High'] = df['High'][(df['High'] == df['High'].rolling(window*2+1, center=True).max())]
     df['Swing_Low'] = df['Low'][(df['Low'] == df['Low'].rolling(window*2+1, center=True).min())]
 
-    # --- Market Structure (BOS & CHoCH) & Trend ---
+    # --- Market Structure & Trend ---
     df['Structure'] = "NEUTRAL"
     df['Signal'] = "HOLD"
     df['Stop_Loss'] = np.nan
     df['Target'] = np.nan
 
-    # Simple EMA Trend Baseline for structural alignment
     df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
 
@@ -94,16 +93,16 @@ def fetch_and_calculate_institutional_smc(ticker, period, interval):
     df['FVG_Bottom'] = np.nan
 
     for i in range(2, len(df)):
-        if df['Low'].iloc[i] > df['High'].iloc[i-2]:  # Bullish FVG
+        if df['Low'].iloc[i] > df['High'].iloc[i-2]:
             df.loc[df.index[i], 'FVG_Type'] = "BULLISH_FVG"
             df.loc[df.index[i], 'FVG_Bottom'] = df['High'].iloc[i-2]
             df.loc[df.index[i], 'FVG_Top'] = df['Low'].iloc[i]
-        elif df['High'].iloc[i] < df['Low'].iloc[i-2]:  # Bearish FVG
+        elif df['High'].iloc[i] < df['Low'].iloc[i-2]:
             df.loc[df.index[i], 'FVG_Type'] = "BEARISH_FVG"
             df.loc[df.index[i], 'FVG_Top'] = df['Low'].iloc[i-2]
             df.loc[df.index[i], 'FVG_Bottom'] = df['High'].iloc[i]
 
-    # --- Order Blocks (Institutional Accumulation/Distribution Zones) ---
+    # --- Order Blocks ---
     df['OB_Type'] = "NONE"
     df['OB_Level'] = np.nan
     for i in range(5, len(df) - 1):
@@ -112,11 +111,4 @@ def fetch_and_calculate_institutional_smc(ticker, period, interval):
             df.loc[df.index[i], 'OB_Level'] = df['Low'].iloc[i-1]
         elif df['Close'].iloc[i] < df['Low'].iloc[i-1] and df['Close'].iloc[i-1] > df['Open'].iloc[i-1]:
             df.loc[df.index[i], 'OB_Type'] = "BEARISH_OB"
-            df.loc[df.index[i], 'OB_Level'] = df['High'].iloc[i-1]
-
-    # --- Execution Signals ---
-    for i in range(1, len(df)):
-        if df['Structure'].iloc[i] == "BULLISH_BOS" and df['Structure'].iloc[i-1] != "BULLISH_BOS":
-            df.loc[df.index[i], 'Signal'] = "BUY"
-            df.loc[df.index[i], 'Stop_Loss'] = df['Low'].iloc[i] - (1.5 * df['ATR'].iloc[i])
-            df.
+            df
