@@ -98,14 +98,24 @@ elif app_mode == "⚡ Volume Surge Scanner & Intraday Setup":
         try:
             stock = yf.Ticker(ticker)
             hist = stock.history(period="1mo")
+            
+            # Fix: Flatten MultiIndex columns if returned by yfinance
+            if isinstance(hist.columns, pd.MultiIndex):
+                hist.columns = hist.columns.droplevel(1)
+
             if hist is not None and len(hist) >= 15:
-                avg_vol = hist["Volume"].iloc[:-1].mean()
-                latest_vol = hist["Volume"].iloc[-1]
-                latest_close = hist["Close"].iloc[-1]
-                prev_close = hist["Close"].iloc[-2]
-                price_change = ((latest_close - prev_close) / prev_close) * 100
-                day_high = hist["High"].iloc[-1]
-                day_low = hist["Low"].iloc[-1]
+                # Drop rows with missing Close or Volume data
+                hist = hist.dropna(subset=["Close", "Volume", "High", "Low"])
+                if len(hist) < 15:
+                    return None
+
+                avg_vol = float(hist["Volume"].iloc[:-1].mean())
+                latest_vol = float(hist["Volume"].iloc[-1])
+                latest_close = float(hist["Close"].iloc[-1])
+                prev_close = float(hist["Close"].iloc[-2])
+                price_change = float(((latest_close - prev_close) / prev_close) * 100)
+                day_high = float(hist["High"].iloc[-1])
+                day_low = float(hist["Low"].iloc[-1])
 
                 if avg_vol > 0 and latest_vol >= (avg_vol * volume_multiplier):
                     if price_change >= 0:
@@ -122,7 +132,7 @@ elif app_mode == "⚡ Volume Surge Scanner & Intraday Setup":
                         target = round(latest_close - (risk * mult), 2)
 
                     return {
-                        "Ticker": ticker,
+                        "Ticker": ticker.replace(".NS", ""),
                         "Action Setup": action,
                         "LTP (₹)": round(latest_close, 2),
                         "Change (%)": round(price_change, 2),
@@ -130,7 +140,7 @@ elif app_mode == "⚡ Volume Surge Scanner & Intraday Setup":
                         "Suggested Target (₹)": target,
                         "Surge Ratio (x)": round(latest_vol / avg_vol, 2),
                     }
-        except Exception:
+        except Exception as e:
             pass
         return None
 
@@ -169,7 +179,6 @@ elif app_mode == "⚡ Volume Surge Scanner & Intraday Setup":
                     return 'background-color: rgba(248, 81, 73, 0.2); color: #f85149;'
                 return ''
 
-            # Updated to .map() to match modern pandas versions
             styled_df = res_df.style.map(color_coding, subset=['Action Setup'])
             st.dataframe(styled_df, use_container_width=True)
             
