@@ -1,4 +1,9 @@
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
+import yfinance as yf
 
 st.set_page_config(
     page_title="Institutional SMC & ICT Execution Terminal",
@@ -8,31 +13,25 @@ st.set_page_config(
 
 st.title("⚡ Institutional Smart Money Concepts (SMC) & ICT Master Terminal")
 st.markdown(
-    "### ⚠️ File Sync Notice\n"
-    "To resolve cloud syntax parsing issues caused by web editor line endings,"
-    " please upload this file via **Git push** from your local machine, or use"
-    " the raw code snippet below."
+    "Advanced multi-timeframe execution suite featuring **Structure Breaks (BOS/CHoCH)**,"
+    " **Liquidity Pools (Stop Hunts)**, **Fair Value Gaps (FVG)**, **VWAP Order Flow**, and **Automated Risk Management**."
 )
 
-# Core Execution Frame
-import numpy as np
-import pandas as pd
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import yfinance as yf
-
-# Sidebar
+st.sidebar.header("🛠️ Terminal Controls")
 stock_input = st.sidebar.text_input(
     "Stock Ticker (e.g., RELIANCE, TCS, HDFCBANK)", value="RELIANCE"
 ).upper()
 symbol_str = (
     f"{stock_input}.NS" if not stock_input.endswith(".NS") else stock_input
 )
+
 timeframe = st.sidebar.selectbox(
     "Select Timeframe / Resolution", ["5m", "15m", "30m", "1h", "1d"], index=4
 )
 fetch_period = "60d" if timeframe in ["5m", "15m", "30m", "1h"] else "max"
 
+st.sidebar.markdown("---")
+st.sidebar.header("⚙️ Institutional Overlays & Layers")
 show_fvg = st.sidebar.checkbox("Show Fair Value Gaps (FVG)", value=True)
 show_ob = st.sidebar.checkbox("Show Order Blocks (Support/Resistance)", value=True)
 show_liquidity = st.sidebar.checkbox(
@@ -205,6 +204,7 @@ if not df.empty and len(df) >= 15:
 
   st.markdown("---")
 
+  # --- MULTI-PANE SUBPLOTS WITH PROPER TRADINGVIEW LAYOUT ---
   fig = make_subplots(
       rows=2,
       cols=1,
@@ -212,6 +212,8 @@ if not df.empty and len(df) >= 15:
       vertical_spacing=0.03,
       row_heights=[0.8, 0.2],
   )
+
+  # Professional Candlesticks
   fig.add_trace(
       go.Candlestick(
           x=df.index,
@@ -219,7 +221,9 @@ if not df.empty and len(df) >= 15:
           high=df["High"],
           low=df["Low"],
           close=df["Close"],
-          name="OHLC",
+          name="OHLC Price",
+          increasing=dict(line=dict(color="#00E676", width=1.2)),
+          decreasing=dict(line=dict(color="#FF1744", width=1.2)),
       ),
       row=1,
       col=1,
@@ -231,8 +235,8 @@ if not df.empty and len(df) >= 15:
             x=df.index,
             y=df["VWAP"],
             mode="lines",
-            name="VWAP",
-            line=dict(color="#2962FF"),
+            name="Institutional VWAP",
+            line=dict(color="#2962FF", width=1.8),
         ),
         row=1,
         col=1,
@@ -274,7 +278,7 @@ if not df.empty and len(df) >= 15:
           y0=row["OB_Level"],
           x1=df.index[-1],
           y1=row["OB_Level"],
-          line=dict(color=color, dash="dash"),
+          line=dict(color=color, width=1.5, dash="dash"),
           row=1,
           col=1,
       )
@@ -285,8 +289,8 @@ if not df.empty and len(df) >= 15:
             x=df.index,
             y=df["Swing_High"],
             mode="markers",
-            name="Sell Liquidity",
-            marker=dict(color="#FFD700", size=8),
+            name="Sell-Side Liquidity",
+            marker=dict(symbol="circle-open", size=8, color="#FFD700"),
         ),
         row=1,
         col=1,
@@ -296,8 +300,8 @@ if not df.empty and len(df) >= 15:
             x=df.index,
             y=df["Swing_Low"],
             mode="markers",
-            name="Buy Liquidity",
-            marker=dict(color="#00FFFF", size=8),
+            name="Buy-Side Liquidity",
+            marker=dict(symbol="circle-open", size=8, color="#00FFFF"),
         ),
         row=1,
         col=1,
@@ -309,19 +313,69 @@ if not df.empty and len(df) >= 15:
   ]
   fig.add_trace(
       go.Bar(
-          x=df.index, y=df["Volume"], marker_color=vol_colors, name="Volume"
+          x=df.index,
+          y=df["Volume"],
+          marker_color=vol_colors,
+          name="Session Volume",
       ),
       row=2,
       col=1,
   )
 
+  # Fully Interactive TradingView Layout Configuration with Crosshairs & Toolbars
   fig.update_layout(
       template="plotly_dark",
-      height=800,
+      height=820,
       xaxis_rangeslider_visible=False,
-      margin=dict(l=20, r=20, t=20, b=20),
+      dragmode="zoom",
+      hovermode="x unified",
+      margin=dict(l=20, r=20, t=40, b=20),
+      legend=dict(
+          orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+      ),
   )
-  st.plotly_chart(fig, use_container_width=True)
+
+  fig.update_xaxes(
+      showspikes=True,
+      spikemode="across",
+      spikesnap="cursor",
+      spikecolor="#888888",
+      spikethickness=1,
+  )
+  fig.update_yaxes(
+      side="right",
+      showspikes=True,
+      spikecolor="#888888",
+      spikethickness=1,
+  )
+
+  chart_config = {
+      "scrollZoom": True,
+      "displayModeBar": True,
+      "modeBarButtonsToAdd": ["drawline", "drawrect", "eraseshape"],
+      "responsive": True,
+  }
+
+  st.plotly_chart(fig, use_container_width=True, config=chart_config)
+
+  st.markdown("---")
+  st.subheader("🎯 Institutional Risk & Position Sizing Matrix")
+
+  risk_per_share = abs(float(latest["Close"]) - float(stop_loss_val))
+  reward_per_share = abs(float(target_val) - float(latest["Close"]))
+  rr_ratio = reward_per_share / risk_per_share if risk_per_share > 0 else 0.0
+
+  st.markdown(
+      f"### 🧠 Expert Strategist Notes:\n"
+      f"- **Action Setup & Risk:** Dominant signal indicates **{action_type}** with"
+      f" a stop-loss anchored at **₹{float(stop_loss_val):.2f}** and target at"
+      f" **₹{float(target_val):.2f}** (Risk-Reward Ratio **1 : {rr_ratio:.2f}**).\n"
+      f"- **Key Support & Resistance:** Immediate support sits at"
+      f" **₹{support_level:,.2f}** and overhead resistance at"
+      f" **₹{resistance_level:,.2f}**.\n"
+      f"- **Active Fair Value Gap (FVG):** Current unmitigated imbalance zone"
+      f" spans between **{fvg_range_str}**."
+  )
 else:
   st.warning(
       "Please enter a valid stock ticker symbol or select a different"
