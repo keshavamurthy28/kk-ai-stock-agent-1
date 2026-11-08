@@ -11,7 +11,7 @@ st.set_page_config(
 )
 
 st.title("🌐 All-NSE Institutional Signal Scanner")
-st.markdown("Scans top NSE F&O stocks simultaneously for Order Blocks, generating automated Buy/Sell signals with SL & Targets.")
+st.markdown("Scans top NSE F&O stocks simultaneously for Order Blocks, automatically ranked by momentum strength.")
 
 # Comprehensive Universe of Top Liquid NSE F&O Stocks
 NSE_FO_UNIVERSE = [
@@ -56,9 +56,13 @@ def scan_all_stocks(tickers, tf):
             # Order Block & Displacement Logic
             df['Body'] = (df['Close'] - df['Open']).abs()
             df['ATR'] = df['Body'].rolling(14, min_periods=1).mean()
+            df['Volume_MA'] = df['Volume'].rolling(10, min_periods=1).mean()
             df['Displacement'] = df['Body'] > (1.2 * df['ATR'])
             df['Bullish_Impulse'] = (df['Close'] > df['Open']) & df['Displacement']
             df['Bearish_Impulse'] = (df['Close'] < df['Open']) & df['Displacement']
+
+            # Calculate a strength score based on volume surge and candle size ratio
+            vol_ratio = float(df['Volume'].iloc[-1] / (df['Volume_MA'].iloc[-1] + 1))
 
             # Check latest candles for active OB
             for i in range(len(df)-3, len(df)):
@@ -74,9 +78,12 @@ def scan_all_stocks(tickers, tf):
                     t1 = round(entry_max + (risk * rr_ratio), 2)
                     t2 = round(entry_max + (risk * (rr_ratio + 1.0)), 2)
                     
+                    strength_score = round(vol_ratio * (df['Body'].iloc[i] / df['ATR'].iloc[i]), 2)
+                    
                     master_signals.append({
                         'Stock': ticker.replace(".NS", ""),
                         'Action': 'BUY',
+                        'Strength Score': strength_score,
                         'LTP': round(float(df['Close'].iloc[-1]), 2),
                         'Entry Min': entry_min,
                         'Entry Max': entry_max,
@@ -85,20 +92,23 @@ def scan_all_stocks(tickers, tf):
                         'Target 2': t2,
                         'Time': str(df.index[i-1])[:16]
                     })
-                    break # Grab latest valid signal per stock
+                    break
                     
                 # Bearish OB (SELL)
                 elif df['Bearish_Impulse'].iloc[i] and df['Close'].iloc[i-1] > df['Open'].iloc[i-1]:
                     entry_min = round(float(df['Low'].iloc[i-1]), 2)
-                    entry_max = round(float(df['High'].iloc[i-1], 2), 2) if hasattr(df['High'], 'iloc') else round(float(df['High'].iloc[i-1]), 2)
+                    entry_max = round(float(df['High'].iloc[i-1]), 2)
                     sl = round(entry_max * 1.008, 2)
                     risk = sl - entry_min
                     t1 = round(entry_min - (risk * rr_ratio), 2)
                     t2 = round(entry_min - (risk * (rr_ratio + 1.0)), 2)
                     
+                    strength_score = round(vol_ratio * (df['Body'].iloc[i] / df['ATR'].iloc[i]), 2)
+                    
                     master_signals.append({
                         'Stock': ticker.replace(".NS", ""),
                         'Action': 'SELL',
+                        'Strength Score': strength_score,
                         'LTP': round(float(df['Close'].iloc[-1]), 2),
                         'Entry Min': entry_min,
                         'Entry Max': entry_max,
@@ -113,7 +123,12 @@ def scan_all_stocks(tickers, tf):
             
     progress_bar.empty()
     status_text.empty()
-    return pd.DataFrame(master_signals)
+    
+    df_out = pd.DataFrame(master_signals)
+    if not df_out.empty:
+        # Sort by Strength Score descending so highest ranked/strongest show on top
+        df_out = df_out.sort_values(by='Strength Score', ascending=False).reset_index(drop=True)
+    return df_out
 
 # Run Scanner Button
 if st.button("🚀 Run Full NSE Market Scan", type="primary"):
@@ -127,11 +142,13 @@ if 'scan_results' in st.session_state:
     if not res_df.empty:
         # Apply Sidebar Filter
         if signal_filter == "BUY ONLY":
-            res_df = res_df[res_df['Action'] == 'BUY']
+            filtered_df = res_df[res_df['Action'] == 'BUY'].reset_index(drop=True)
         elif signal_filter == "SELL ONLY":
-            res_df = res_df[res_df['Action'] == 'SELL']
+            filtered_df = res_df[res_df['Action'] == 'SELL'].reset_index(drop=True)
+        else:
+            filtered_df = res_df
             
-        st.success(f"Scan complete! Found {len(res_df)} active institutional setups.")
+        st.success(f"Scan complete! Showing {len(filtered_df)} ranked institutional setups.")
         
         # Summary Metrics
         col1, col2, col3 = st.columns(3)
@@ -142,12 +159,12 @@ if 'scan_results' in st.session_state:
         col3.metric("🔴 Sell Signals", sell_count)
         
         st.markdown("---")
-        st.subheader("📋 Master Trade Setup Table")
-        st.dataframe(res_df, use_container_width=True)
+        st.subheader("📋 Master Ranked Trade Setup Table")
+        st.dataframe(filtered_df, use_container_width=True, hide_index=True)
         
-        # Mobile Card View for easier viewing on phone screens
-        st.subheader("📱 Mobile Signal Cards")
-        for idx, row in res_df.iterrows():
+        # Mobile Card View
+        st.subheader("📱 Ranked Mobile Signal Cards")
+        for idx, row in filtered_df.iterrows():
             is_buy = row['Action'] == 'BUY'
             card_bg = "#132a1c" if is_buy else "#3a1518"
             border_color = "#00c853" if is_buy else "#ff3d00"
@@ -156,7 +173,7 @@ if 'scan_results' in st.session_state:
             st.markdown(f"""
             <div style="background-color: {card_bg}; border-left: 5px solid {border_color}; padding: 12px; border-radius: 8px; margin-bottom: 10px;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <b style="font-size: 16px;">{row['Stock']}</b>
+                    <b style="font-size: 16px;">#{idx+1} {row['Stock']} (Score: {row['Strength Score']})</b>
                     <span style="background-color: {badge_bg}; color: white; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;">{row['Action']}</span>
                 </div>
                 <div style="margin-top: 6px; font-size: 13px;">
@@ -172,4 +189,4 @@ if 'scan_results' in st.session_state:
     else:
         st.warning("No signals found matching current criteria.")
 else:
-    st.info("Click the **'Run Full NSE Market Scan'** button above to scan all listed stocks.")
+    st.info("Click the **'Run Full NSE Market Scan'** button above to scan and rank all listed stocks.")
