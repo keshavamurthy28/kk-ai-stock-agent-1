@@ -1,49 +1,33 @@
+import numpy as np
 import pandas as pd
 import streamlit as st
 import yfinance as yf
 
-# Expand watchlist to include Mid Cap, Small Cap & TV Momentum Stars
-EXPANDED_NSE_UNIVERSE = [
-    # CNBC Top Panel Picks & Small Caps
-    "MANKIND",
-    "DIVISLAB",
-    "HONASA",
-    "WOCKPHARMA",
-    "GLAND",
-    "RAIN",
-    "ANUPAM",
-    "DYNAMATECH",
-    "TDPOWERSYS",
-    "FINCABLES",
-    "KALYANKJIL",
-    "LAURUSLABS",
-    "IOLCP",
-    "DATAPATTNS",
-    "SAILIFE",
-    "MCX",
-    "BSE",
-    "BEL",
-    "BHEL",
-    "HAL",
-    # Large & Mid Caps
-    "SBIN",
-    "RELIANCE",
-    "TATASTEEL",
-    "INFY",
-    "HDFCBANK",
-    "ICICIBANK",
-    "M&M",
-    "NTPC",
-    "ONGC",
-    "BHARTIARTL",
-]
+st.set_page_config(
+    page_title="Morning Desk & CNBC Panel Live Picks",
+    page_icon="🎯",
+    layout="wide",
+)
+
+st.title("🎯 CNBC Morning Desk & Expert Panel Live Terminal")
+st.markdown(
+    "Track morning panel picks, volume momentum, breakout status, and"
+    " automated profit-booking targets for **any Indian stock (NSE)**."
+)
+
+st.sidebar.header("Settings")
+tickers_input = st.sidebar.text_area(
+    "Enter Tickers (comma separated, e.g., MANKIND, DIVISLAB, HONASA, WOCKPHARMA,"
+    " TDPOWERSYS)",
+    value="MANKIND, DIVISLAB, HONASA, WOCKPHARMA, GLAND, SBIN",
+)
+watchlist = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
 
 
 @st.cache_data(ttl=120)
-def scan_any_indian_stock(symbols):
+def get_data(symbols):
   data = []
   for s in symbols:
-    # Append .NS for Indian National Stock Exchange listings
     sym = f"{s}.NS" if not s.endswith(".NS") else s
     try:
       df = yf.download(
@@ -51,8 +35,7 @@ def scan_any_indian_stock(symbols):
       )
       if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
-
-      if df.empty or len(df) < 2:
+      if df.empty or len(df) < 3:
         continue
 
       ltp = float(df["Close"].iloc[-1])
@@ -61,20 +44,19 @@ def scan_any_indian_stock(symbols):
 
       avg_vol = float(df["Volume"].tail(5).mean())
       cur_vol = float(df["Volume"].iloc[-1])
-      vol_mult = cur_vol / avg_vol if avg_vol > 0 else 1.0
+      v_mult = cur_vol / avg_vol if avg_vol > 0 else 1.0
 
-      # Intraday 2.5% ATR target
-      atr = ltp * 0.025
+      atr = ltp * 0.022
       sl = round(ltp - (1.2 * atr), 2)
       tgt = round(ltp + (3.0 * atr), 2)
 
-      status = "🟢 BREAKOUT" if chg > 1.0 else "⚪ SIDEWAYS"
+      status = "🟢 BREAKOUT / MOVING GREEN" if chg > 0.5 else "🔴 ACCUMULATION"
 
       data.append({
           "Stock": s,
           "LTP": round(ltp, 2),
           "Change_%": round(chg, 2),
-          "Vol_Mult": round(vol_mult, 2),
+          "Vol_Mult": round(v_mult, 2),
           "Status": status,
           "Stop_Loss": sl,
           "Book_Profit_Target": tgt,
@@ -82,3 +64,34 @@ def scan_any_indian_stock(symbols):
     except:
       continue
   return pd.DataFrame(data)
+
+
+df_res = get_data(watchlist)
+
+if df_res.empty:
+  st.warning(
+      "Please check your ticker symbols or enter valid NSE stock names."
+  )
+else:
+  df_res = df_res.sort_values(by="Change_%", ascending=False)
+  st.markdown("### 🔥 Live Actionable Desk Picks & Profit Booking Matrix")
+
+  cols = st.columns(3)
+  for idx, row in df_res.reset_index().iterrows():
+    c_idx = idx % 3
+    with cols[c_idx]:
+      st.markdown(f"#### {row['Stock']} ({row['Change_%']:+.2f}%)")
+      st.metric(
+          label="Live Price",
+          value=f"₹{row['LTP']:.2f}",
+          delta=f"Vol: {row['Vol_Mult']}x",
+      )
+      st.markdown(f"**Zone:** {row['Status']}")
+      st.markdown(
+          f"🛑 **Stop-Loss:** ₹{row['Stop_Loss']}\n"
+          f"🎯 **Book-Profit Target:** **₹{row['Book_Profit_Target']}**"
+      )
+      st.markdown("---")
+
+  st.markdown("### 📋 Detailed Summary Table")
+  st.dataframe(df_res, use_container_width=True)
