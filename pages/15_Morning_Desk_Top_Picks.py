@@ -11,14 +11,28 @@ st.set_page_config(
 
 st.title("🎯 CNBC Morning Desk & Expert Panel Live Terminal")
 st.markdown(
-    "Track morning panel picks, volume momentum, breakout status, and"
-    " automated profit-booking targets for **any Indian stock (NSE)**."
+    "Upload a CNBC screenshot or enter tickers manually to track live volume"
+    " momentum, breakout status, and automated profit-booking targets."
 )
 
 st.sidebar.header("Settings")
+
+# 1. Added File Uploader for Screenshots
+uploaded_image = st.sidebar.file_uploader(
+    "Upload CNBC / TV Screenshot", type=["png", "jpg", "jpeg"]
+)
+if uploaded_image is not None:
+  st.sidebar.image(
+      uploaded_image, caption="Uploaded TV Screen", use_column_width=True
+  )
+  st.sidebar.info(
+      "Screenshot received! (Tip: If OCR isn't active, use the text box below"
+      " to type the stocks visible in your photo)."
+  )
+
+# 2. Ticker Input Box
 tickers_input = st.sidebar.text_area(
-    "Enter Tickers (comma separated, e.g., MANKIND, DIVISLAB, HONASA, WOCKPHARMA,"
-    " TDPOWERSYS)",
+    "Enter Tickers (comma separated)",
     value="MANKIND, DIVISLAB, HONASA, WOCKPHARMA, GLAND, SBIN",
 )
 watchlist = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
@@ -50,7 +64,7 @@ def get_data(symbols):
       sl = round(ltp - (1.2 * atr), 2)
       tgt = round(ltp + (3.0 * atr), 2)
 
-      status = "🟢 BREAKOUT / MOVING GREEN" if chg > 0.5 else "🔴 ACCUMULATION"
+      status = "🟢 BREAKOUT / MOVING GREEN" if chg > 0 else "🔴 ACCUMULATION"
 
       data.append({
           "Stock": s,
@@ -70,7 +84,8 @@ df_res = get_data(watchlist)
 
 if df_res.empty:
   st.warning(
-      "Please check your ticker symbols or enter valid NSE stock names."
+      "Please check your ticker symbols or enter valid NSE stock names (e.g.,"
+      " MANKIND, DIVISLAB)."
   )
 else:
   df_res = df_res.sort_values(by="Change_%", ascending=False)
