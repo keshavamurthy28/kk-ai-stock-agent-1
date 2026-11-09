@@ -59,7 +59,6 @@ def scan_sudden_spurts(symbols, min_chg, min_vol_mul):
   for sym in symbols:
     ticker = f"{sym}.NS" if not sym.endswith(".NS") else sym
     try:
-      # Pull live intraday / recent daily bars
       df = yf.download(
           ticker, period="5d", interval="1d", progress=False, auto_adjust=True
       )
@@ -76,12 +75,10 @@ def scan_sudden_spurts(symbols, min_chg, min_vol_mul):
       prev_close = float(prev["Close"])
       chg_pct = ((ltp - prev_close) / prev_close) * 100
 
-      # Volume Spurt Calculation
       avg_vol = float(df["Volume"].tail(4).mean())
       cur_vol = float(latest["Volume"])
       vol_ratio = cur_vol / avg_vol if avg_vol > 0 else 1.0
 
-      # Trigger condition: Meets user's minimum gain and volume spurt criteria
       if chg_pct >= min_chg and vol_ratio >= min_vol_mul:
         atr = ltp * 0.02
         stop_loss = round(ltp - (1.2 * atr), 2)
@@ -102,7 +99,7 @@ def scan_sudden_spurts(symbols, min_chg, min_vol_mul):
 
 
 if st.button("⚡ Scan for Live Sudden Breakouts & Spurts", type="primary"):
-  st.cache_data.clear()  # Flush cache to fetch raw live state
+  st.cache_data.clear()
   with st.spinner(
       "Scanning live order flow for sudden volume and price spikes..."
   ):
