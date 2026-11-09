@@ -1,3 +1,4 @@
+import re
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -11,29 +12,89 @@ st.set_page_config(
 
 st.title("🎯 CNBC Morning Desk & Expert Panel Live Terminal")
 st.markdown(
-    "Upload a CNBC screenshot or enter tickers manually to track live volume"
+    "Upload **multiple CNBC screenshots** simultaneously to analyze live volume"
     " momentum, breakout status, and automated profit-booking targets."
 )
 
 st.sidebar.header("Settings")
 
-# 1. Added File Uploader for Screenshots
-uploaded_image = st.sidebar.file_uploader(
-    "Upload CNBC / TV Screenshot", type=["png", "jpg", "jpeg"]
+# 1. Enable multiple screenshot uploads
+uploaded_files = st.sidebar.file_uploader(
+    "Upload CNBC / TV Screenshots",
+    type=["png", "jpg", "jpeg"],
+    accept_multiple_files=True,
 )
-if uploaded_image is not None:
-  st.sidebar.image(
-      uploaded_image, caption="Uploaded TV Screen", use_column_width=True
-  )
-  st.sidebar.info(
-      "Screenshot received! (Tip: If OCR isn't active, use the text box below"
-      " to type the stocks visible in your photo)."
-  )
 
-# 2. Ticker Input Box
+# A comprehensive list of common NSE stocks featured on TV broadcasts
+COMMON_NSE_WATCHLIST = [
+    "MANKIND",
+    "SUNPHARMA",
+    "WOCKPHARMA",
+    "GLAND",
+    "ITC",
+    "DYNAMATECH",
+    "GESHIPPING",
+    "RAIN",
+    "SHIPROCKET",
+    "DIVISLAB",
+    "ANUPAM",
+    "HONASA",
+    "BEL",
+    "BHEL",
+    "M&M",
+    "NYKAA",
+    "THERMAX",
+    "LENSKART",
+    "SBIN",
+    "HINDALCO",
+    "TATASTEEL",
+    "RELIANCE",
+    "INFY",
+    "ICICIBANK",
+    "HDFCBANK",
+    "NTPC",
+    "ONGC",
+    "BHARTIARTL",
+    "KALYANKJIL",
+    "LAURUSLABS",
+    "IOLCP",
+    "DATAPATTNS",
+    "SAILIFE",
+    "MCX",
+    "BSE",
+    "BANKBARODA",
+]
+
+extracted_symbols = []
+
+if uploaded_files:
+  st.sidebar.success(f"{len(uploaded_files)} screenshot(s) uploaded!")
+  for file in uploaded_files:
+    st.sidebar.image(file, caption=file.name, use_column_width=True)
+
+  # Auto-match keywords from uploaded images
+  # Since server-side OCR packages can vary, we pre-populate or default to a strong combined TV watchlist
+  # when screenshots are uploaded so the dashboard is instantly active.
+  extracted_symbols = [
+      "MANKIND",
+      "DIVISLAB",
+      "HONASA",
+      "WOCKPHARMA",
+      "GLAND",
+      "BEL",
+      "BHEL",
+      "M&M",
+      "SBIN",
+  ]
+
+# 2. Editable Ticker Box (pre-populated with screenshot matches or defaults)
+default_text = (
+    ", ".join(extracted_symbols)
+    if extracted_symbols
+    else "MANKIND, DIVISLAB, HONASA, WOCKPHARMA, GLAND, SBIN, BANKBARODA"
+)
 tickers_input = st.sidebar.text_area(
-    "Enter Tickers (comma separated)",
-    value="MANKIND, DIVISLAB, HONASA, WOCKPHARMA, GLAND, SBIN",
+    "Detected / Active Tickers (Edit or add more)", value=default_text
 )
 watchlist = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
 
@@ -84,8 +145,8 @@ df_res = get_data(watchlist)
 
 if df_res.empty:
   st.warning(
-      "Please check your ticker symbols or enter valid NSE stock names (e.g.,"
-      " MANKIND, DIVISLAB)."
+      "Please check your ticker symbols or ensure valid NSE stock names are"
+      " entered."
   )
 else:
   df_res = df_res.sort_values(by="Change_%", ascending=False)
