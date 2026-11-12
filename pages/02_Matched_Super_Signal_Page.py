@@ -90,25 +90,22 @@ if st.button("🚀 Run Instant Expert Scan & Generate Trades", type="primary"):
         df_matched = pd.DataFrame(results).sort_values(by="Change (%)", ascending=False)
         st.success(f"🎯 Execution Matrix Ready! Found {len(df_matched)} high-conviction breakout setups.")
         
-        # Display as clean, professional expert cards and data grid
-        st.dataframe(
-            df_matched.style.applymap(lambda x: 'color: green;' if isinstance(x, (int, float)) and x > 0 else '', subset=['Change (%)']),
-            use_container_width=True
-        )
+        # Display professional expert table
+        st.dataframe(df_matched, use_container_width=True)
         
         st.markdown("### 📋 Quick-Execution Summary Cards")
         cols = st.columns(3)
         for i, row in df_matched.reset_index().iterrows():
             with cols[i % 3]:
                 st.markdown(f"""
-                ### 🟢 {row['Stock']} ({row['Change (%)']:+.2f}%)
-                * **Action:** **{row['Action']}** at ₹{row['LTP (₹)']}
-                * **Volume Surge:** {row['Volume Spike']}
-                * 🛑 **Stop-Loss:** **₹{row['Stop_Loss (₹)']0}**
-                * 🎯 **Target 1:** **₹{row['Target 1 (₹)']0}**
-                * 🎯 **Target 2:** **₹{row['Target 2 (₹)']0}**
-                ---
-                """)
+### 🟢 {row['Stock']} ({row['Change (%)']:+.2f}%)
+* **Action:** **{row['Action']}** at ₹{row['LTP (₹)']}
+* **Volume Surge:** {row['Volume Spike']}
+* 🛑 **Stop-Loss:** **₹{row['Stop Loss (₹)']}**
+* 🎯 **Target 1:** **₹{row['Target 1 (₹)']}**
+* 🎯 **Target 2:** **₹{row['Target 2 (₹)']}**
+---
+""")
     else:
         st.warning("No stocks matched the strict volume/momentum criteria right now. Try lowering the 'Min Volume Multiplier' slider to 1.1x in the sidebar.")
 else:
