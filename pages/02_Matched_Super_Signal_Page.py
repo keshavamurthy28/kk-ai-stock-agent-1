@@ -5,29 +5,31 @@ import yfinance as yf
 st.set_page_config(page_title="Matched Super-Signal Watchlist", layout="wide")
 
 st.markdown("### 🎯 Matched Morning Super-Signal Watchlist")
-st.markdown("Automatically cross-references your Night-Before Homework with Live Morning Volume Spurts.")
-
-# 1. Create a unified session state so lists from Night Before Prep flow here automatically
-if "universal_watchlist" not in st.session_state:
-    st.session_state.universal_watchlist = [
-        "HINDCOPPER", "STLTECH", "CUPID", "KALYANKJIL", "ITC", "SBIN", "ONGC"
-    ]
+st.markdown("Automatically scans live Indian market leaders, high-volume stocks, and cross-references your morning volume filters.")
 
 st.sidebar.header("Filters")
 min_vol_surge = st.sidebar.slider("Min Volume Surge (x)", 1.0, 5.0, 2.0, 0.1)
 
-# Allow manual override or addition of your scanned stocks
-user_tickers = st.sidebar.text_area(
-    "Active Homework Watchlist (Comma separated)", 
-    value=", ".join(st.session_state.universal_watchlist)
-)
-watchlist = [t.strip().upper() for t in user_tickers.split(",") if t.strip()]
+# Curated list of heavy-weight / active NSE momentum stocks to scan automatically
+# You can expand this list or hook it to an NSE live index/scraper fetch
+DEFAULT_NSE_UNIVERSE = [
+    "HINDCOPPER", "STLTECH", "CUPID", "KALYANKJIL", "ITC", "SBIN", "ONGC",
+    "RELIANCE", "TATASTEEL", "INFY", "ICICIBANK", "HDFCBANK", "NTPC", 
+    "BHARTIARTL", "TATAPOWER", "ADANIPORTS", "BAJFINANCE", "M&M", "SUNPHARMA",
+    "WOCKPHARMA", "GLAND", "BEL", "BHEL", "DIVISLAB", "HONASA", "ROTO", "V2RETAIL"
+]
 
-if st.button("Run Super-Signal Match Scan"):
+if st.button("Run Automated Market Scan"):
     results = []
-    for symbol in watchlist:
-        sym_query = f"{symbol}.NS" if not symbol.endswith(".NS") else symbol
+    
+    # Progress bar for smooth automatic fetching
+    progress_bar = st.progress(0)
+    total_stocks = len(DEFAULT_NSE_UNIVERSE)
+    
+    for idx, symbol in enumerate(DEFAULT_NSE_UNIVERSE):
+        sym_query = f"{symbol}.NS"
         try:
+            # Fetch recent price and volume history via yfinance
             df = yf.download(sym_query, period="5d", interval="1d", progress=False, auto_adjust=True)
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
@@ -42,7 +44,7 @@ if st.button("Run Super-Signal Match Scan"):
             cur_vol = float(df["Volume"].iloc[-1])
             vol_mult = cur_vol / avg_vol if avg_vol > 0 else 1.0
             
-            # Relaxed filter or exact match
+            # Automatically evaluate if it crosses your volume breakout filter
             if vol_mult >= min_vol_surge:
                 atr = ltp * 0.02
                 results.append({
@@ -56,9 +58,15 @@ if st.button("Run Super-Signal Match Scan"):
         except Exception:
             continue
             
+        progress_bar.progress((idx + 1) / total_stocks)
+        
+    progress_bar.empty()
+    
     if results:
         df_matched = pd.DataFrame(results).sort_values(by="Volume Multiplier", ascending=False)
-        st.success(f"Found {len(df_matched)} active breakout signals matching your criteria!")
+        st.success(f"Successfully auto-scanned market and found {len(df_matched)} active breakout signals matching your volume criteria!")
         st.dataframe(df_matched, use_container_width=True)
     else:
-        st.warning("No matched super-signals found right now based on your volume filter threshold. Try lowering the Min Volume Surge slider to 1.1x or 1.2x.")
+        st.warning("Market scan completed, but no stocks met the current volume multiplier threshold. Try lowering the 'Min Volume Surge' slider on the sidebar to 1.1x or 1.2x.")
+else:
+    st.info("Click **'Run Automated Market Scan'** above to let the app automatically check active Indian stock market tickers for breakout and profit-booking setups.")
