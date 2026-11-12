@@ -3,13 +3,53 @@ import pandas as pd
 import streamlit as st
 
 st.title("🌙 Night Before Institutional Prep & Watchlist Generator")
-
-risk_tolerance = st.sidebar.selectbox(
-    "Select Risk Profile", ["Conservative (Swing)", "Aggressive (Momentum)"]
+st.markdown(
+    "Pre-market institutional scan results split into **Conservative Swing**"
+    " and **Aggressive Momentum** tables for instant comparative review."
 )
 
-# Sample data showing different statuses
-watchlist_data = [
+# --- 1. CONSERVATIVE SWING TABLE ---
+st.subheader("🛡️ Conservative Swing Watchlist")
+
+conservative_data = [
+    {
+        "Stock": "HDFCBANK",
+        "Close": 812.30,
+        "Change_%": 0.71,
+        "Volume_Spurt": "1.4x",
+        "Status": "Night Watchlist Candidate",
+        "Catalyst_Driver": "FII Delivery Buying & Institutional Support",
+    },
+    {
+        "Stock": "PNB",
+        "Close": 141.79,
+        "Change_%": 2.39,
+        "Volume_Spurt": "1.8x",
+        "Status": "Night Watchlist Candidate",
+        "Catalyst_Driver": "Banking Sector Rotation & Strong Quarterly Outlook",
+    },
+]
+
+df_conservative = pd.DataFrame(conservative_data)
+
+
+def conservative_highlighter(row):
+  return [
+      "background-color: #3B1443; color: #EA80FC; font-weight: bold;"
+      for _ in row
+  ]  # Rich Purple
+
+
+styled_conservative = df_conservative.style.apply(
+    conservative_highlighter, axis=1
+)
+st.dataframe(styled_conservative, use_container_width=True)
+
+
+# --- 2. AGGRESSIVE MOMENTUM TABLE ---
+st.subheader("⚡ Aggressive Momentum Watchlist")
+
+aggressive_data = [
     {
         "Stock": "DCXINDIA",
         "Close": 163.80,
@@ -32,39 +72,28 @@ watchlist_data = [
     },
 ]
 
-df_watchlist = pd.DataFrame(watchlist_data)
+df_aggressive = pd.DataFrame(aggressive_data)
 
 
-# Function to apply distinct, non-similar colors
-def distinct_color_highlighter(row):
+def aggressive_highlighter(row):
   status = str(row["Status"])
   if "Super Signal" in status:
-    # Emerald Green for Master Overlaps
     return [
         "background-color: #0E4429; color: #76FF03; font-weight: bold;"
         for _ in row
-    ]
-  elif "Top 2" in status:
-    # Electric Blue for Top 2 Picks
+    ]  # Emerald Green
+  else:
     return [
         "background-color: #113F67; color: #00E5FF; font-weight: bold;"
         for _ in row
-    ]
-  else:
-    # Purple for general watchlist
-    return [
-        "background-color: #3B1443; color: #EA80FC; font-weight: bold;"
-        for _ in row
-    ]
+    ]  # Electric Blue
 
 
-st.subheader(f"📋 Pre-Market Watchlist Matrix — {risk_tolerance}")
+styled_aggressive = df_aggressive.style.apply(aggressive_highlighter, axis=1)
+st.dataframe(styled_aggressive, use_container_width=True)
 
-# Render table with distinct styling
-styled_df = df_watchlist.style.apply(distinct_color_highlighter, axis=1)
-st.dataframe(styled_df, use_container_width=True)
 
-# Dedicated Color Legend Card
+# --- COLOR CODE LEGEND CARD ---
 st.markdown("### 🎨 Distinct Color-Code Legend")
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -85,6 +114,6 @@ with col3:
   st.markdown(
       '<div style="background-color: #3B1443; color: #EA80FC; padding: 10px;'
       ' border-radius: 5px; text-align: center; font-weight: bold;">🟣 Rich'
-      " Purple<br>Night Watchlist Candidate</div>",
+      " Purple<br>Conservative Swing Candidate</div>",
       unsafe_allow_html=True,
   )
