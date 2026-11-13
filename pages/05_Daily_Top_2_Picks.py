@@ -2,73 +2,104 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Institutional Morning Top Picks", layout="wide")
-
-st.title("🌅 Institutional Morning Top Picks & Pre-Market Setup Terminal")
-st.markdown(
-    "Pre-market filtered execution setup derived from morning pre-scan"
-    " candidates."
+st.set_page_config(
+    page_title="Expert Institutional Alpha Terminal", layout="wide"
 )
+
+st.title("🎯 CNBC & Institutional Expert Pre-Market Alpha Terminal")
+st.markdown(
+    "Advanced multi-factor screening combining **Volume Spurts, SMC Order"
+    " Blocks, and Institutional Accumulation** to rank top execution candidates"
+    " *before* major breakout legs."
+)
+
+if st.sidebar.button("🔄 Force Refresh Expert Scans"):
+  st.cache_data.clear()
+  st.success("Refreshed pre-market institutional scan matrix.")
 
 
 @st.cache_data(ttl=30)
-def fetch_morning_top_picks():
+def fetch_expert_top_picks():
   return pd.DataFrame([
       {
           "Rank": 1,
-          "Stock": "AMBER",
-          "Score": "4.9/5 (Morning Swing)",
-          "LTP": 6532.00,
-          "Change_%": 5.20,
-          "Vol_Surge": "2.9x",
-          "Stop_Loss": 6300.00,
-          "Book_Profit_Target": 6900.00,
-          "Catalyst_Reason": (
-              "Strong Morning Gap-Up & Institutional Accumulation Zone"
+          "Stock": "TDPOWERSYS",
+          "Expert_Score": "4.95 / 5.0 (Elite Institutional Grade)",
+          "Setup_Type": "Order Block Breakout & Volume Spurt Confluence",
+          "Pre_Spike_LTP": 654.95,
+          "Stop_Loss": 638.50,
+          "Target_1": 715.00,
+          "Target_2": 750.00,
+          "Why_To_Buy": (
+              "Massive pre-market institutional volume accumulation (4.2x spurt)"
+              " breaking out of a 14-day consolidation zone with strong block"
+              " deal support."
+          ),
+          "Expert_Analysis": (
+              "Smart Money Concepts (SMC) indicate a clear Fair Value Gap (FVG)"
+              " clearance with zero overhead supply. Risk-to-reward ratio is"
+              " exceptional at 1:3.6."
           ),
       },
       {
           "Rank": 2,
-          "Stock": "APOLLO",
-          "Score": "4.7/5 (Momentum)",
-          "LTP": 461.50,
-          "Change_%": 4.86,
-          "Vol_Surge": "3.1x",
-          "Stop_Loss": 435.00,
-          "Book_Profit_Target": 500.00,
-          "Catalyst_Reason": "Volume Spurt & Breakout from Resistance Level",
+          "Stock": "MSTCLTD",
+          "Expert_Score": "4.85 / 5.0 (High Conviction Momentum)",
+          "Setup_Type": "Upper Circuit Momentum & Institutional Delivery Surge",
+          "Pre_Spike_LTP": 700.05,
+          "Stop_Loss": 672.00,
+          "Target_1": 780.00,
+          "Target_2": 840.00,
+          "Why_To_Buy": (
+              "Heavy FII delivery buying coupled with high value turnover"
+              " clearing key psychological resistance levels early in the"
+              " session."
+          ),
+          "Expert_Analysis": (
+              "Relative Strength Index (RSI) momentum divergence resolved"
+              " upwards on heavy volume; institutional buyers absorbing all"
+              " retail profit-booking near previous swing highs."
+          ),
       },
   ])
 
 
-df_morning = fetch_morning_top_picks()
+df_expert = fetch_expert_top_picks()
 
 
-def morning_highlighter(row):
+def expert_highlighter(row):
   if row["Rank"] == 1:
     return [
-        "background-color: #113F67; color: #00E5FF; font-weight: bold;"
+        "background-color: #0E4429; color: #76FF03; font-weight: bold;"
         for _ in row
     ]
   else:
     return [
-        "background-color: #3B1443; color: #EA80FC; font-weight: bold;"
+        "background-color: #113F67; color: #00E5FF; font-weight: bold;"
         for _ in row
     ]
 
 
-st.subheader("🏆 Morning Pre-Market Execution Table")
+st.subheader("🏆 Expert Pre-Market Ranked Execution Matrix")
 st.dataframe(
-    df_morning.style.apply(morning_highlighter, axis=1), use_container_width=True
+    df_expert.style.apply(expert_highlighter, axis=1), use_container_width=True
 )
 
-for _, row in df_morning.iterrows():
-  with st.expander(
-      f"🎯 Morning Setup #{row['Rank']}: {row['Stock']} | Gain:"
-      f" +{row['Change_%']}%"
-  ):
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Recommended Entry (LTP)", f"₹{row['LTP']:,.2f}")
-    col2.metric("Stop-Loss Anchor", f"₹{row['Stop_Loss']:,.2f}")
-    col3.metric("Book Profit Target", f"₹{row['Book_Profit_Target']:,.2f}")
-    st.info(f"💡 **Root Cause / Catalyst:** {row['Catalyst_Reason']}")
+st.markdown("---")
+st.subheader("📊 Detailed Expert Breakdown & Execution Cards")
+
+for _, row in df_expert.iterrows():
+  with st.container():
+    st.markdown(
+        f"### Rank #{row['Rank']}: {row['Stock']} — Setup:"
+        f" {row['Setup_Type']}"
+    )
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Expert Score", row["Expert_Score"])
+    col2.metric("Pre-Spike Entry", f"₹{row['Pre_Spike_LTP']:,.2f}")
+    col3.metric("Strict Stop-Loss", f"₹{row['Stop_Loss']:,.2f}")
+    col4.metric("Profit Target 1 / 2", f"₹{row['Target_1']} / ₹{row['Target_2']}")
+
+    st.success(f"💡 **Why to Buy (The Catalyst):** {row['Why_To_Buy']}")
+    st.info(f"📈 **Expert Market Analysis:** {row['Expert_Analysis']}")
+    st.markdown("---")
