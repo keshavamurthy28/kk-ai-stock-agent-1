@@ -24,7 +24,6 @@ def fetch_top_two_picks():
 
   leaders with comprehensive trade execution metrics.
   """
-  # Focus pool of top momentum institutional candidates
   candidate_pool = [
       "TDPOWERSYS",
       "MSTCLTD",
@@ -35,7 +34,6 @@ def fetch_top_two_picks():
       "KALYANKJIL",
       "DCXINDIA",
   ]
-
   ranked_data = []
 
   for symbol in candidate_pool:
@@ -71,11 +69,9 @@ def fetch_top_two_picks():
     except Exception:
       continue
 
-  # Sort by highest score and pick top 2
   ranked_data = sorted(ranked_data, key=lambda x: x["Score"], reverse=True)
   top_two = ranked_data[:2]
 
-  # Fallback if live fetch is empty
   if len(top_two) < 2:
     top_two = [
         {
@@ -97,13 +93,11 @@ def fetch_top_two_picks():
   return top_two
 
 
-# Fetch Top 2 Selections
 with st.spinner("Analyzing market flow to isolate today's Top 2 Picks..."):
   top_picks = fetch_top_two_picks()
 
 st.markdown("---")
 
-# Render each of the Top 2 Picks with advanced details and interactive charts
 for idx, pick in enumerate(top_picks):
   rank = idx + 1
   stock_name = pick["Stock"]
@@ -111,7 +105,6 @@ for idx, pick in enumerate(top_picks):
   change = pick["Change_%"]
   vol_spurt = pick["Volume_Spurt"]
 
-  # Dynamic setup calculations
   stop_loss = round(ltp * 0.95, 2)
   target_1 = round(ltp * 1.06, 2)
   target_2 = round(ltp * 1.12, 2)
@@ -126,7 +119,6 @@ for idx, pick in enumerate(top_picks):
   col3.metric("Profit Target 1", f"₹{target_1:,.2f}", "+6.0% Gain")
   col4.metric("Profit Target 2", f"₹{target_2:,.2f}", "+12.0% Gain")
 
-  # Advanced Institutional Analysis
   st.info(
       f"💡 **Why to Buy (The Catalyst):** Heavy institutional accumulation"
       f" with a **{vol_spurt}** volume spurt clearing key resistance zones."
@@ -134,7 +126,6 @@ for idx, pick in enumerate(top_picks):
       " with superior risk-to-reward ratio."
   )
 
-  # Interactive TradingView-style Candlestick Chart for the Stock
   hist_df = pick["History"]
   if not hist_df.empty:
     fig = go.Figure(
@@ -156,7 +147,7 @@ for idx, pick in enumerate(top_picks):
         ]
     )
 
-    # Overlay Target and Stop Loss lines
+    # Completed horizontal target and stop-loss overlay lines
     fig.add_hline(
         y=target_1,
         line_dash="dash",
@@ -165,3 +156,21 @@ for idx, pick in enumerate(top_picks):
         annotation_position="top left",
     )
     fig.add_hline(
+        y=stop_loss,
+        line_dash="dash",
+        line_color="#FF5252",
+        annotation_text=f"Stop Loss: ₹{stop_loss}",
+        annotation_position="bottom left",
+    )
+
+    fig.update_layout(
+        title=f"Advanced Price Action & SMC Chart for {stock_name}",
+        yaxis_title="Price (INR ₹)",
+        template="plotly_dark",
+        height=450,
+        xaxis_rangeslider_visible=False,
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+  st.markdown("---")
