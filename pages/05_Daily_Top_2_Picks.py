@@ -80,7 +80,6 @@ def fetch_top_two_picks():
   top_two = ranked_data[:2]
 
   if len(top_two) < 2:
-    # Safe fallback with computed EMAs
     fallback_hist = yf.Ticker("MSTCLTD.NS").history(period="15d")
     fallback_hist["EMA_9"] = fallback_hist["Close"].ewm(span=9).mean()
     fallback_hist["EMA_21"] = fallback_hist["Close"].ewm(span=21).mean()
@@ -218,3 +217,17 @@ for idx, pick in enumerate(top_picks):
         annotation_text=f"Stop Loss: ₹{stop_loss}",
         annotation_position="bottom left",
     )
+
+    fig.update_layout(
+        title=f"Advanced Intraday SMC Chart for {stock_name} (EMA & FVG)",
+        yaxis_title="Price (INR ₹)",
+        template="plotly_dark",
+        height=500,
+        xaxis_rangeslider_visible=False,
+        hovermode="x unified",
+    )
+
+    # RENDER THE PLOTLY CHART IN STREAMLIT
+    st.plotly_chart(fig, use_container_width=True)
+
+  st.markdown("---")
