@@ -2,15 +2,12 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(
-    page_title="Institutional Morning Top Picks",
-    layout="wide",
-)
+st.set_page_config(page_title="Institutional Morning Top Picks", layout="wide")
 
 st.title("🌅 Institutional Morning Top Picks & Pre-Market Setup Terminal")
 st.markdown(
-    "Pre-market filtered execution setup derived from overnight institutional"
-    " accumulation scans."
+    "Pre-market filtered execution setup derived from morning pre-scan"
+    " candidates."
 )
 
 
@@ -61,8 +58,9 @@ def morning_highlighter(row):
 
 
 st.subheader("🏆 Morning Pre-Market Execution Table")
-styled_morning = df_morning.style.apply(morning_highlighter, axis=1)
-st.dataframe(styled_morning, use_container_width=True)
+st.dataframe(
+    df_morning.style.apply(morning_highlighter, axis=1), use_container_width=True
+)
 
 for _, row in df_morning.iterrows():
   with st.expander(
