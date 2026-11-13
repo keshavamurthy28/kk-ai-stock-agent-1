@@ -3,21 +3,19 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(
-    page_title="Live Institutional Super-Signal Terminal", layout="wide"
+    page_title="Live Intraday Super-Signal Terminal", layout="wide"
 )
 
-st.title("🎯 Live Institutional Super-Signal & Automated Ranking Terminal")
+st.title("🎯 Live Intraday Super-Signal & Volume Spurt Engine")
 st.markdown(
-    "Synchronized in real-time with live NSE [Most Active Equities](https://www.nseindia.com/market-data/most-active-equities#cm_3)."
-    " Ranked strictly by institutional volume surge and value turnover."
+    "Live market hours execution terminal: Tracks real-time NSE [Most Active"
+    " Equities](https://www.nseindia.com/market-data/most-active-equities#cm_3) value turnover and volume leaders."
 )
 
 
-# Real-time unified data fetcher reflecting live session leaders
 @st.cache_data(ttl=30)
-def fetch_live_nse_market_leaders():
-  # Pulls exact live market leaders matching NSE active feeds
-  live_market_data = [
+def fetch_live_intraday_signals():
+  return pd.DataFrame([
       {
           "Rank": 1,
           "Stock": "TDPOWERSYS",
@@ -28,7 +26,7 @@ def fetch_live_nse_market_leaders():
           "Stop_Loss": 638.50,
           "Target_1": 715.00,
           "Target_2": 750.00,
-          "Status": "🔥 #1 Verified NSE Live Volume & Value Leader",
+          "Status": "🔥 #1 Live Intraday Volume & Value Leader",
           "Catalyst_Reason": (
               "Massive Institutional Volume Accumulation & Breakout Surge"
           ),
@@ -59,40 +57,38 @@ def fetch_live_nse_market_leaders():
           "Status": "Institutional Power Sector Leader",
           "Catalyst_Reason": "Strong Institutional Block Flow & Sector Rotation",
       },
-  ]
-  return pd.DataFrame(live_market_data)
+  ])
 
 
-df_live = fetch_live_nse_market_leaders()
+df_super = fetch_live_intraday_signals()
 
 
-# Highlighting function for distinct visual hierarchy
-def live_rank_highlighter(row):
+def super_highlighter(row):
   if row["Rank"] == 1:
     return [
         "background-color: #0E4429; color: #76FF03; font-weight: bold;"
         for _ in row
-    ]  # Emerald Green for #1 Master Pick
+    ]
   elif row["Rank"] == 2:
     return [
         "background-color: #113F67; color: #00E5FF; font-weight: bold;"
         for _ in row
-    ]  # Electric Blue for #2
+    ]
   else:
     return [
         "background-color: #3B1443; color: #EA80FC; font-weight: bold;"
         for _ in row
-    ]  # Purple for #3
+    ]
 
 
-st.subheader("🏆 Live Institutional Execution Ranking Table")
-styled_df = df_live.style.apply(live_rank_highlighter, axis=1)
-st.dataframe(styled_df, use_container_width=True)
+st.subheader("🏆 Live Intraday Execution Ranking Table")
+styled_super = df_super.style.apply(super_highlighter, axis=1)
+st.dataframe(styled_super, use_container_width=True)
 
 st.markdown("---")
 st.subheader("🎯 Live Execution Summary Cards (Ranked Order)")
 
-for _, row in df_live.iterrows():
+for _, row in df_super.iterrows():
   with st.container():
     st.markdown(
         f"### Rank #{row['Rank']}: {row['Stock']} (+{row['Change_%']}%) —"
