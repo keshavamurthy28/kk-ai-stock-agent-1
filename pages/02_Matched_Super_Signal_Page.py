@@ -12,6 +12,10 @@ st.markdown(
     " Equities](https://www.nseindia.com/market-data/most-active-equities#cm_3) value turnover and volume leaders."
 )
 
+if st.sidebar.button("🔄 Force Refresh Live Data"):
+  st.cache_data.clear()
+  st.success("Cache cleared! Loaded latest live market data.")
+
 
 @st.cache_data(ttl=30)
 def fetch_live_intraday_signals():
@@ -82,8 +86,9 @@ def super_highlighter(row):
 
 
 st.subheader("🏆 Live Intraday Execution Ranking Table")
-styled_super = df_super.style.apply(super_highlighter, axis=1)
-st.dataframe(styled_super, use_container_width=True)
+st.dataframe(
+    df_super.style.apply(super_highlighter, axis=1), use_container_width=True
+)
 
 st.markdown("---")
 st.subheader("🎯 Live Execution Summary Cards (Ranked Order)")
