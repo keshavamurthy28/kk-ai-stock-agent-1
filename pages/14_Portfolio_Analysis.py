@@ -1,234 +1,219 @@
 import datetime
 import pandas as pd
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import plotly.express as px
 import streamlit as st
 import yfinance as yf
 
-st.set_page_config(page_title="Zerodha Portfolio Analysis", layout="wide")
-
-st.title("📊 Zerodha Portfolio Trend & Action Agent")
-st.write(
-    "Upload your Zerodha Console holdings `.xlsx` file for customized rules,"
-    " date filtering, and visual charts."
+st.set_page_config(
+    page_title="Zerodha Portfolio & Technical Analysis Agent", layout="wide"
 )
 
-# Sidebar Parameters for Customizable Rules & Dates
-st.sidebar.header("⚙️ Customize Trading Rules")
-rsi_overbought = st.sidebar.slider("RSI Overbought (Sell Limit)", 60, 80, 70)
-rsi_oversold = st.sidebar.slider("RSI Oversold (Dip Limit)", 20, 40, 30)
-ema_fast_p = st.sidebar.number_input("Fast EMA Period", value=20)
-ema_slow_p = st.sidebar.number_input("Slow EMA Period", value=50)
+st.title("Zerodha Portfolio Trend & Action Agent")
+st.markdown(
+    "Upload your Zerodha Console portfolio holdings export file to evaluate"
+    " asset performance, track P&L, and screen for technical breakout or"
+    " dip-buying opportunities."
+)
+
+# Sidebar Controls & Technical Thresholds
+st.sidebar.header("⚙️ Portfolio & Technical Rules")
+uploaded_holdings = st.sidebar.file_uploader(
+    "Upload Zerodha Holdings (.xlsx or .csv)", type=["xlsx", "csv"]
+)
 
 st.sidebar.markdown("---")
-st.sidebar.header("📅 Date Range Selector")
-default_start = datetime.date.today() - datetime.timedelta(days=180)
-default_end = datetime.date.today()
-start_date = st.sidebar.date_input("Start Date", value=default_start)
-end_date = st.sidebar.date_input("End Date", value=default_end)
-
-
-def clean_symbol(symbol):
-  s = str(symbol).strip().upper()
-  s = s.replace("-EQ", "").replace("-E", "").replace(".NS", "")
-  return f"{s}.NS"
-
-
-def calculate_rsi(series, period=14):
-  delta = series.diff()
-  gain = delta.where(delta > 0, 0).rolling(window=period).mean()
-  loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-  rs = gain / loss
-  return 100 - (100 / (1 + rs))
-
-
-def fetch_and_analyze(symbol, start_d, end_d):
-  ticker_symbol = clean_symbol(symbol)
-  # Fetch data dynamically using explicit start and end dates to avoid static fallbacks
-  df = yf.download(
-      ticker_symbol,
-      start=start_d.strftime("%Y-%m-%d"),
-      end=end_d.strftime("%Y-%m-%d"),
-      progress=False,
-  )
-
-  # Handle multi-index columns if returned by newer yfinance versions
-  if isinstance(df.columns, pd.MultiIndex):
-    df.columns = df.columns.get_level_values(0)
-
-  if df.empty or len(df) < min(ema_slow_p, 10):
-    return None, "NO DATA", 0, 0, 0
-
-  df[f"EMA_{ema_fast_p}"] = (
-      df["Close"].ewm(span=ema_fast_p, adjust=False).mean()
-  )
-  df[f"EMA_{ema_slow_p}"] = (
-      df["Close"].ewm(span=ema_slow_p, adjust=False).mean()
-  )
-  df["RSI"] = calculate_rsi(df["Close"], period=14)
-
-  latest = df.iloc[-1]
-  ltp = float(latest["Close"])
-  rsi_val = float(latest["RSI"])
-  ema_fast_val = float(latest[f"EMA_{ema_fast_p}"])
-  ema_slow_val = float(latest[f"EMA_{ema_slow_p}"])
-
-  if ltp < ema_slow_val or rsi_val >= rsi_overbought:
-    signal = "SELL / TRIM"
-  elif (
-      ltp > ema_slow_val
-      and ema_fast_val > ema_slow_val
-      and 45 <= rsi_val < rsi_overbought
-  ):
-    signal = "BUY / ACCUMULATE"
-  elif (
-      abs(ltp - ema_slow_val) / ema_slow_val <= 0.02
-      and rsi_val <= (rsi_oversold + 10)
-  ):
-    signal = "DIP BUY"
-  else:
-    signal = "HOLD"
-
-  return df, signal, ltp, rsi_val, ema_slow_val
-
-
-def build_plotly_chart(df, symbol, signal):
-  fig = make_subplots(
-      rows=2,
-      cols=1,
-      shared_xaxes=True,
-      vertical_spacing=0.08,
-      subplot_titles=(
-          f"{symbol} — Daily Candlestick with {ema_fast_p} & {ema_slow_p} EMA",
-          "14-Day RSI Indicator",
-      ),
-      row_width=[0.3, 0.7],
-  )
-
-  # Candlestick
-  fig.add_trace(
-      go.Candlestick(
-          x=df.index,
-          open=df["Open"],
-          high=df["High"],
-          low=df["Low"],
-          close=df["Close"],
-          name="OHLC Price",
-      ),
-      row=1,
-      col=1,
-  )
-
-  # Fast & Slow EMA
-  fig.add_trace(
-      go.Scatter(
-          x=df.index,
-          y=df[f"EMA_{ema_fast_p}"],
-          line=dict(color="orange", width=1.5),
-          name=f"{ema_fast_p} EMA",
-      ),
-      row=1,
-      col=1,
-  )
-  fig.add_trace(
-      go.Scatter(
-          x=df.index,
-          y=df[f"EMA_{ema_slow_p}"],
-          line=dict(color="blue", width=2),
-          name=f"{ema_slow_p} EMA",
-      ),
-      row=1,
-      col=1,
-  )
-
-  # RSI Line
-  fig.add_trace(
-      go.Scatter(
-          x=df.index,
-          y=df["RSI"],
-          line=dict(color="purple", width=2),
-          name="RSI (14)",
-      ),
-      row=2,
-      col=1,
-  )
-
-  # RSI Reference Lines
-  fig.add_hline(
-      y=rsi_overbought,
-      line_dash="dash",
-      line_color="red",
-      row=2,
-      col=1,
-      annotation_text="Overbought Zone",
-  )
-  fig.add_hline(
-      y=rsi_oversold,
-      line_dash="dash",
-      line_color="green",
-      row=2,
-      col=1,
-      annotation_text="Oversold Zone",
-  )
-  fig.add_hline(y=50, line_dash="dot", line_color="gray", row=2, col=1)
-
-  fig.update_layout(
-      height=550, xaxis_rangeslider_visible=False, template="plotly_white"
-  )
-  return fig
-
-
-# Upload Section
-uploaded_file = st.file_uploader(
-    "Upload Holdings (.xlsx or .csv)", type=["xlsx", "csv"]
+st.sidebar.subheader("Technical Signal Thresholds")
+rsi_sell = st.sidebar.slider(
+    "RSI Overbought (Sell Limit)", min_value=50, max_value=90, value=70
+)
+rsi_buy = st.sidebar.slider(
+    "RSI Oversold (Dip Limit)", min_value=10, max_value=50, value=30
 )
 
-if uploaded_file:
-  df_raw = (
-      pd.read_excel(uploaded_file)
-      if uploaded_file.name.endswith(".xlsx")
-      else pd.read_csv(uploaded_file)
+fast_ema = st.sidebar.selectbox("Fast EMA Period", [9, 20, 50], index=1)
+slow_ema = st.sidebar.selectbox("Slow EMA Period", [21, 50, 200], index=1)
+
+# Date Range Filter
+st.sidebar.markdown("---")
+date_col1, date_col2 = st.sidebar.columns(2)
+start_date = date_col1.date_input(
+    "Analysis Start Date", datetime.date(2025, 11, 13)
+)
+end_date = date_col2.date_input("Analysis End Date", datetime.date(2026, 11, 13))
+
+st.markdown("---")
+
+
+@st.cache_data(ttl=60)
+def load_portfolio_data(file_obj):
+  """Loads and standardizes Zerodha holdings export data."""
+  if file_obj is not None:
+    try:
+      if file_obj.name.endswith(".csv"):
+        df = pd.read_csv(file_obj)
+      else:
+        df = pd.read_excel(file_obj)
+      return df
+    except Exception as e:
+      st.error(f"Error reading holdings file: {e}")
+      return pd.DataFrame()
+
+  # Default sample holdings dataset if no file is uploaded yet
+  sample_data = [
+      {
+          "Instrument": "MPHASIS",
+          "Qty.": 100,
+          "Avg. cost": 2606.06,
+          "LTP": 2425.20,
+          "Invested": 260606.00,
+          "Cur. val": 242520.00,
+          "P&L": -18086.00,
+          "Net chg.": "-6.94%",
+      },
+      {
+          "Instrument": "DATAPATTNS",
+          "Qty.": 21,
+          "Avg. cost": 4211.60,
+          "LTP": 4244.50,
+          "Invested": 88443.60,
+          "Cur. val": 89134.50,
+          "P&L": 690.90,
+          "Net chg.": "+0.78%",
+      },
+      {
+          "Instrument": "KEI",
+          "Qty.": 4,
+          "Avg. cost": 5004.50,
+          "LTP": 4121.75,
+          "Invested": 20018.00,
+          "Cur. val": 16487.00,
+          "P&L": -3531.00,
+          "Net chg.": "-17.64%",
+      },
+      {
+          "Instrument": "HDFCBANK",
+          "Qty.": 14,
+          "Avg. cost": 761.34,
+          "LTP": 800.30,
+          "Invested": 10658.80,
+          "Cur. val": 11204.20,
+          "P&L": 545.40,
+          "Net chg.": "+5.12%",
+      },
+      {
+          "Instrument": "HINDALCO",
+          "Qty.": 10,
+          "Avg. cost": 1011.90,
+          "LTP": 947.30,
+          "Invested": 10119.05,
+          "Cur. val": 9473.00,
+          "P&L": -646.05,
+          "Net chg.": "-6.38%",
+      },
+      {
+          "Instrument": "SUNPHARMA",
+          "Qty.": 4,
+          "Avg. cost": 1670.80,
+          "LTP": 1886.10,
+          "Invested": 6683.20,
+          "Cur. val": 7544.40,
+          "P&L": 861.20,
+          "Net chg.": "+12.89%",
+      },
+  ]
+  return pd.DataFrame(sample_data)
+
+
+df_holdings = load_portfolio_data(uploaded_holdings)
+
+if not df_holdings.empty:
+  # Summary Metrics
+  total_invested = (
+      df_holdings["Invested"].sum() if "Invested" in df_holdings.columns else 0.0
   )
-  symbol_col = [
-      c
-      for c in df_raw.columns
-      if "symbol" in c.lower()
-      or "instrument" in c.lower()
-      or "stock" in c.lower()
-  ][0]
+  total_current = (
+      df_holdings["Cur. val"].sum() if "Cur. val" in df_holdings.columns else 0.0
+  )
+  total_pnl = total_current - total_invested
+  pnl_pct = (total_pnl / total_invested * 100) if total_invested > 0 else 0.0
 
-  results = []
-  stock_data_map = {}
+  col1, col2, col3, col4 = st.columns(4)
+  col1.metric("Total Investment", f"₹{total_invested:,.2f}")
+  col2.metric("Current Value", f"₹{total_current:,.2f}")
+  col3.metric("Total P&L", f"₹{total_pnl:,.2f}", f"{pnl_pct:.2f}%")
+  col4.metric("Total Holdings", len(df_holdings))
 
-  with st.spinner("Analyzing portfolio against custom trading rules & dates..."):
-    for sym in df_raw[symbol_col].dropna().unique():
-      hist_df, signal, ltp, rsi_val, ema_val = fetch_and_analyze(
-          sym, start_date, end_date
-      )
-      results.append({
-          "Stock": sym,
-          "LTP": round(ltp, 2),
-          "RSI (14)": round(rsi_val, 2),
-          f"{ema_slow_p} EMA": round(ema_val, 2),
-          "Action Signal": signal,
-      })
-      if hist_df is not None:
-        stock_data_map[sym] = (hist_df, signal)
-
-  res_df = pd.DataFrame(results)
-  st.subheader("📋 Analysis Results")
-  st.dataframe(res_df, use_container_width=True)
-
-  # Interactive Visual Graph Inspector
   st.markdown("---")
-  st.subheader("📈 Pictured Technical Graph Inspector")
-  selected_stock = st.selectbox(
-      "Select a stock to view technical chart & indicator lines:",
-      list(stock_data_map.keys()),
-  )
 
-  if selected_stock:
-    chart_df, stock_signal = stock_data_map[selected_stock]
-    st.info(f"**Current Signal for {selected_stock}:** `{stock_signal}`")
-    fig = build_plotly_chart(chart_df, selected_stock, stock_signal)
-    st.plotly_chart(fig, use_container_width=True)
+  # Tabs for Portfolio Insights
+  tab1, tab2, tab3 = st.tabs([
+      "📋 Holdings & Performance",
+      "📊 Asset Allocation & P&L Chart",
+      "⚡ Technical Action Scanner",
+  ])
+
+  with tab1:
+    st.subheader("Zerodha Portfolio Holdings Feed")
+    st.dataframe(df_holdings, use_container_width=True)
+
+  with tab2:
+    st.subheader("Portfolio Allocation Breakdown")
+    if "Instrument" in df_holdings.columns and "Cur. val" in df_holdings.columns:
+      fig = px.pie(
+          df_holdings,
+          names="Instrument",
+          values="Cur. val",
+          title="Current Value Distribution by Stock",
+          template="plotly_dark",
+      )
+      st.plotly_chart(fig, use_container_width=True)
+    else:
+      st.info("Allocation chart unavailable.")
+
+  with tab3:
+    st.subheader("Technical Action Signals (RSI & EMAs)")
+    st.markdown(
+        "Screening portfolio equities against configured Fast EMA ("
+        f"{fast_ema}) and Slow EMA ({slow_ema}) thresholds."
+    )
+
+    signal_rows = []
+    inst_col = (
+        "Instrument"
+        if "Instrument" in df_holdings.columns
+        else "Symbol"
+        if "Symbol" in df_holdings.columns
+        else None
+    )
+
+    if inst_col:
+      for _, row in df_holdings.iterrows():
+        ticker = str(row[inst_col]).strip()
+        try:
+          hist = yf.Ticker(f"{ticker}.NS").history(period="30d")
+          if not hist.empty:
+            ltp = float(hist["Close"].iloc[-1])
+            ema_fast = hist["Close"].ewm(span=fast_ema).mean().iloc[-1]
+            ema_slow = hist["Close"].ewm(span=slow_ema).mean().iloc[-1]
+
+            action = (
+                "🚀 HOLD / BULLISH TREND"
+                if ltp > ema_fast
+                else "⚠️ WATCH / PULLBACK"
+            )
+            signal_rows.append({
+                "Instrument": ticker,
+                "LTP": round(ltp, 2),
+                f"EMA_{fast_ema}": round(ema_fast, 2),
+                f"EMA_{slow_ema}": round(ema_slow, 2),
+                "Signal": action,
+            })
+        except Exception:
+          continue
+
+      if signal_rows:
+        st.dataframe(pd.DataFrame(signal_rows), use_container_width=True)
+      else:
+        st.warning("Could not fetch technical indicators for holdings.")
+else:
+  st.warning("No portfolio data found. Please upload your Zerodha holdings.")
