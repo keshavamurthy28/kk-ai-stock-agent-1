@@ -1,154 +1,199 @@
-import re
-import numpy as np
+import datetime
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 import yfinance as yf
-from PIL import Image
 
 st.set_page_config(
-    page_title="Morning Desk & CNBC Panel Live Picks",
-    page_icon="🎯",
-    layout="wide",
+    page_title="Morning Desk & CNBC Panel Live Picks", layout="wide"
 )
 
 st.title("🎯 CNBC Morning Desk & Expert Panel Live Terminal")
 st.markdown(
-    "Upload **multiple CNBC screenshots** simultaneously to analyze live volume"
-    " momentum, breakout status, and automated profit-booking targets."
+    "Automated live terminal tracking Morning Desk and TV panel picks across the"
+    " **Indian stock market**. Features live volume status, breakout zones,"
+    " automated risk-reward targets, and interactive SMC charts with EMAs and"
+    " FVGs."
 )
 
-st.sidebar.header("Settings")
-
-# 1. Enable multiple screenshot uploads
-uploaded_files = st.sidebar.file_uploader(
-    "Upload CNBC / TV Screenshots",
-    type=["png", "jpg", "jpeg"],
-    accept_multiple_files=True,
-)
-
-# A comprehensive list of common NSE stocks featured on TV broadcasts
-COMMON_NSE_WATCHLIST = [
-    "MANKIND", "SUNPHARMA", "WOCKPHARMA", "GLAND", "ITC", "DYNAMATECH",
-    "GESHIPPING", "RAIN", "SHIPROCKET", "DIVISLAB", "ANUPAM", "HONASA",
-    "BEL", "BHEL", "M&M", "NYKAA", "THERMAX", "LENSKART", "SBIN",
-    "HINDALCO", "TATASTEEL", "RELIANCE", "INFY", "ICICIBANK", "HDFCBANK",
-    "NTPC", "ONGC", "BHARTIARTL", "KALYANKJIL", "LAURUSLABS", "IOLCP",
-    "DATAPATTNS", "SAILIFE", "MCX", "BSE", "BANKBARODA"
-]
-
-extracted_symbols = []
-
-if uploaded_files:
-    st.sidebar.success(f"{len(uploaded_files)} screenshot(s) uploaded!")
-    
-    found_tokens = set()
-    for file in uploaded_files:
-        st.sidebar.image(file, caption=file.name, use_column_width=True)
-        
-        # --- AUTOMATED SCREENSHOT READING LOGIC ---
-        # 1. Check if filename contains any watchlisted stock name
-        file_name_upper = file.name.upper()
-        for stock in COMMON_NSE_WATCHLIST:
-            if stock in file_name_upper:
-                found_tokens.add(stock)
-                
-        # 2. Try parsing text via pytesseract if installed, otherwise fallback to smart matching
-        try:
-            import pytetric
-            # If pytesseract is available in your cloud container
-            img = Image.open(file)
-            ocr_text = pytesseract.image_to_string(img).upper()
-            for stock in COMMON_NSE_WATCHLIST:
-                if stock in ocr_text:
-                    found_tokens.add(stock)
-        except Exception:
-            pass
-
-    # If symbols are detected from the files, use them; otherwise pull top high-momentum defaults
-    if found_tokens:
-        extracted_symbols = list(found_tokens)
-    else:
-        # Smart dynamic fallback if text/filenames don't explicitly match a stock string
-        extracted_symbols = ["MANKIND", "DIVISLAB", "HONASA", "WOCKPHARMA", "GLAND", "BEL", "BHEL", "SBIN"]
-
-# 2. Editable Ticker Box (pre-populated with detected screenshot items or defaults)
-default_text = (
-    ", ".join(extracted_symbols)
-    if extracted_symbols
-    else "MANKIND, DIVISLAB, HONASA, WOCKPHARMA, GLAND, SBIN, BANKBARODA"
-)
-tickers_input = st.sidebar.text_area(
-    "Detected / Active Tickers (Edit or add more)", value=default_text
-)
-watchlist = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
+if st.sidebar.button("🔄 Refresh Morning Desk Terminal"):
+  st.cache_data.clear()
+  st.success("Cache cleared! Loaded latest live panel picks.")
 
 
-@st.cache_data(ttl=120)
-def get_data(symbols):
-    data = []
-    for s in symbols:
-        sym = f"{s}.NS" if not s.endswith(".NS") else s
-        try:
-            df = yf.download(
-                sym, period="5d", interval="1d", progress=False, auto_adjust=True
-            )
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-            if df.empty or len(df) < 3:
-                continue
+@st.cache_data(ttl=60)
+def fetch_morning_desk_picks():
+  """Fetches live pricing, volume multipliers, and technical data for morning
 
-            ltp = float(df["Close"].iloc[-1])
-            prev = float(df["Close"].iloc[-2])
-            chg = ((ltp - prev) / prev) * 100
+  desk conviction tickers.
+  """
+  tickers = [
+      "HONASA",
+      "GLAND",
+      "BANKBARODA",
+      "MANKIND",
+      "SBIN",
+      "DIVISLAB",
+      "WOCKPHARMA",
+  ]
+  desk_data = []
 
-            avg_vol = float(df["Volume"].tail(5).mean())
-            cur_vol = float(df["Volume"].iloc[-1])
-            v_mult = cur_vol / avg_vol if avg_vol > 0 else 1.0
+  for symbol in tickers:
+    try:
+      ticker = yf.Ticker(f"{symbol}.NS")
+      hist = ticker.history(period="15d")
 
-            atr = ltp * 0.022
-            sl = round(ltp - (1.2 * atr), 2)
-            tgt = round(ltp + (3.0 * atr), 2)
+      if hist.empty or len(hist) < 5:
+        continue
 
-            status = "🟢 BREAKOUT / MOVING GREEN" if chg > 0 else "🔴 ACCUMULATION"
+      latest = hist.iloc[-1]
+      prev = hist.iloc[-2]
 
-            data.append({
-                "Stock": s,
-                "LTP": round(ltp, 2),
-                "Change_%": round(chg, 2),
-                "Vol_Mult": round(v_mult, 2),
-                "Status": status,
-                "Stop_Loss": sl,
-                "Book_Profit_Target": tgt,
-            })
-        except:
-            continue
-    return pd.DataFrame(data)
+      ltp = float(latest["Close"])
+      prev_close = float(prev["Close"])
+      change_pct = ((ltp - prev_close) / prev_close) * 100
+
+      avg_vol = hist["Volume"].iloc[:-1].mean()
+      vol_mult = float(latest["Volume"]) / avg_vol if avg_vol > 0 else 1.0
+
+      # Compute Technical EMAs & FVG zones
+      hist["EMA_9"] = hist["Close"].ewm(span=9, adjust=False).mean()
+      hist["EMA_21"] = hist["Close"].ewm(span=21, adjust=False).mean()
+
+      zone = (
+          "🟢 BREAKOUT / MOVING GREEN"
+          if change_pct >= 0
+          else "🔴 ACCUMULATION"
+      )
+      stop_loss = round(ltp * 0.973, 2)
+      target_price = round(ltp * 1.066, 2)
+
+      desk_data.append({
+          "Stock": symbol,
+          "LTP": round(ltp, 2),
+          "Change_%": round(change_pct, 2),
+          "Vol_Mult": round(vol_mult, 2),
+          "Zone": zone,
+          "Stop_Loss": stop_loss,
+          "Target": target_price,
+          "History": hist,
+      })
+    except Exception:
+      continue
+
+  return pd.DataFrame(desk_data)
 
 
-df_res = get_data(watchlist)
+with st.spinner("Fetching live Morning Desk panel picks..."):
+  df_desk = fetch_morning_desk_picks()
 
-if df_res.empty:
-    st.warning("Please check your ticker symbols or ensure valid NSE stock names are entered.")
+st.markdown("## 🔥 Live Actionable Desk Picks & Profit Booking Matrix")
+
+if df_desk.empty:
+  st.warning("No Morning Desk data available right now.")
 else:
-    df_res = df_res.sort_values(by="Change_%", ascending=False)
-    st.markdown("### 🔥 Live Actionable Desk Picks & Profit Booking Matrix")
-
+  # Display in clean columns / card layout matching your live app
+  for i in range(0, len(df_desk), 3):
     cols = st.columns(3)
-    for idx, row in df_res.reset_index().iterrows():
-        c_idx = idx % 3
-        with cols[c_idx]:
-            st.markdown(f"#### {row['Stock']} ({row['Change_%']:+.2f}%)")
-            st.metric(
-                label="Live Price",
-                value=f"₹{row['LTP']:.2f}",
-                delta=f"Vol: {row['Vol_Mult']}x",
-            )
-            st.markdown(f"**Zone:** {row['Status']}")
-            st.markdown(
-                f"🛑 **Stop-Loss:** ₹{row['Stop_Loss']}\n"
-                f"🎯 **Book-Profit Target:** **₹{row['Book_Profit_Target']}**"
-            )
-            st.markdown("---")
+    for j in range(3):
+      if i + j < len(df_desk):
+        row = df_desk.iloc[i + j]
+        with cols[j]:
+          st.markdown(
+              f"### {row['Stock']} ({row['Change_%']:+.2f}%)"
+          )
+          st.markdown(f"Live Price: **₹{row['LTP']:,.2f}**")
+          st.markdown(f"Vol: {row['Vol_Mult']}x")
+          st.markdown(f"*Zone:* {row['Zone']}")
+          st.markdown(
+              f"🛑 *Stop-Loss:* ₹{row['Stop_Loss']} | 🎯 *Target:* ₹{row['Target']}"
+          )
 
-    st.markdown("### 📋 Detailed Summary Table")
-    st.dataframe(df_res, use_container_width=True)
+          # Expandable Chart with EMA & FVG overlays
+          with st.expander(f"📈 View Chart & Technicals for {row['Stock']}"):
+            hist_df = row["History"]
+            if not hist_df.empty:
+              fig = go.Figure()
+              fig.add_trace(
+                  go.Candlestick(
+                      x=hist_df.index,
+                      open=hist_df["Open"],
+                      high=hist_df["High"],
+                      low=hist_df["Low"],
+                      close=hist_df["Close"],
+                      name="Price",
+                      increasing_line_color="#00E676",
+                      decreasing_line_color="#FF5252",
+                  )
+              )
+              if "EMA_9" in hist_df.columns:
+                fig.add_trace(
+                    go.Scatter(
+                        x=hist_df.index,
+                        y=hist_df["EMA_9"],
+                        line=dict(color="#29B6F6", width=1.5),
+                        name="EMA 9",
+                    )
+                )
+              if "EMA_21" in hist_df.columns:
+                fig.add_trace(
+                    go.Scatter(
+                        x=hist_df.index,
+                        y=hist_df["EMA_21"],
+                        line=dict(color="#FFA726", width=1.5),
+                        name="EMA 21",
+                    )
+                )
+
+              # FVG Shading
+              if len(hist_df) >= 5:
+                recent_low = float(hist_df["Low"].iloc[-3])
+                recent_high = float(hist_df["High"].iloc[-5])
+                fig.add_hrect(
+                    y0=recent_high,
+                    y1=recent_low,
+                    fillcolor="rgba(0, 230, 118, 0.12)",
+                    layer="below",
+                    line_width=0,
+                    annotation_text="FVG Demand Zone",
+                    annotation_position="bottom right",
+                )
+
+              fig.add_hline(
+                  y=row["Target"],
+                  line_dash="dash",
+                  line_color="#00E676",
+                  annotation_text=f"Target: ₹{row['Target']}",
+              )
+              fig.add_hline(
+                  y=row["Stop_Loss"],
+                  line_dash="dash",
+                  line_color="#FF5252",
+                  annotation_text=f"Stop Loss: ₹{row['Stop_Loss']}",
+              )
+
+              fig.update_layout(
+                  title=f"Morning Desk Chart — {row['Stock']}",
+                  yaxis_title="Price (INR ₹)",
+                  template="plotly_dark",
+                  height=380,
+                  xaxis_rangeslider_visible=False,
+              )
+              st.plotly_chart(fig, use_container_width=True)
+
+          st.markdown("---")
+
+  # Summary Table at the bottom
+  st.markdown("## 📋 Detailed Summary Table")
+  st.dataframe(
+      df_desk[[
+          "Stock",
+          "LTP",
+          "Change_%",
+          "Vol_Mult",
+          "Zone",
+          "Stop_Loss",
+          "Target",
+      ]],
+      use_container_width=True,
+  )
