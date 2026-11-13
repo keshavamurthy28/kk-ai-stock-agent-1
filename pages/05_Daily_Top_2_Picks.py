@@ -143,7 +143,7 @@ for idx, pick in enumerate(top_picks):
   if not hist_df.empty:
     fig = go.Figure()
 
-    # Candlestick Trace
+    # 1. Candlestick Trace
     fig.add_trace(
         go.Candlestick(
             x=(
@@ -159,4 +159,62 @@ for idx, pick in enumerate(top_picks):
             increasing_line_color="#00E676",
             decreasing_line_color="#FF5252",
         )
+    )
+
+    # 2. Overlay Exponential Moving Averages (EMA 9, EMA 21, EMA 50)
+    if "EMA_9" in hist_df.columns:
+      fig.add_trace(
+          go.Scatter(
+              x=hist_df.index,
+              y=hist_df["EMA_9"],
+              line=dict(color="#29B6F6", width=1.5),
+              name="EMA 9 (Fast)",
+          )
+      )
+    if "EMA_21" in hist_df.columns:
+      fig.add_trace(
+          go.Scatter(
+              x=hist_df.index,
+              y=hist_df["EMA_21"],
+              line=dict(color="#FFA726", width=1.5),
+              name="EMA 21 (Mid)",
+          )
+      )
+    if "EMA_50" in hist_df.columns:
+      fig.add_trace(
+          go.Scatter(
+              x=hist_df.index,
+              y=hist_df["EMA_50"],
+              line=dict(color="#AB47BC", width=1.5),
+              name="EMA 50 (Trend)",
+          )
+      )
+
+    # 3. Highlight Bullish Fair Value Gap (FVG) Zone
+    recent_low = float(hist_df["Low"].iloc[-3])
+    recent_high = float(hist_df["High"].iloc[-5])
+    fig.add_hrect(
+        y0=recent_high,
+        y1=recent_low,
+        fillcolor="rgba(0, 230, 118, 0.12)",
+        layer="below",
+        line_width=0,
+        annotation_text="Active Bullish FVG Zone",
+        annotation_position="bottom right",
+    )
+
+    # 4. Horizontal Target & Stop-Loss Overlay Lines
+    fig.add_hline(
+        y=target_1,
+        line_dash="dash",
+        line_color="#00E676",
+        annotation_text=f"Target 1: ₹{target_1}",
+        annotation_position="top left",
+    )
+    fig.add_hline(
+        y=stop_loss,
+        line_dash="dash",
+        line_color="#FF5252",
+        annotation_text=f"Stop Loss: ₹{stop_loss}",
+        annotation_position="bottom left",
     )
