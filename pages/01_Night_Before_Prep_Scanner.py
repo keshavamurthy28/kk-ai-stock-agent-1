@@ -10,7 +10,6 @@ st.markdown(
 
 # --- 1. CONSERVATIVE SWING TABLE ---
 st.subheader("🛡️ Conservative Swing Watchlist")
-
 conservative_data = [
     {
         "Stock": "HDFCBANK",
@@ -29,7 +28,6 @@ conservative_data = [
         "Catalyst_Driver": "Banking Sector Rotation & Strong Quarterly Outlook",
     },
 ]
-
 df_conservative = pd.DataFrame(conservative_data)
 
 
@@ -37,18 +35,16 @@ def conservative_highlighter(row):
   return [
       "background-color: #3B1443; color: #EA80FC; font-weight: bold;"
       for _ in row
-  ]  # Rich Purple
+  ]
 
 
-styled_conservative = df_conservative.style.apply(
-    conservative_highlighter, axis=1
+st.dataframe(
+    df_conservative.style.apply(conservative_highlighter, axis=1),
+    use_container_width=True,
 )
-st.dataframe(styled_conservative, use_container_width=True)
-
 
 # --- 2. AGGRESSIVE MOMENTUM TABLE ---
 st.subheader("⚡ Aggressive Momentum Watchlist")
-
 aggressive_data = [
     {
         "Stock": "DCXINDIA",
@@ -71,7 +67,6 @@ aggressive_data = [
         ),
     },
 ]
-
 df_aggressive = pd.DataFrame(aggressive_data)
 
 
@@ -81,19 +76,20 @@ def aggressive_highlighter(row):
     return [
         "background-color: #0E4429; color: #76FF03; font-weight: bold;"
         for _ in row
-    ]  # Emerald Green
+    ]
   else:
     return [
         "background-color: #113F67; color: #00E5FF; font-weight: bold;"
         for _ in row
-    ]  # Electric Blue
+    ]
 
 
-styled_aggressive = df_aggressive.style.apply(aggressive_highlighter, axis=1)
-st.dataframe(styled_aggressive, use_container_width=True)
+st.dataframe(
+    df_aggressive.style.apply(aggressive_highlighter, axis=1),
+    use_container_width=True,
+)
 
-
-# --- COLOR CODE LEGEND CARD ---
+# --- COLOR CODE LEGEND ---
 st.markdown("### 🎨 Distinct Color-Code Legend")
 col1, col2, col3 = st.columns(3)
 with col1:
