@@ -213,4 +213,23 @@ for _, row in df_breakouts.iterrows():
         y=row["Target_1"],
         line_dash="dash",
         line_color="#00E676",
-        annotation_text=
+        annotation_text=f"Target 1: ₹{row['Target_1']}",
+    )
+    fig.add_hline(
+        y=row["Stop_Loss"],
+        line_dash="dash",
+        line_color="#FF5252",
+        annotation_text=f"Stop Loss: ₹{row['Stop_Loss']}",
+    )
+
+    fig.update_layout(
+        title=f"Order Block Breakout Analysis — {stock_name}",
+        yaxis_title="Price (INR ₹)",
+        template="plotly_dark",
+        height=420,
+        xaxis_rangeslider_visible=False,
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+  st.markdown("---")
