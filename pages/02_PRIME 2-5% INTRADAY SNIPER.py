@@ -9,9 +9,8 @@ import yfinance as yf
 
 st.set_page_config(page_title="MU$₹A Rendezvous 2-5% Intraday Sniper", layout="wide")
 
-st.title("🎯 MU$₹A Rendezvous: 2%–5% Intraday Sniper Terminal")
+st.title("🎯 MU$₹A Rendezvous: Realistic ADR & Intraday Sniper Terminal")
 
-# Check current IST market time to protect beginners from late-day entries
 ist = pytz.timezone("Asia/Kolkata")
 now_ist = datetime.now(ist)
 cur_time = now_ist.time()
@@ -19,16 +18,11 @@ cur_time = now_ist.time()
 if cur_time < datetime.strptime("09:20", "%H:%M").time():
     st.info("⏳ **Pre-Market / Opening Volatility (Before 9:20 AM IST):** Wait for the first 15-minute candle to settle before placing intraday orders.")
 elif cur_time <= datetime.strptime("11:45", "%H:%M").time():
-    st.success("🟢 **PRIME INTRADAY WINDOW (9:20 AM – 11:45 AM IST):** Best window to enter `🎯 PRIME 2-5% SNIPER` breakouts.")
+    st.success("🟢 **PRIME INTRADAY WINDOW (9:20 AM – 11:45 AM IST):** Best window to enter `🎯 FRESH ROOM LEFT` breakouts.")
 elif cur_time <= datetime.strptime("14:15", "%H:%M").time():
-    st.warning("🟡 **MID-DAY SESSION (11:45 AM – 2:15 PM IST):** Only enter pullbacks near the Yellow VWAP line with strict stop-loss.")
+    st.warning("🟡 **MID-DAY SESSION (11:45 AM – 2:15 PM IST):** Only enter stocks with `>= 40%` Daily Range remaining near VWAP.")
 else:
-    st.error("🛑 **LATE SESSION / MARKET CLOSING (After 2:15 PM IST):** Do NOT take fresh intraday trades now—insufficient time for a 2–5% move before 3:30 PM close.")
-
-st.markdown(
-    "🎯 **PRIME 2-5% SNIPER:** Up `+1.2%` to `+4.2%` with `>= 1.5x` Volume (Best Risk-Reward for 2–4% Intraday)  |  "
-    "🟢 **EXTENDED / SWING BREAKOUT:** Already up `> 4.2%` (Avoid chasing intraday; wait for pullback)"
-)
+    st.error("🛑 **LATE SESSION / MARKET CLOSING (After 2:15 PM IST):** Do NOT take fresh intraday trades now—most daily ranges are already exhausted.")
 
 UNIVERSE = {
     "LICHSGFIN": "LIC Housing Finance",
@@ -73,43 +67,55 @@ def scan_intraday_sniper(symbols_dict):
     for sym, name in symbols_dict.items():
         t_key = f"{sym}.NS"
         try:
-            df_s = raw[t_key].dropna(subset=["Close", "Volume"]) if len(tickers) > 1 else raw.dropna(subset=["Close", "Volume"])
-            if len(df_s) < 6:
+            df_s = raw[t_key].dropna(subset=["Close", "Volume", "High", "Low", "Open"]) if len(tickers) > 1 else raw.dropna(subset=["Close", "Volume", "High", "Low", "Open"])
+            if len(df_s) < 15:
                 continue
 
             ltp = float(df_s["Close"].iloc[-1])
+            day_open = float(df_s["Open"].iloc[-1])
+            day_high = float(df_s["High"].iloc[-1])
+            day_low = float(df_s["Low"].iloc[-1])
             prev_close = float(df_s["Close"].iloc[-2])
-            chg_pct = ((ltp - prev_close) / prev_close) * 100.0
 
+            chg_pct = ((ltp - prev_close) / prev_close) * 100.0
             cur_vol = float(df_s["Volume"].iloc[-1])
-            avg_vol = float(df_s["Volume"].iloc[-11:-1].mean()) if len(df_s) >= 11 else float(df_s["Volume"].iloc[:-1].mean())
+            avg_vol = float(df_s["Volume"].iloc[-11:-1].mean())
             rvol = round(cur_vol / avg_vol, 2) if avg_vol > 0 else 1.0
 
-            # Classify specifically for 2-5% Intraday Sniper vs Extended
-            is_prime_sniper = (1.2 <= chg_pct <= 4.2) and (rvol >= 1.5)
-            is_extended = (chg_pct > 4.2) and (rvol >= 1.5)
+            # True 14-Day ATR (Average Daily Range in Rupees)
+            tr = np.maximum(
+                df_s["High"].iloc[-15:-1] - df_s["Low"].iloc[-15:-1],
+                np.maximum(
+                    abs(df_s["High"].iloc[-15:-1] - df_s["Close"].iloc[-16:-2]),
+                    abs(df_s["Low"].iloc[-15:-1] - df_s["Close"].iloc[-16:-2]),
+                ),
+            )
+            atr_14 = float(tr.mean())
+            today_moved = day_high - day_low
+            range_used_pct = round((today_moved / atr_14) * 100.0, 0) if atr_14 > 0 else 100.0
 
-            if is_prime_sniper:
-                status = "🎯 PRIME 2-5% SNIPER"
-                action = "BUY INTRADAY"
-                score = 100 + (rvol * 5) + chg_pct
-            elif is_extended:
-                status = "⚠️ EXTENDED (>4.2%)"
-                action = "WAIT PULLBACK"
-                score = 60 + rvol
+            # Anchor realistic intraday targets from Day Open / Support (NOT chased afternoon high)
+            base_anchor = round((day_open + day_low) / 2.0, 2) if ltp > day_open else day_open
+            t1 = round(base_anchor + (atr_14 * 0.90), 2)
+            t2 = round(base_anchor + (atr_14 * 1.35), 2)
+            sl = round(max(day_low * 0.996, ltp - (atr_14 * 0.55)), 2)
+
+            if ltp >= t1 and rvol >= 1.3:
+                status = "✅ T1 ALREADY HIT TODAY"
+                action = "BOOKED / WAIT DIP"
+                score = 70 + rvol
+            elif chg_pct > 0.8 and rvol >= 1.4 and range_used_pct < 85:
+                status = "🎯 FRESH ROOM LEFT"
+                action = "BUY PULLBACK"
+                score = 110 + (rvol * 4) + (100 - range_used_pct) * 0.2
             elif chg_pct > 0.5 and rvol >= 1.2:
                 status = "🔵 BUILDING MOMENTUM"
                 action = "WATCHLIST"
-                score = 40 + (rvol * 3) + chg_pct
+                score = 50 + (rvol * 3)
             else:
-                status = "⚪ LOW VOLUME / FLAT"
+                status = "⚪ LOW VOLUME / EXHAUSTED"
                 action = "AVOID"
                 score = chg_pct
-
-            # Tight Intraday Risk & 2.2% / 4.0% Profit Targets
-            sl = round(ltp * 0.988, 2)        # -1.2% hard intraday stop-loss
-            t1 = round(ltp * 1.022, 2)        # +2.2% realistic intraday Target 1
-            t2 = round(ltp * 1.040, 2)        # +4.0% stretch intraday Target 2
 
             rows.append({
                 "Score": score,
@@ -120,9 +126,10 @@ def scan_intraday_sniper(symbols_dict):
                 "LTP": round(ltp, 2),
                 "Change_%": round(chg_pct, 2),
                 "Volume_Surge": rvol,
-                "Intraday_SL (-1.2%)": sl,
-                "Target_1 (+2.2%)": t1,
-                "Target_2 (+4.0%)": t2,
+                "Daily_ATR_Used": f"{int(range_used_pct)}%",
+                "Intraday_SL": sl,
+                "Realistic_T1": t1,
+                "Stretch_T2": t2,
             })
         except Exception:
             continue
@@ -135,21 +142,21 @@ def scan_intraday_sniper(symbols_dict):
     return res_df.drop(columns=["Score"])
 
 
-with st.spinner("Filtering Prime 2%–5% Intraday Sniper setups..."):
+with st.spinner("Calculating 14-Day ATR & Intraday Range Remaining..."):
     rank_df = scan_intraday_sniper(UNIVERSE)
 
 selected_sym = "LICHSGFIN"
 
 if not rank_df.empty:
-    st.subheader("🏆 Intraday 2%–5% Sniper Ranking Table")
-    st.caption("👇 **Click any `🎯 PRIME 2-5% SNIPER` row** to load its intraday chart, VWAP entry, -1.2% Stop-Loss, and +2.2% / +4.0% Targets.")
+    st.subheader("🏆 Intraday ATR-Adjusted Sniper Ranking Table")
+    st.caption("👇 **Only enter `🎯 FRESH ROOM LEFT` stocks where `Daily_ATR_Used` is below 85%.** If `T1 ALREADY HIT TODAY` shows, the move already happened!")
 
     def style_sniper_rows(row):
         val = str(row["Sniper_Status"])
-        if "PRIME" in val:
+        if "FRESH ROOM" in val:
             return ["background-color: rgba(0, 230, 118, 0.18)"] * len(row)
-        elif "EXTENDED" in val:
-            return ["background-color: rgba(255, 193, 7, 0.12)"] * len(row)
+        elif "ALREADY HIT" in val:
+            return ["background-color: rgba(255, 193, 7, 0.14)"] * len(row)
         elif "BUILDING" in val:
             return ["background-color: rgba(41, 182, 246, 0.10)"] * len(row)
         return [""] * len(row)
@@ -161,9 +168,9 @@ if not rank_df.empty:
             "LTP": "₹{:,.2f}",
             "Change_%": "{:+.2f}%",
             "Volume_Surge": "{:.2f}x",
-            "Intraday_SL (-1.2%)": "₹{:,.2f}",
-            "Target_1 (+2.2%)": "₹{:,.2f}",
-            "Target_2 (+4.0%)": "₹{:,.2f}",
+            "Intraday_SL": "₹{:,.2f}",
+            "Realistic_T1": "₹{:,.2f}",
+            "Stretch_T2": "₹{:,.2f}",
         })
     )
 
@@ -195,9 +202,10 @@ def fetch_chart_data(sym, tf):
     p_map = {"5m": "5d", "15m": "15d", "1h": "60d", "4h": "60d", "1D": "6mo"}
     i_map = {"5m": "5m", "15m": "15m", "1h": "1h", "4h": "1h", "1D": "1d"}
     df = t_obj.history(period=p_map[tf], interval=i_map[tf], auto_adjust=True)
+    df_1d = t_obj.history(period="1mo", interval="1d", auto_adjust=True)
 
     if df is None or df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
 
     df = df.reset_index()
     df.rename(columns={df.columns[0]: "Time"}, inplace=True)
@@ -213,14 +221,27 @@ def fetch_chart_data(sym, tf):
             .dropna()
             .reset_index()
         )
-    return df
+    return df, df_1d
 
 
-df = fetch_chart_data(active_sym, tf_choice)
+df, df_1d = fetch_chart_data(active_sym, tf_choice)
 
-if not df.empty:
+if not df.empty and not df_1d.empty:
     ltp = float(df["Close"].iloc[-1])
     company_name = UNIVERSE.get(active_sym, active_sym)
+
+    # Calculate true 14-day ATR & Today's Session Anchor
+    tr = np.maximum(
+        df_1d["High"].iloc[-15:-1] - df_1d["Low"].iloc[-15:-1],
+        np.maximum(
+            abs(df_1d["High"].iloc[-15:-1] - df_1d["Close"].iloc[-16:-2]),
+            abs(df_1d["Low"].iloc[-15:-1] - df_1d["Close"].iloc[-16:-2]),
+        ),
+    )
+    atr_14 = float(tr.mean())
+    today_open = float(df_1d["Open"].iloc[-1])
+    today_low = float(df_1d["Low"].iloc[-1])
+    today_high = float(df_1d["High"].iloc[-1])
 
     df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
     df["VWAP"] = (
@@ -229,28 +250,27 @@ if not df.empty:
     )
     latest_vwap = float(df["VWAP"].iloc[-1]) if not np.isnan(df["VWAP"].iloc[-1]) else ltp
 
-    # Pullback entry near VWAP or 0.4% below LTP
-    buy_zone = round(max(latest_vwap, ltp * 0.996), 2) if ltp >= latest_vwap else round(ltp, 2)
-    sl_price = round(buy_zone * 0.988, 2)      # -1.2% Stop-Loss
-    t1_price = round(buy_zone * 1.022, 2)      # +2.2% Target 1
-    t2_price = round(buy_zone * 1.040, 2)      # +4.0% Target 2
-    breakeven_trigger = round(buy_zone * 1.011, 2)  # +1.1% Zero-Loss Lock
+    # Anchor targets to morning breakout base (VWAP / Open) instead of afternoon high
+    buy_zone = round(latest_vwap, 2)
+    sl_price = round(max(today_low * 0.996, buy_zone - (atr_14 * 0.55)), 2)
+    t1_price = round(buy_zone + (atr_14 * 0.90), 2)
+    t2_price = round(buy_zone + (atr_14 * 1.35), 2)
+    t1_already_hit = today_high >= t1_price
 
-    st.subheader(f"📊 Intraday 2%–5% Execution Plan: {company_name} ({active_sym})")
+    st.subheader(f"📊 Realistic ADR Execution Plan: {company_name} ({active_sym})")
+
+    if t1_already_hit:
+        st.warning(
+            f"⚠️ **Notice on {active_sym}:** Today's high (**₹{today_high:,.2f}**) ALREADY reached/passed the realistic 1-day ATR Target 1 (**₹{t1_price:,.2f}**)! "
+            f"Do NOT chase at ₹{ltp:,.2f} expecting another full intraday leg today—wait for tomorrow's fresh morning setup."
+        )
 
     m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("Live LTP", f"₹{ltp:,.2f}", "Above VWAP ✅" if ltp >= latest_vwap else "Below VWAP ⚠️")
-    m2.metric("🟡 Limit Buy Zone", f"₹{buy_zone:,.2f}", "Enter Only Above VWAP")
-    m3.metric("🛑 Hard SL (-1.2%)", f"₹{sl_price:,.2f}", "Exit Immediately If Hit")
-    m4.metric("🎯 Target 1 (+2.2%)", f"₹{t1_price:,.2f}", "Book 70% Quantity")
-    m5.metric("🚀 Target 2 (+4.0%)", f"₹{t2_price:,.2f}", "Book Balance 30%")
-
-    st.info(
-        f"**⚡ 3-Step Intraday Rule for {active_sym}:**  \n"
-        f"1. **Check VWAP First:** Only buy if the price candle is **above the Yellow VWAP line (₹{latest_vwap:,.2f})** between **9:30 AM and 11:45 AM**.  \n"
-        f"2. **Zero-Loss Lock:** As soon as price hits **₹{breakeven_trigger:,.2f} (+1.1%)**, move your Stop-Loss from ₹{sl_price:,.2f} up to your buy price (**₹{buy_zone:,.2f}**).  \n"
-        f"3. **Book Profit:** Sell 70% of your shares at **₹{t1_price:,.2f} (+2.2%)** and exit the rest at **₹{t2_price:,.2f} (+4.0%)** or before 3:15 PM."
-    )
+    m1.metric("Live LTP", f"₹{ltp:,.2f}", f"14D Avg Range: ₹{atr_14:,.2f}")
+    m2.metric("🟡 VWAP Pullback Buy", f"₹{buy_zone:,.2f}", "Ideal Morning Entry")
+    m3.metric("🛑 Structure Stop-Loss", f"₹{sl_price:,.2f}", "Below Morning Low / ATR")
+    m4.metric("🎯 Realistic T1 (0.9x ATR)", f"₹{t1_price:,.2f}", "Achieved ✅" if t1_already_hit else "High-Prob Intraday Target")
+    m5.metric("🚀 Stretch T2 (1.35x ATR)", f"₹{t2_price:,.2f}", "Strong Trend Day Only")
 
     v_avg = df["Volume"].rolling(20, min_periods=1).mean()
     v_col = [
@@ -274,13 +294,13 @@ if not df.empty:
     fig.add_trace(go.Bar(x=df["Time"], y=df["Volume"], name="Volume", marker_color=v_col), row=2, col=1)
 
     fig.add_hline(y=buy_zone, line_dash="solid", line_color="#FFD700", line_width=1.6,
-                  annotation_text=f"🟡 BUY: ₹{buy_zone:,.2f}", annotation_position="bottom left", annotation_font_color="#FFD700", row=1, col=1)
+                  annotation_text=f"🟡 VWAP BUY: ₹{buy_zone:,.2f}", annotation_position="bottom left", annotation_font_color="#FFD700", row=1, col=1)
     fig.add_hline(y=sl_price, line_dash="solid", line_color="#FF5252", line_width=1.6,
-                  annotation_text=f"🛑 SL (-1.2%): ₹{sl_price:,.2f}", annotation_position="bottom right", annotation_font_color="#FF5252", row=1, col=1)
+                  annotation_text=f"🛑 SL: ₹{sl_price:,.2f}", annotation_position="bottom right", annotation_font_color="#FF5252", row=1, col=1)
     fig.add_hline(y=t1_price, line_dash="dash", line_color="#29B6F6", line_width=1.4,
-                  annotation_text=f"🎯 T1 (+2.2%): ₹{t1_price:,.2f}", annotation_position="top left", annotation_font_color="#29B6F6", row=1, col=1)
+                  annotation_text=f"🎯 REALISTIC T1: ₹{t1_price:,.2f}", annotation_position="top left", annotation_font_color="#29B6F6", row=1, col=1)
     fig.add_hline(y=t2_price, line_dash="dash", line_color="#00E676", line_width=1.4,
-                  annotation_text=f"🚀 T2 (+4.0%): ₹{t2_price:,.2f}", annotation_position="top right", annotation_font_color="#00E676", row=1, col=1)
+                  annotation_text=f"🚀 STRETCH T2: ₹{t2_price:,.2f}", annotation_position="top right", annotation_font_color="#00E676", row=1, col=1)
 
     rb = [dict(bounds=["sat", "mon"])]
     if tf_choice != "1D":
@@ -293,7 +313,7 @@ if not df.empty:
     ]
 
     fig.update_layout(
-        title=f"{active_sym} ({tf_choice}) | LTP: ₹{ltp:,.2f} | Yellow Line = VWAP (Buy Only Above VWAP)",
+        title=f"{active_sym} ({tf_choice}) | LTP: ₹{ltp:,.2f} | 14D Avg Daily Move (ATR): ₹{atr_14:,.2f}",
         template="plotly_dark", height=640, dragmode="pan", hovermode="x unified", showlegend=False,
         margin=dict(l=10, r=65, t=45, b=35),
         yaxis=dict(side="right", title="Price (₹)", showgrid=True, gridcolor="rgba(255,255,255,0.06)"),
