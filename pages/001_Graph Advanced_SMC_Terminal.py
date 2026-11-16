@@ -13,7 +13,7 @@ raw_sym = c1.text_input("Enter NSE Stock Symbol", value="ITC").strip().upper()
 ticker = raw_sym if raw_sym.endswith(".NS") else f"{raw_sym}.NS"
 tf_choice = c2.radio("Select Candle Interval", ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D"], index=3, horizontal=True)
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=10)
 def fetch_clean_smc(sym, tf):
     p_map = {"1m": "5d", "3m": "5d", "5m": "10d", "15m": "15d", "30m": "30d", "1h": "60d", "4h": "60d", "1D": "6mo"}
     i_map = {"1m": "1m", "3m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "4h": "1h", "1D": "1d"}
@@ -21,15 +21,17 @@ def fetch_clean_smc(sym, tf):
     df = t_obj.history(period=p_map[tf], interval=i_map[tf], auto_adjust=True)
     df4 = t_obj.history(period="60d", interval="1h", auto_adjust=True)
     df1 = t_obj.history(period="6mo", interval="1d", auto_adjust=True)
-    if df.empty or "Close" not in df.columns:
+    req = {"Open", "High", "Low", "Close", "Volume"}
+    if df is None or df.empty or not req.issubset(set(df.columns)):
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-    df = df.reset_index().rename(columns={df.columns[0]: "Time"})
+    df = df.reset_index()
+    df.rename(columns={df.columns[0]: "Time"}, inplace=True)
     df["Time"] = pd.to_datetime(df["Time"])
     if df["Time"].dt.tz is not None:
         df["Time"] = df["Time"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
     if tf in ["3m", "4h"]:
         df = df.set_index("Time").resample("3min" if tf == "3m" else "4h").agg({"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"}).dropna().reset_index()
-    if not df4.empty and "Close" in df4.columns:
+    if df4 is not None and not df4.empty and {"Open", "High", "Low", "Close"}.issubset(set(df4.columns)):
         df4.index = pd.to_datetime(df4.index)
         if df4.index.tz is not None:
             df4.index = df4.index.tz_convert("Asia/Kolkata").tz_localize(None)
@@ -42,12 +44,12 @@ if df.empty:
     st.error(f"No data returned for {ticker}. Check the NSE symbol.")
 else:
     ltp = float(df["Close"].iloc[-1])
-    res_1d = round(float(df_1d["High"].iloc[-20:].max()), 2) if not df_1d.empty else round(float(df["High"].max()), 2)
+    res_1d = round(float(df_1d["High"].iloc[-20:].max()), 2) if (df_1d is not None and not df_1d.empty and "High" in df_1d.columns) else round(float(df["High"].max()), 2)
     df["VWAP"] = (((df["High"] + df["Low"] + df["Close"]) / 3.0) * df["Volume"]).groupby(df["Time"].dt.date).cumsum() / df["Volume"].groupby(df["Time"].dt.date).cumsum().replace(0, np.nan)
     v_avg = df["Volume"].rolling(20, min_periods=1).mean()
     v_col = ["#00E676" if (c >= o and v >= 1.5 * va) else ("#FF5252" if (c < o and v >= 1.5 * va) else ("rgba(0,230,118,0.35)" if c >= o else "rgba(255,82,82,0.35)")) for o, c, v, va in zip(df["Open"], df["Close"], df["Volume"], v_avg)]
 
-    fvg = next(((df_4h.index[i-2], float(df_4h["High"].iloc[i-2]), float(df_4h["Low"].iloc[i])) for i in range(len(df_4h)-1, 1, -1) if (df_4h["Low"].iloc[i] - df_4h["High"].iloc[i-2]) > 0.05), None) if not df_4h.empty else None
+    fvg = next(((df_4h.index[i-2], float(df_4h["High"].iloc[i-2]), float(df_4h["Low"].iloc[i])) for i in range(len(df_4h)-1, 1, -1) if (df_4h["Low"].iloc[i] - df_4h["High"].iloc[i-2]) > 0.05), None) if (df_4h is not None and not df_4h.empty) else None
     df["SH"] = df["High"] == df["High"].rolling(9, center=True).max()
     sigs, last_sh, entry_p = [], None, round(fvg[2], 2) if fvg else round(ltp * 0.99, 2)
     for i in range(4, len(df)):
