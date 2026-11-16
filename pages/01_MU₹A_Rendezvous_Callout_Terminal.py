@@ -7,9 +7,22 @@ import yfinance as yf
 
 st.set_page_config(page_title="MU$₹A Rendezvous Advance Callouts", layout="wide")
 
+# --- SIDEBAR: REFRESH CONTROLS & AI STATUS ---
+with st.sidebar:
+    st.header("⚙️ Terminal Control Center")
+    if st.button("🔄 Refresh Live Scans", type="primary", use_container_width=True):
+        st.cache_data.clear()
+        st.success("Cache cleared! Fetching fresh data...")
+        st.rerun()
+    
+    st.markdown("---")
+    st.markdown("### 🤖 AI Agent Status")
+    st.info("Connected to GitHub: `keshavamurthy28/kk-ai-stock-agent-1`")
+    st.caption("Active Engine: Python yfinance + Plotly Multi-Timeframe Engine")
+
 st.title("🎯 MU$₹A Rendezvous: Live Breakout & Advance Callout Terminal")
 st.markdown(
-    "🟢 **Night-Before Coil Triggered:** Multi-day tight consolidation breaking out  |  "
+    "🟢 **Night-Before Coil Triggered:** Multi-day tight consolidation breaking out  |  "
     "🔵 **Fresh Intraday Surge:** High-volume institutional momentum breakout"
 )
 
@@ -48,7 +61,7 @@ UNIVERSE = {
 }
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=30)
 def scan_live_universe(symbols_dict):
     tickers = [f"{s}.NS" for s in symbols_dict.keys()]
     raw = yf.download(tickers, period="1mo", interval="1d", group_by="ticker", progress=False, threads=True)
@@ -80,7 +93,7 @@ def scan_live_universe(symbols_dict):
                 sig_source = "🔵 FRESH INTRADAY BREAKOUT"
                 reason = f"Momentum Drive ({chg_pct:+.2f}%) + {rvol:.2f}x RVOL"
 
-            # Risk & Target Calculation (Anchored to recent swing structure)
+            # Risk & Target Calculation
             sl = round(max(low_5d * 0.992, ltp * 0.955), 2)
             risk = max(ltp - sl, ltp * 0.015)
             t1 = round(ltp + (risk * 1.5), 2)
@@ -203,7 +216,6 @@ else:
     ltp = float(df["Close"].iloc[-1])
     company_name = UNIVERSE.get(active_sym, active_sym)
 
-    # Pull matching table metrics if available, otherwise compute cleanly
     if not rank_df.empty and active_sym in rank_df["Stock"].values:
         r_row = rank_df[rank_df["Stock"] == active_sym].iloc[0]
         initial_sl = float(r_row["Stop_Loss"])
@@ -237,7 +249,7 @@ else:
         f"3. **Zero-Loss Lock:** Once price crosses **₹{zero_loss_trigger:,.2f}**, move your Stop-Loss up to **₹{suggested_entry:,.2f}** so the trade becomes 100% risk-free."
     )
 
-    # VWAP & EMA 20 for clear visual trend guidance
+    # VWAP & EMA 20
     df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
     df["VWAP"] = (
         (((df["High"] + df["Low"] + df["Close"]) / 3.0) * df["Volume"]).groupby(df["Time"].dt.date).cumsum()
@@ -260,7 +272,6 @@ else:
         row_heights=[0.78, 0.22],
     )
 
-    # Candlesticks
     fig.add_trace(
         go.Candlestick(
             x=df["Time"],
@@ -276,7 +287,6 @@ else:
         col=1,
     )
 
-    # VWAP & 20 EMA
     fig.add_trace(
         go.Scatter(x=df["Time"], y=df["VWAP"], mode="lines", name="VWAP", line=dict(color="#FFD700", width=1.3)),
         row=1,
@@ -287,66 +297,21 @@ else:
         row=1,
         col=1,
     )
-
-    # Volume
     fig.add_trace(
         go.Bar(x=df["Time"], y=df["Volume"], name="Volume", marker_color=v_col),
         row=2,
         col=1,
     )
 
-    # Horizontal Execution Lines
-    fig.add_hline(
-        y=suggested_entry,
-        line_dash="solid",
-        line_color="#FFD700",
-        line_width=1.6,
-        annotation_text=f"🟡 BUY: ₹{suggested_entry:,.2f}",
-        annotation_position="bottom left",
-        annotation_font_color="#FFD700",
-        row=1,
-        col=1,
-    )
-    fig.add_hline(
-        y=initial_sl,
-        line_dash="solid",
-        line_color="#FF5252",
-        line_width=1.6,
-        annotation_text=f"🛑 SL: ₹{initial_sl:,.2f}",
-        annotation_position="bottom right",
-        annotation_font_color="#FF5252",
-        row=1,
-        col=1,
-    )
-    fig.add_hline(
-        y=target_1,
-        line_dash="dash",
-        line_color="#29B6F6",
-        line_width=1.4,
-        annotation_text=f"🎯 T1: ₹{target_1:,.2f}",
-        annotation_position="top left",
-        annotation_font_color="#29B6F6",
-        row=1,
-        col=1,
-    )
-    fig.add_hline(
-        y=target_2,
-        line_dash="dash",
-        line_color="#00E676",
-        line_width=1.4,
-        annotation_text=f"🚀 T2: ₹{target_2:,.2f}",
-        annotation_position="top right",
-        annotation_font_color="#00E676",
-        row=1,
-        col=1,
-    )
+    fig.add_hline(y=suggested_entry, line_dash="solid", line_color="#FFD700", line_width=1.6, annotation_text=f"🟡 BUY: ₹{suggested_entry:,.2f}", annotation_position="bottom left", annotation_font_color="#FFD700", row=1, col=1)
+    fig.add_hline(y=initial_sl, line_dash="solid", line_color="#FF5252", line_width=1.6, annotation_text=f"🛑 SL: ₹{initial_sl:,.2f}", annotation_position="bottom right", annotation_font_color="#FF5252", row=1, col=1)
+    fig.add_hline(y=target_1, line_dash="dash", line_color="#29B6F6", line_width=1.4, annotation_text=f"🎯 T1: ₹{target_1:,.2f}", annotation_position="top left", annotation_font_color="#29B6F6", row=1, col=1)
+    fig.add_hline(y=target_2, line_dash="dash", line_color="#00E676", line_width=1.4, annotation_text=f"🚀 T2: ₹{target_2:,.2f}", annotation_position="top right", annotation_font_color="#00E676", row=1, col=1)
 
-    # Remove weekends & off-market hours so candles connect seamlessly like TradingView/Kite
     rb = [dict(bounds=["sat", "mon"])]
     if tf_choice != "1D":
         rb.append(dict(bounds=[15.5, 9.25], pattern="hour"))
 
-    # TradingView / Kite style X-axis: Time on top, Date below
     tv_tickformats = [
         dict(dtickrange=[None, 86400000], value="%H:%M<br>%d %b"),
         dict(dtickrange=[86400000, "M1"], value="%d %b<br>%Y"),
@@ -363,20 +328,8 @@ else:
         margin=dict(l=10, r=65, t=45, b=35),
         yaxis=dict(side="right", title="Price (₹)", showgrid=True, gridcolor="rgba(255,255,255,0.06)"),
         yaxis2=dict(side="right", title="Volume", showgrid=False),
-        xaxis=dict(
-            rangeslider_visible=False,
-            rangebreaks=rb,
-            tickformatstops=tv_tickformats,
-            showgrid=True,
-            gridcolor="rgba(255,255,255,0.06)",
-        ),
-        xaxis2=dict(
-            rangeslider_visible=False,
-            rangebreaks=rb,
-            tickformatstops=tv_tickformats,
-            showgrid=True,
-            gridcolor="rgba(255,255,255,0.06)",
-        ),
+        xaxis=dict(rangeslider_visible=False, rangebreaks=rb, tickformatstops=tv_tickformats, showgrid=True, gridcolor="rgba(255,255,255,0.06)"),
+        xaxis2=dict(rangeslider_visible=False, rangebreaks=rb, tickformatstops=tv_tickformats, showgrid=True, gridcolor="rgba(255,255,255,0.06)"),
     )
 
     st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
