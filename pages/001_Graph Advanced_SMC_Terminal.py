@@ -70,10 +70,4 @@ else:
         fig.add_shape(type="rect", x0=xs, x1=df["Time"].iloc[-1], y0=fvg[1], y1=fvg[2], fillcolor="rgba(0,230,118,0.16)", line=dict(width=0), layer="below", row=1, col=1)
         fig.add_annotation(x=xs, y=fvg[2], text=f"4H FVG ({fvg[1]:,.1f}-{fvg[2]:,.1f})", showarrow=False, xanchor="left", yshift=10, font=dict(size=10, color="#00E676"), row=1, col=1)
     for idx_s, s in enumerate(sigs[-2:]):
-        fig.add_shape(type="line", x0=s["x0"], x1=s["t"], y0=s["y"], y1=s["y"], line=dict(color="#00E676", width=1.3, dash="dot"), row=1, col=1)
-        fig.add_annotation(x=s["t"], y=s["y"], text=f"CHoCH ▲ BUY @ {s['y']}" if idx_s == len(sigs[-2:])-1 else f"BOS ▲ @ {s['y']}", showarrow=False, yshift=12, font=dict(size=10, color="#00E676"), row=1, col=1)
-    fig.add_hline(y=sl_p, line_dash="solid", line_color="#FF5252", line_width=1.4, annotation_text=f"🛑 SL: ₹{sl_p:,.2f}", annotation_position="bottom left", annotation_font_color="#FF5252", row=1, col=1)
-    fig.add_hline(y=t1_p, line_dash="dash", line_color="#29B6F6", line_width=1.4, annotation_text=f"🎯 T1: ₹{t1_p:,.2f}", annotation_position="top left", annotation_font_color="#29B6F6", row=1, col=1)
-    fig.add_hline(y=t2_p, line_dash="dash", line_color="#00E676", line_width=1.4, annotation_text=f"🚀 T2: ₹{t2_p:,.2f}", annotation_position="top right", annotation_font_color="#00E676", row=1, col=1)
-    rb = [dict(bounds=["sat", "mon"])] + ([dict(bounds=[15.5, 9.25], pattern="hour")] if tf_choice != "1D" else [])
-    fig.update_layout(title=f"Institutional SMC & VWAP Chart: {ticker} ({tf_choice}) | LTP: ₹{ltp:,.2f}", template="plotly_dark", height=600, dragmode="pan", hovermode="x unified", showlegend=False, margin=dict(l=10, r=60, t=45, b=30), yaxis=dict(side="right", title="Price (₹)", fixedrange=False), yaxis2=dict(side="right", title="Vol
+        fig.add_shape(type="line", x0=s["x0"], x1=s
