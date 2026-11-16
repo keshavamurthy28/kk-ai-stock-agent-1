@@ -16,8 +16,8 @@ tf_choice = c2.radio("Select Candle Interval", ["1m", "3m", "5m", "15m", "30m", 
 def clean_df(d):
     if d is None or d.empty: return pd.DataFrame()
     if isinstance(d.columns, pd.MultiIndex):
-        lvl0 = [str(x) for x in d.columns.get_level_values(0)]
-        d.columns = d.columns.get_level_values(0 if "Close" in lvl0 else -1)
+        d.columns = [str(c[0]) for c in d.columns]
+    d.columns = [str(c).strip() for c in d.columns]
     return d.loc[:, ~d.columns.duplicated()]
 
 @st.cache_data(ttl=60)
@@ -42,7 +42,7 @@ def load_smc(sym, tf):
 df, df_4h, df_1d = load_smc(ticker, tf_choice)
 
 if df.empty:
-    st.error(f"No data returned for {ticker}.")
+    st.error(f"No data returned for {ticker}. Please check the symbol.")
 else:
     ltp = float(df["Close"].iloc[-1])
     res_1d = round(float(df_1d["High"].iloc[-20:].max()), 2) if (not df_1d.empty and "High" in df_1d.columns) else round(float(df["High"].max()), 2)
