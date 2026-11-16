@@ -98,3 +98,4 @@ else:
         rank_num, stock = idx + 1, row["Stock"]
         badge = "🟢 MASTER CONFLUENCE" if row["Is_Master"] else "🔵 LIVE SUPER-SIGNAL"
         st.subheader(f"🏆 Rank #{rank_num}: {stock} (LTP: ₹{row['LTP']:,.2f} | +{row['Change_%']}%) — {badge}")
+        c1
