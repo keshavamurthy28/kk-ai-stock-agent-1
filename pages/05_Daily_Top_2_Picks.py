@@ -37,4 +37,72 @@ def compute_top2_confluence(tickers, nb_list, ss_list):
             if pct_chg < 0.8 or pct_chg > 9.5 or not is_ss: continue
             is_master, broke_20d = (is_nb and is_ss), (ltp >= res_20d)
             near_high = (high_p - ltp) / max(high_p - low_p, 0.01) <= 0.35
-            score = (100 if is_master else 0) + (pct_chg * 5) + (min(rvol, 8.0) * 4) + (15 if broke_20d else 0) + (10 if
+            score = (100 if is_master else 0) + (pct_chg * 5) + (min(rvol, 8.0) * 4) + (15 if broke_20d else 0) + (10 if near_high else 0)
+            ideal_buy = min(round(max(res_20d, high_p - ((high_p - low_p) * 0.382), open_p * 1.003), 2), round(ltp, 2))
+            ext_pct = round(((ltp - ideal_buy) / ideal_buy) * 100, 2)
+            kite_act = f"⏳ WAIT FOR PULLBACK BUY @ ₹{ideal_buy:,.2f}" if ext_pct > 0.8 else f"✅ BUY NOW / LIMIT @ ₹{ideal_buy:,.2f}"
+            note = f"Extended +{ext_pct}% above retest. Place Kite Limit Order at ₹{ideal_buy:,.2f}." if ext_pct > 0.8 else f"Inside optimal entry zone! Execute Buy near ₹{ideal_buy:,.2f}."
+            sl = round(min(low_p, ideal_buy * 0.988), 2)
+            risk = max(ideal_buy - sl, ideal_buy * 0.008)
+            tags = (["Night-Before Coil"] if is_master else []) + ["Super-Signal Live"] + (["20D Breakout"] if broke_20d else [])
+            rows.append({"Stock": t, "LTP": round(ltp, 2), "Change_%": pct_chg, "Pace_RVOL": rvol, "Kite_Action": kite_act, "Limit_Buy": ideal_buy, "Stop_Loss": sl, "Target_1": round(ideal_buy + risk * 1.5, 2), "Target_2": round(ideal_buy + risk * 3.0, 2), "Action_Note": note, "Score": round(score, 1), "Confluence": " + ".join(tags), "Is_Master": is_master})
+        except Exception: continue
+    return pd.DataFrame(rows).sort_values(by="Score", ascending=False).reset_index(drop=True) if rows else pd.DataFrame()
+
+@st.cache_data(ttl=60)
+def build_smc_chart(stock_sym, tf_choice, ltp_p, buy_p, sl_p, t1_p, t2_p):
+    ticker = f"{stock_sym}.NS"
+    p_map = {"1m": "5d", "3m": "5d", "5m": "10d", "15m": "15d", "30m": "30d", "1h": "60d", "4h": "60d", "1D": "6mo"}
+    i_map = {"1m": "1m", "3m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "4h": "1h", "1D": "1d"}
+    df = yf.download(ticker, period=p_map[tf_choice], interval=i_map[tf_choice], progress=False, auto_adjust=True)
+    df_4h = yf.download(ticker, period="60d", interval="1h", progress=False, auto_adjust=True)
+    for d in [df, df_4h]:
+        if isinstance(d.columns, pd.MultiIndex): d.columns = d.columns.droplevel(1)
+    df = df.reset_index().rename(columns={"Datetime" if "Datetime" in df.columns else "Date": "Time"})
+    df["Time"] = pd.to_datetime(df["Time"])
+    if df["Time"].dt.tz is not None: df["Time"] = df["Time"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
+    if tf_choice in ["3m", "4h"]:
+        df = df.set_index("Time").resample("3min" if tf_choice == "3m" else "4h").agg({"Open": "first", "High": "max", "Low": "min", "Close": "last"}).dropna().reset_index()
+    if not df_4h.empty: df_4h = df_4h.resample("4h").agg({"Open": "first", "High": "max", "Low": "min", "Close": "last"}).dropna()
+    bull_fvg = next(((float(df_4h["High"].iloc[i-2]), float(df_4h["Low"].iloc[i])) for i in range(len(df_4h)-1, 1, -1) if df_4h["Low"].iloc[i] > df_4h["High"].iloc[i-2]), None)
+    df["SH"] = df["High"] == df["High"].rolling(9, center=True).max()
+    sigs, last_sh = [], None
+    for i in range(4, len(df)):
+        if df["SH"].iloc[i-4]: last_sh = (df["Time"].iloc[i-4], float(df["High"].iloc[i-4]))
+        if last_sh and float(df["Close"].iloc[i-1]) <= last_sh[1] and float(df["Close"].iloc[i]) > last_sh[1]:
+            sigs.append({"t": df["Time"].iloc[i], "x0": last_sh[0], "y": last_sh[1]}); last_sh = None
+    fig = go.Figure(data=[go.Candlestick(x=df["Time"], open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"], name=stock_sym, increasing_line_color="#00E676", decreasing_line_color="#FF5252")])
+    if bull_fvg: fig.add_hrect(y0=bull_fvg[0], y1=bull_fvg[1], fillcolor="rgba(0,230,118,0.14)", layer="below", line_width=0, annotation_text=f"PAST: 4H Bullish FVG ({bull_fvg[0]:,.1f}-{bull_fvg[1]:,.1f})", annotation_position="bottom left")
+    for idx_s, s in enumerate(sigs[-4:]):
+        fig.add_shape(type="line", x0=s["x0"], x1=s["t"], y0=s["y"], y1=s["y"], line=dict(color="#00E676", width=1.2, dash="dot"))
+        fig.add_annotation(x=s["t"], y=s["y"], text="PRESENT: CHoCH Breakout" if idx_s == len(sigs[-4:])-1 else "PAST: BOS", showarrow=False, yshift=10, font=dict(size=9, color="#00E676"))
+    fig.add_hline(y=buy_p, line_dash="solid", line_color="#FFD700", line_width=2.0, annotation_text=f"🟡 KITE LIMIT BUY: ₹{buy_p:,.2f} (LTP: ₹{ltp_p:,.2f})", annotation_position="top left", annotation_font_color="#FFD700")
+    fig.add_hline(y=sl_p, line_dash="solid", line_color="#FF5252", line_width=1.5, annotation_text=f"🛑 STRICT SL: ₹{sl_p:,.2f}", annotation_position="bottom right", annotation_font_color="#FF5252")
+    fig.add_hline(y=t1_p, line_dash="dash", line_color="#29B6F6", line_width=1.5, annotation_text=f"🎯 TARGET 1 (1.5R): ₹{t1_p:,.2f}", annotation_position="top right", annotation_font_color="#29B6F6")
+    fig.add_hline(y=t2_p, line_dash="dash", line_color="#00E676", line_width=1.5, annotation_text=f"🚀 TARGET 2 (3.0R): ₹{t2_p:,.2f}", annotation_position="top right", annotation_font_color="#00E676")
+    rb = [dict(bounds=["sat", "mon"])] + ([dict(bounds=[15.5, 9.25], pattern="hour")] if tf_choice != "1D" else [])
+    fig.update_layout(title=f"SMC Kite Execution Chart: {stock_sym} ({tf_choice}) | LTP: ₹{ltp_p:,.2f}", template="plotly_dark", height=540, dragmode="pan", hovermode="x unified", margin=dict(l=10, r=60, t=45, b=35), yaxis=dict(side="right", title="Price (₹)", fixedrange=False), xaxis=dict(rangeslider_visible=False, rangebreaks=rb, rangeselector=dict(buttons=[dict(count=1, label="1D", step="day", stepmode="backward"), dict(count=5, label="5D", step="day", stepmode="backward"), dict(count=7, label="1W", step="day", stepmode="backward"), dict(count=1, label="1M", step="month", stepmode="backward"), dict(step="all", label="All")], bgcolor="#1E222D", activecolor="#2962FF", font=dict(color="white", size=11), x=0.0, y=-0.15)))
+    return fig
+
+if st.sidebar.button("🔄 Force Refresh Top 2 Picks"): st.cache_data.clear()
+df_ranked = compute_top2_confluence(NSE_UNIVERSE, st.session_state.get("night_before_watchlist", []), st.session_state.get("super_signal_confirmed", []))
+
+if df_ranked.empty:
+    st.warning("No stocks currently satisfy institutional volume expansion and trend alignment.")
+else:
+    st.subheader("🔗 Multi-Page Confluence Pipeline (Night Before ➔ Super-Signal ➔ Kite Limit Plan)")
+    st.dataframe(df_ranked.head(5)[["Stock", "LTP", "Change_%", "Pace_RVOL", "Kite_Action", "Stop_Loss", "Target_1", "Target_2"]], width="stretch", hide_index=True)
+    st.markdown("---")
+    for idx, row in df_ranked.head(2).iterrows():
+        rank_num, stock = idx + 1, row["Stock"]
+        badge = "🟢 MASTER CONFLUENCE" if row["Is_Master"] else "🔵 LIVE SUPER-SIGNAL"
+        st.subheader(f"🏆 Rank #{rank_num}: {stock} (LTP: ₹{row['LTP']:,.2f} | +{row['Change_%']}%) — {badge}")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("🟡 Kite Limit Buy Price", f"₹{row['Limit_Buy']:,.2f}", row["Kite_Action"])
+        c2.metric("🛑 Strict Stop-Loss", f"₹{row['Stop_Loss']:,.2f}", "Protected Risk")
+        c3.metric("🎯 Target 1 (Intraday 1.5R)", f"₹{row['Target_1']:,.2f}", "Book 50% Qty")
+        c4.metric("🚀 Target 2 (Swing 3.0R)", f"₹{row['Target_2']:,.2f}", "Trail Balance")
+        st.warning(f"📲 **Zerodha Kite Order Rule ({stock}):** {row['Action_Note']} (Confluence: {row['Confluence']})")
+        selected_tf = st.radio(f"Select Candle Interval for {stock}", ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D"], index=3, horizontal=True, key=f"tf_radio_{stock}_{rank_num}")
+        st.plotly_chart(build_smc_chart(stock, selected_tf, row["LTP"], row["Limit_Buy"], row["Stop_Loss"], row["Target_1"], row["Target_2"]), width="stretch", config={"scrollZoom": True})
+        st.markdown("---")
