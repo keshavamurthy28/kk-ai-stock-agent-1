@@ -110,10 +110,3 @@ def get_timeframe_data(ticker: str, tf: str) -> pd.DataFrame:
             "Volume": "sum",
         })
         .dropna()
-        .reset_index()
-    )
-  return df
-
-
-# --- SMC DETECTION FUNCTIONS (FVG, SWINGS, CHoCH) ---
-def detect_fvgs(df: pd.
