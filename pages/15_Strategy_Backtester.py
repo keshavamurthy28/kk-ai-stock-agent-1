@@ -1,205 +1,100 @@
-import datetime
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import streamlit as st
 import yfinance as yf
 
-# Page Configuration
-st.set_page_config(
-    page_title="NSE Strategy Backtester",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+st.set_page_config(page_title="Master Confluence Strategy Backtester", layout="wide")
+st.title("📊 Master Confluence & Pullback Limit Backtester (6-Month Proof)")
+st.markdown("Tests the exact **Night-Before VCP Coil + 20D Breakout + Pullback Limit Entry** strategy across top NSE stocks over the last **6 months** to verify historical win rate and net P&L.")
 
-st.title("🧪 NSE Historical Strategy & Orderflow Backtester")
-st.markdown(
-    "Backtest custom setups on any NSE equity across *Minute, Hourly, or Daily*"
-    " timeframes for any date range you desire."
-)
+BACKTEST_UNIVERSE = ["ITC", "APOLLOHOSP", "KALYANKJIL", "DEEPAKFERT", "BELRISE", "BHARTIARTL", "PNB", "EICHERMOT", "SBIN", "HDFCBANK", "ICICIBANK", "BSE", "HINDALCO", "ABB", "RELIANCE", "TCS", "INFY", "AXISBANK", "BAJFINANCE", "SUNPHARMA", "MARUTI", "NTPC", "M&M", "TATASTEEL", "HAL", "BEL", "TRENT", "DIXON", "POLYCAB", "PFC", "RECLTD", "IRFC", "RVNL", "MAZDOCK", "TITAN", "DLF", "INDIGO", "MAXHEALTH"]
 
-# --- SIDEBAR CONTROLS ---
-st.sidebar.header("⚙️ Backtest Parameters")
-ticker_input = st.sidebar.text_input(
-    "Enter NSE Ticker Symbol", value="RELIANCE"
-)
-ticker_symbol = (
-    ticker_input.strip().upper()
-    if ticker_input.strip().upper().endswith(".NS")
-    else ticker_input.strip().upper() + ".NS"
-)
+c_in1, c_in2, c_in3 = st.columns(3)
+capital_per_trade = c_in1.number_input("Capital Allocated per Trade (₹)", min_value=10000, max_value=1000000, value=100000, step=10000)
+rr_target = c_in2.selectbox("Profit Target Multiplier", [1.5, 2.0, 2.5, 3.0], index=1)
+hold_days = c_in3.slider("Max Holding Days per Trade", min_value=2, max_value=15, value=7)
 
-timeframe = st.sidebar.selectbox(
-    "Select Timeframe", ["1m", "5m", "15m", "1h", "1d"], index=4
-)
+@st.cache_data(ttl=300)
+def run_confluence_backtest(tickers, cap, rr, max_hold):
+    raw = yf.download([f"{t}.NS" for t in tickers], period="6mo", interval="1d", group_by="ticker", progress=False, auto_adjust=True)
+    trades = []
+    for t in tickers:
+        try:
+            df = raw[f"{t}.NS"].dropna()
+            if len(df) < 40: continue
+            df["EMA21"] = df["Close"].ewm(span=21).mean()
+            df["EMA50"] = df["Close"].ewm(span=50).mean()
+            df["VolAvg"] = df["Volume"].rolling(20).mean()
+            df["Res20"] = df["High"].rolling(20).max().shift(1)
 
-today_date = datetime.date.today()
-default_start = today_date - datetime.timedelta(days=365)
+            i = 25
+            while i < len(df) - max_hold:
+                prev_c, prev_ema21, prev_ema50, res20 = float(df["Close"].iloc[i-1]), float(df["EMA21"].iloc[i-1]), float(df["EMA50"].iloc[i-1]), float(df["Res20"].iloc[i])
+                dist_coil = ((res20 - prev_c) / prev_c) * 100
+                # Night-Before Coil Check on Day i-1
+                is_coil = (prev_c > prev_ema21 > prev_ema50) and (-2.5 <= dist_coil <= 4.0)
+                # Breakout + Volume Expansion Check on Day i
+                day_c, day_o, day_h, day_l = float(df["Close"].iloc[i]), float(df["Open"].iloc[i]), float(df["High"].iloc[i]), float(df["Low"].iloc[i])
+                rvol = float(df["Volume"].iloc[i]) / max(float(df["VolAvg"].iloc[i]), 1.0)
+                if is_coil and day_c >= res20 and day_c > day_o and rvol >= 1.3:
+                    limit_entry = round(max(res20, day_h - ((day_h - day_l) * 0.382)), 2)
+                    sl = round(min(day_l, limit_entry * 0.985), 2)
+                    risk = max(limit_entry - sl, limit_entry * 0.01)
+                    target = round(limit_entry + (risk * rr), 2)
+                    qty = max(int(cap // limit_entry), 1)
 
-start_date = st.sidebar.date_input("Start Date", value=default_start)
-end_date = st.sidebar.date_input("End Date", value=today_date)
+                    filled, exit_p, exit_dt, outcome = False, limit_entry, df.index[i], "Unfilled"
+                    for j in range(i + 1, min(i + 1 + max_hold, len(df))):
+                        fh, fl, fc = float(df["High"].iloc[j]), float(df["Low"].iloc[j]), float(df["Close"].iloc[j])
+                        if not filled:
+                            if fl <= limit_entry <= fh:
+                                filled = True
+                            continue
+                        if fl <= sl:
+                            exit_p, exit_dt, outcome = sl, df.index[j], "🛑 Stop-Loss Hit"
+                            break
+                        if fh >= target:
+                            exit_p, exit_dt, outcome = target, df.index[j], "🎯 Target Hit"
+                            break
+                        exit_p, exit_dt, outcome = fc, df.index[j], "⏳ Time Exit"
 
-st.sidebar.markdown("### Strategy Rules")
-ema_period = st.sidebar.slider("EMA Trend Filter", 10, 50, 20, 5)
-vol_threshold = st.sidebar.slider(
-    "Volume Surge Threshold", 1.0, 3.0, 1.5, 0.1
-)
+                    if filled and outcome != "Unfilled":
+                        pnl = round((exit_p - limit_entry) * qty, 2)
+                        trades.append({"Stock": t, "Entry_Date": df.index[i].strftime("%Y-%m-%d"), "Exit_Date": exit_dt.strftime("%Y-%m-%d"), "Limit_Buy": limit_entry, "Stop_Loss": sl, "Target": target, "Exit_Price": round(exit_p, 2), "Result": outcome, "Net_PnL (₹)": pnl})
+                        i += max_hold
+                        continue
+                i += 1
+        except Exception: continue
+    return pd.DataFrame(trades)
 
+if st.button("🚀 Run 6-Month Confluence Backtest"):
+    st.cache_data.clear()
 
-@st.cache_data(ttl=60)
-def load_backtest_data(symbol, start, end, interval):
-  df = yf.download(
-      symbol, start=start, end=end, interval=interval, progress=False
-  )
-  if isinstance(df.columns, pd.MultiIndex):
-    df.columns = df.columns.get_level_values(0)
-  df.dropna(inplace=True)
-  return df
+df_bt = run_confluence_backtest(BACKTEST_UNIVERSE, capital_per_trade, rr_target, hold_days)
 
-
-if st.sidebar.button("🚀 Run Backtest Simulation", type="primary"):
-  df = load_backtest_data(
-      ticker_symbol, str(start_date), str(end_date), timeframe
-  )
-
-  if df.empty or len(df) < ema_period:
-    st.error(
-        "Insufficient data found for the selected ticker and date range."
-        " Please adjust your filters."
-    )
-  else:
-    # Strategy calculations
-    df["EMA"] = df["Close"].ewm(span=ema_period, adjust=False).mean()
-    df["Vol_SMA"] = df["Volume"].rolling(window=20).mean()
-    df["Vol_Surge"] = df["Volume"] > (vol_threshold * df["Vol_SMA"])
-
-    # Simulate Signals & Returns
-    df["Signal"] = 0
-    df.loc[(df["Close"] > df["EMA"]) & (df["Vol_Surge"]), "Signal"] = 1
-    df.loc[(df["Close"] < df["EMA"]) & (df["Vol_Surge"]), "Signal"] = -1
-
-    df["Market_Return"] = df["Close"].pct_change().fillna(0)
-    df["Strategy_Return"] = df["Market_Return"] * df["Signal"].shift(1).fillna(0)
-
-    df["Cumulative_Strategy"] = (1 + df["Strategy_Return"]).cumprod() - 1
-    df["Cumulative_Benchmark"] = (1 + df["Market_Return"]).cumprod() - 1
-
-    df["Delta_Return"] = (
-        df["Cumulative_Strategy"] - df["Cumulative_Benchmark"]
-    )
-    df["Orderflow_Delta"] = (df["Close"] - df["Open"]) * df["Volume"]
-
-    total_strat_ret = float(df["Cumulative_Strategy"].iloc[-1] * 100)
-    total_bench_ret = float(df["Cumulative_Benchmark"].iloc[-1] * 100)
-    total_signals = int((df["Signal"] != 0).sum())
-
-    st.success("Backtest Completed Successfully!")
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Strategy Return", f"{total_strat_ret:+.2f}%")
-    col2.metric("Benchmark Buy & Hold Return", f"{total_bench_ret:+.2f}%")
-    col3.metric("Total Signals Generated", f"{total_signals}")
-
-    # --- INTERACTIVE 2-TIER SUBPLOT CHART ---
-    fig = make_subplots(
-        rows=2,
-        cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.08,
-        row_heights=[0.7, 0.3],
-    )
-
-    # 1. Cumulative Performance (Row 1)
-    fig.add_trace(
-        go.Scatter(
-            x=df.index,
-            y=df["Cumulative_Strategy"] * 100,
-            line=dict(color="#00E676", width=2),
-            name="Strategy Return (%)",
-        ),
-        row=1,
-        col=1,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=df.index,
-            y=df["Cumulative_Benchmark"] * 100,
-            line=dict(color="#FF5252", width=1.5, dash="dash"),
-            name="Benchmark (Buy & Hold)",
-        ),
-        row=1,
-        col=1,
-    )
-
-    # 2. Orderflow Delta & Volume Breakdown (Row 2)
-    bar_colors = [
-        "#00E676" if val >= 0 else "#FF1744" for val in df["Orderflow_Delta"]
-    ]
-    fig.add_trace(
-        go.Bar(
-            x=df.index,
-            y=df["Volume"],
-            marker_color=bar_colors,
-            name="Orderflow Delta & Volume Breakdown",
-        ),
-        row=2,
-        col=1,
-    )
-
-    # TradingView-Like Global Layout with Adjusted Legend Position
-    fig.update_layout(
-        template="plotly_dark",
-        height=680,
-        xaxis_rangeslider_visible=False,
-        dragmode="zoom",
-        hovermode="x unified",
-        margin=dict(l=10, r=10, t=50, b=10),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.08,  # Pushes legend slightly above the top chart line boundary
-            xanchor="left",
-            x=0.0,
-            bgcolor="rgba(0,0,0,0.5)",
-        ),
-    )
-
-    # Crosshair configuration
-    fig.update_xaxes(
-        showspikes=True,
-        spikemode="across",
-        spikesnap="cursor",
-        spikecolor="#888888",
-        spikethickness=1,
-    )
-    fig.update_yaxes(
-        side="right",
-        showspikes=True,
-        spikecolor="#888888",
-        spikethickness=1,
-    )
-
-    # Display fully interactive chart
-    st.plotly_chart(
-        fig,
-        use_container_width=True,
-        config={
-            "scrollZoom": True,
-            "displayModeBar": True,
-            "modeBarButtonsToAdd": ["drawline", "drawrect", "eraseshape"],
-        },
-    )
-
-    # --- SIGNAL EXECUTION LOGS ---
-    st.subheader("📋 Signal Execution Logs")
-    exec_logs = df[df["Signal"] != 0][
-        ["Close", "Volume", "Vol_Surge", "Orderflow_Delta", "EMA"]
-    ].tail(50)
-    st.dataframe(exec_logs, use_container_width=True)
+if df_bt.empty:
+    st.warning("No completed historical trades matched the strict filter parameters.")
 else:
-    st.info(
-        "👈 Configure your parameters in the sidebar and click **Run Backtest"
-        " Simulation** to load the interactive backtest."
-    )
+    df_bt = df_bt.sort_values(by="Exit_Date").reset_index(drop=True)
+    df_bt["Cumulative_PnL"] = df_bt["Net_PnL (₹)"].cumsum()
+    total_trades = len(df_bt)
+    wins = len(df_bt[df_bt["Net_PnL (₹)"] > 0])
+    win_rate = round((wins / total_trades) * 100, 1)
+    net_profit = round(df_bt["Net_PnL (₹)"].sum(), 2)
+    gross_win = df_bt[df_bt["Net_PnL (₹)"] > 0]["Net_PnL (₹)"].sum()
+    gross_loss = abs(df_bt[df_bt["Net_PnL (₹)"] < 0]["Net_PnL (₹)"].sum())
+    profit_factor = round(gross_win / max(gross_loss, 1.0), 2)
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total Executed Trades", total_trades)
+    m2.metric("Verified Win Rate", f"{win_rate}%", f"{wins} Wins / {total_trades - wins} Losses")
+    m3.metric("Profit Factor", f"{profit_factor}x", "Gross Win / Gross Loss")
+    m4.metric("6-Month Net P&L", f"₹{net_profit:,.2f}", f"₹{capital_per_trade:,}/trade")
+
+    fig = go.Figure(go.Scatter(x=df_bt["Exit_Date"], y=df_bt["Cumulative_PnL"], mode="lines+markers", line=dict(color="#00E676", width=2.5), name="Equity Curve"))
+    fig.update_layout(title="Cumulative Strategy Equity Curve (6 Months)", template="plotly_dark", height=360, yaxis_title="Cumulative Profit (₹)", margin=dict(l=10, r=20, t=40, b=20))
+    st.plotly_chart(fig, width="stretch")
+
+    st.subheader("📋 Complete Historical Trade Log (Pullback Limit Orders Filled)")
+    st.dataframe(df_bt.sort_values(by="Entry_Date", ascending=False), width="stretch", hide_index=True)
