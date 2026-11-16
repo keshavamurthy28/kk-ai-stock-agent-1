@@ -58,12 +58,16 @@ def build_smc_chart(stock_sym, tf_choice, ltp_p, buy_p, sl_p, t1_p, t2_p):
     df_4h = yf.download(ticker, period="60d", interval="1h", progress=False, auto_adjust=True)
     for d in [df, df_4h]:
         if isinstance(d.columns, pd.MultiIndex): d.columns = d.columns.droplevel(1)
-    df = df.reset_index().rename(columns={"Datetime" if "Datetime" in df.columns else "Date": "Time"})
+    df = df.reset_index()
+    df.rename(columns={df.columns[0]: "Time"}, inplace=True)
     df["Time"] = pd.to_datetime(df["Time"])
     if df["Time"].dt.tz is not None: df["Time"] = df["Time"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
     if tf_choice in ["3m", "4h"]:
         df = df.set_index("Time").resample("3min" if tf_choice == "3m" else "4h").agg({"Open": "first", "High": "max", "Low": "min", "Close": "last"}).dropna().reset_index()
-    if not df_4h.empty: df_4h = df_4h.resample("4h").agg({"Open": "first", "High": "max", "Low": "min", "Close": "last"}).dropna()
+    if not df_4h.empty:
+        df_4h.index = pd.to_datetime(df_4h.index)
+        if df_4h.index.tz is not None: df_4h.index = df_4h.index.tz_convert("Asia/Kolkata").tz_localize(None)
+        df_4h = df_4h.resample("4h").agg({"Open": "first", "High": "max", "Low": "min", "Close": "last"}).dropna()
     bull_fvg = next(((float(df_4h["High"].iloc[i-2]), float(df_4h["Low"].iloc[i])) for i in range(len(df_4h)-1, 1, -1) if df_4h["Low"].iloc[i] > df_4h["High"].iloc[i-2]), None)
     df["SH"] = df["High"] == df["High"].rolling(9, center=True).max()
     sigs, last_sh = [], None
