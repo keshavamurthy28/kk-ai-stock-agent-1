@@ -16,7 +16,8 @@ tf_choice = c2.radio("Select Candle Interval", ["1m", "3m", "5m", "15m", "30m", 
 def clean_df(d):
     if d is None or d.empty: return pd.DataFrame()
     if isinstance(d.columns, pd.MultiIndex):
-        d.columns = [str(c[0]) for c in d.columns]
+        lvl0 = [str(x).strip() for x in d.columns.get_level_values(0)]
+        d.columns = d.columns.get_level_values(0 if "Close" in lvl0 else -1)
     d.columns = [str(c).strip() for c in d.columns]
     return d.loc[:, ~d.columns.duplicated()]
 
