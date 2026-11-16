@@ -4,44 +4,51 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
-st.set_page_config(page_title="Predictive Institutional Breakout Scanner", layout="wide")
+st.set_page_config(page_title="Night Before Institutional Prep Scanner", layout="wide")
 
-st.title("🎯 Predictive Institutional Pre-Breakout & Accumulation Scanner")
+st.title("🌙 Night Before Institutional Prep & Watchlist Generator")
 st.markdown(
-    "Identifies stocks in **tight institutional accumulation** (VCP compression, rising RVOL, and 20D resistance coil) **before** the breakout—filtering out overextended traps."
+    "Scans **120+ NSE Stocks** for tight pre-breakout accumulation coils and sends the watchlist automatically to **Matched Super Signal Page** & **Daily Top 2 Picks**."
 )
 
-NSE_UNIVERSE = [
-    "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "SBIN", "BHARTIARTL",
-    "ITC", "LT", "AXISBANK", "BAJFINANCE", "TATAMOTORS", "SUNPHARMA", "MARUTI",
-    "NTPC", "POWERGRID", "M&M", "TATASTEEL", "HAL", "BEL", "TRENT", "ZOMATO",
-    "PNB", "BANKBARODA", "CANBK", "JINDALPOLY", "FINCABLES", "AMBER", "MSTCLTD",
-    "POWERINDIA", "TDPOWERSYS", "HONASA", "GLAND", "MANKIND", "DIVISLAB",
-    "WOCKPHARMA", "KALYANKJIL", "EICHERMOT", "INDUSTOWER", "ABB", "HINDCOPPER",
-    "DATAPATTNS", "DIXON", "POLYCAB", "KEI", "PFC", "RECLTD", "IRFC", "RVNL"
-]
+NSE_UNIVERSE = list(dict.fromkeys([
+    "BELRISE", "DEEPAKFERT", "ATHERENERG", "ITC", "BHARTIARTL", "PNB", "KALYANKJIL",
+    "SBIN", "HDFCBANK", "ICICIBANK", "EICHERMOT", "BSE", "HINDALCO", "TDPOWERSYS",
+    "ABB", "V2RETAIL", "KAYNES", "RELIANCE", "TCS", "INFY", "AXISBANK", "BAJFINANCE",
+    "TATAMOTORS", "SUNPHARMA", "MARUTI", "NTPC", "POWERGRID", "M&M", "TATASTEEL",
+    "HAL", "BEL", "TRENT", "ZOMATO", "BANKBARODA", "CANBK", "JINDALPOLY", "FINCABLES",
+    "AMBER", "MSTCLTD", "POWERINDIA", "HONASA", "GLAND", "MANKIND", "DIVISLAB",
+    "WOCKPHARMA", "INDUSTOWER", "HINDCOPPER", "DATAPATTNS", "DIXON", "POLYCAB", "KEI",
+    "PFC", "RECLTD", "IRFC", "RVNL", "MAZDOCK", "COCHINSHIP", "GRSE", "BDL",
+    "SUZLON", "IREDA", "HUDCO", "NBCC", "SJVN", "NHPC", "BHEL", "SAIL", "NMDC",
+    "VEDL", "JSWSTEEL", "JINDALSTEL", "ADANIENT", "ADANIPORTS", "ADANIPOWER",
+    "TATAPOWER", "JSWENERGY", "CGPOWER", "SIEMENS", "CUMMINSIND", "THERMAX",
+    "TRITURBINE", "KPITTECH", "PERSISTENT", "COFORGE", "LTIM", "TECHM", "WIPRO",
+    "HCLTECH", "NAUKRI", "PAYTM", "POLICYBZR", "ANGELONE", "CDSL", "MCX", "IEX",
+    "TITAN", "DMART", "VBL", "GODREJCP", "BRITANNIA", "NESTLEIND", "DABUR",
+    "MARICO", "COLPAL", "PIDILITIND", "ASIANPAINT", "BERGEPAINT", "ULTRACEMCO",
+    "AMBUJACEM", "SHREECEM", "DLF", "GODREJPROP", "OBEROIRLTY", "PRESTIGE",
+    "LODHA", "INDIGO", "IRCTC", "CONCOR", "APOLLOHOSP", "MAXHEALTH"
+]))
 
-def get_intraday_volume_multiplier():
-    """Adjusts partial intraday volume based on NSE market hours (9:15 AM - 3:30 PM IST)."""
-    now_utc = datetime.datetime.utcnow()
-    now_ist = now_utc + datetime.timedelta(hours=5, minutes=30)
-    market_open = now_ist.replace(hour=9, minute=15, second=0, microsecond=0)
-    market_close = now_ist.replace(hour=15, minute=30, second=0, microsecond=0)
-
-    if now_ist < market_open or now_ist >= market_close or now_ist.weekday() >= 5:
-        return 1.0  # Full day completed
-    mins_elapsed = max((now_ist - market_open).total_seconds() / 60.0, 5.0)
-    return min(375.0 / mins_elapsed, 25.0)  # Scale partial volume to full-day pace
+def get_rvol_scale():
+    now_ist = datetime.datetime.utcnow() + datetime.timedelta(hours=5, minutes=30)
+    m_open = now_ist.replace(hour=9, minute=15, second=0, microsecond=0)
+    m_close = now_ist.replace(hour=15, minute=30, second=0, microsecond=0)
+    if now_ist < m_open or now_ist >= m_close or now_ist.weekday() >= 5:
+        return 1.0
+    mins = max((now_ist - m_open).total_seconds() / 60.0, 5.0)
+    return min(375.0 / mins, 25.0)
 
 @st.cache_data(ttl=120)
-def scan_predictive_setups(tickers):
+def build_night_before_watchlist(tickers):
     symbols = [f"{t}.NS" for t in tickers]
     try:
         raw = yf.download(symbols, period="3mo", interval="1d", group_by="ticker", progress=False, auto_adjust=True)
     except Exception:
         return pd.DataFrame()
 
-    vol_scale = get_intraday_volume_multiplier()
+    scale = get_rvol_scale()
     rows = []
 
     for t in tickers:
@@ -52,95 +59,63 @@ def scan_predictive_setups(tickers):
                 continue
 
             close_now = float(df["Close"].iloc[-1])
-            open_now = float(df["Open"].iloc[-1])
             close_prev = float(df["Close"].iloc[-2])
             pct_chg = round(((close_now - close_prev) / close_prev) * 100, 2)
 
-            # Time-adjusted Relative Volume (fixes the 0.16x morning bug)
-            vol_now = float(df["Volume"].iloc[-1]) * vol_scale
+            vol_pace = float(df["Volume"].iloc[-1]) * scale
             vol_avg = float(df["Volume"].iloc[-21:-1].mean())
-            rvol = round(vol_now / vol_avg, 2) if vol_avg > 0 else 1.0
+            rvol = round(vol_pace / vol_avg, 2) if vol_avg > 0 else 1.0
 
-            # Trend & Moving Averages
             ema20 = float(df["Close"].ewm(span=20).mean().iloc[-1])
             ema50 = float(df["Close"].ewm(span=50).mean().iloc[-1])
-            above_emas = close_now > ema20 > ema50
+            res_20d = float(df["High"].iloc[-21:-1].max())
+            dist_20d = round(((res_20d - close_now) / close_now) * 100, 2)
 
-            # Volatility Contraction (VCP): Last 5d range vs prior 15d range
             atr5 = float((df["High"] - df["Low"]).tail(5).mean())
             atr20 = float((df["High"] - df["Low"]).tail(20).mean())
-            is_coiling = atr5 < (atr20 * 0.90)
 
-            # Proximity to 20-Day Breakout High (excluding today)
-            res_20d = float(df["High"].iloc[-21:-1].max())
-            dist_to_bo = round(((res_20d - close_now) / close_now) * 100, 2)
-
-            # Filter out crashing stocks or already-exhausted >7% spikes
-            if pct_chg < -0.5 or pct_chg > 7.5:
-                continue
-
-            # Institutional Pre-Breakout Conviction Score (0 - 100)
-            score = 0
-            reasons = []
-            if above_emas:
-                score += 30
-                reasons.append("Above 20/50 EMA")
-            if -1.5 <= dist_to_bo <= 3.5:
-                score += 30
-                reasons.append(f"Coiling {dist_to_bo}% from 20D High")
-            if rvol >= 1.3:
-                score += 25
-                reasons.append(f"Pace RVOL {rvol}x")
-            if is_coiling:
-                score += 15
-                reasons.append("VCP Tight Range")
-            if close_now >= open_now and pct_chg > 0:
-                score += 10
-
-            if score >= 55:
-                sl = round(min(float(df["Low"].tail(3).min()), ema20) * 0.995, 2)
-                risk = max(close_now - sl, close_now * 0.01)
-                t1 = round(close_now + (risk * 1.5), 2)
-                t2 = round(close_now + (risk * 3.0), 2)
-
-                tier = "Early Breakout" if dist_to_bo <= 0.5 and pct_chg >= 1.0 else "Pre-Breakout Coil"
+            # Pre-breakout accumulation coil criteria
+            if close_now > ema20 > ema50 and -2.5 <= dist_20d <= 4.0 and pct_chg >= -0.5:
+                is_vcp = atr5 < (atr20 * 0.92)
+                tier = "Aggressive Coil" if (dist_20d <= 1.5 and rvol >= 1.2) else "Conservative Swing"
+                catalyst = (
+                    f"VCP Tight Coil ({dist_20d}% below 20D High) + {rvol}x RVOL"
+                    if is_vcp else f"Accumulating {dist_20d}% from 20D Breakout ({rvol}x RVOL)"
+                )
                 rows.append({
                     "Stock": t,
-                    "LTP (₹)": round(close_now, 2),
+                    "Close": round(close_now, 2),
                     "Change_%": pct_chg,
                     "Pace_RVOL": f"{rvol:.2f}x",
-                    "Setup_Stage": tier,
-                    "Score": score,
-                    "Entry_Zone": f"₹{round(close_now*0.998,2)} - ₹{round(close_now*1.003,2)}",
-                    "Stop_Loss": sl,
-                    "Target_1": t1,
-                    "Target_2": t2,
-                    "Institutional_Signal": " + ".join(reasons)
+                    "Dist_to_Breakout_%": dist_20d,
+                    "Tier": tier,
+                    "Catalyst_Driver": catalyst
                 })
         except Exception:
             continue
 
     return pd.DataFrame(rows)
 
-if st.button("🔄 Scan Live Pre-Breakout Setups"):
+if st.button("🔄 Refresh Night Before Prep Scan"):
     st.cache_data.clear()
 
-df_picks = scan_predictive_setups(NSE_UNIVERSE)
+df_nb = build_night_before_watchlist(NSE_UNIVERSE)
 
-if df_picks.empty:
-    st.warning("No high-probability pre-breakout coils detected right now. Market may be in broad distribution.")
+if df_nb.empty:
+    st.warning("No pre-breakout accumulation coils found right now.")
+    st.session_state["night_before_watchlist"] = []
 else:
-    df_picks = df_picks.sort_values(by=["Score", "Change_%"], ascending=False).reset_index(drop=True)
+    df_nb = df_nb.sort_values(by=["Dist_to_Breakout_%", "Change_%"], ascending=[True, False]).reset_index(drop=True)
+    # Save watchlist to session state for Matched Super Signal Page
+    st.session_state["night_before_watchlist"] = df_nb["Stock"].tolist()
 
-    breakout_now = df_picks[df_picks["Setup_Stage"] == "Early Breakout"]
-    coil_watch = df_picks[df_picks["Setup_Stage"] == "Pre-Breakout Coil"]
+    st.success(f"✅ **{len(df_nb)} Pre-Breakout Stocks** queued and synced with **Matched Super Signal Page**.")
 
-    st.subheader(f"🚀 Early Breakout Triggers ({len(breakout_now)} Stocks — Entering Momentum Now)")
-    if not breakout_now.empty:
-        st.dataframe(breakout_now, use_container_width=True, hide_index=True)
-    else:
-        st.info("No stocks crossing 20D resistance right this minute—monitor the Pre-Breakout Coils below.")
+    agg_df = df_nb[df_nb["Tier"] == "Aggressive Coil"]
+    con_df = df_nb[df_nb["Tier"] == "Conservative Swing"]
 
-    st.subheader(f"🧲 Pre-Breakout Accumulation Coils ({len(coil_watch)} Stocks — Buy Before Expansion)")
-    if not coil_watch.empty:
-        st.dataframe(coil_watch, use_container_width=True, hide_index=True)
+    st.subheader(f"⚡ Aggressive Pre-Breakout Coils ({len(agg_df)} Stocks)")
+    st.dataframe(agg_df, use_container_width=True, hide_index=True)
+
+    st.subheader(f"🛡️ Conservative Swing Watchlist ({len(con_df)} Stocks)")
+    st.dataframe(con_df, use_container_width=True, hide_index=True)
