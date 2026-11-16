@@ -8,14 +8,14 @@ import yfinance as yf
 st.set_page_config(page_title="Advanced SMC & FVG Terminal", layout="wide")
 st.title("📊 Advanced Smart Money Concepts (SMC) & Institutional FVG Terminal")
 
-# Top Control Bar
-c1, c2, c3 = st.columns([1.2, 2.2, 1.6])
-raw_sym = c1.text_input("Enter NSE Stock Symbol", value="ITC").strip().upper()
+# Top Control Bar + Quick Range Bar (1D, 5D, 1M, All - just like Kite/TradingView bottom bar)
+c1, c2, c3 = st.columns([1.1, 2.3, 1.6])
+raw_sym = c1.text_input("Enter NSE Stock Symbol", value="LICHSGFIN").strip().upper()
 ticker = raw_sym if raw_sym.endswith(".NS") else f"{raw_sym}.NS"
 tf_choice = c2.radio(
-    "Candle Interval (TradingView / Kite Style)",
+    "Candle Interval",
     ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D"],
-    index=2,
+    index=0,
     horizontal=True,
 )
 show_layers = c3.multiselect(
@@ -71,19 +71,20 @@ if df.empty:
 else:
     ltp = float(df["Close"].iloc[-1])
 
-    # Build TradingView / Kite Style Category Time Axis (HH:MM on top, DD MMM below)
+    # TradingView / Kite Style Category Strings:
+    # - First candle of a new day shows bold day number/date (e.g. "16 Nov '26 09:15")
+    # - Every subsequent candle shows exact HH:MM ("09:30", "10:15", "14:30")
+    # Because type="category" + nticks=15 is used, Plotly DYNAMICALLY adds/removes
+    # intermediate minute/hour ticks automatically whenever you scroll-zoom or drag!
     if tf_choice == "1D":
-        df["X_Label"] = df["Time"].dt.strftime("%d %b<br>%Y")
-        df["Hover_Time"] = df["Time"].dt.strftime("%d %b %Y")
+        df["Axis_Str"] = df["Time"].dt.strftime("%d %b '%y")
     else:
-        # Show date on first candle of each day or every major boundary; time on every candle
         is_new_day = df["Time"].dt.date != df["Time"].dt.date.shift(1)
-        df["X_Label"] = np.where(
+        df["Axis_Str"] = np.where(
             is_new_day,
-            df["Time"].dt.strftime("%H:%M<br><b>%d %b</b>"),
-            df["Time"].dt.strftime("%H:%M<br>%d %b"),
+            df["Time"].dt.strftime("%d %b '%y  %H:%M"),
+            df["Time"].dt.strftime("%H:%M  (%d %b)"),
         )
-        df["Hover_Time"] = df["Time"].dt.strftime("%d %b %Y | %H:%M")
 
     # Core Indicators: Intraday VWAP + 20 EMA + Volume Surge
     df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
@@ -101,10 +102,9 @@ else:
         for o, c, v, va in zip(df["Open"], df["Close"], df["Volume"], v_avg)
     ]
 
-    # Helper to map any timestamp to the nearest X_Label index
-    def map_time_to_idx(ts):
-        diffs = (df["Time"] - ts).abs()
-        return int(diffs.idxmin())
+    def map_time_to_str(ts):
+        idx = int((df["Time"] - ts).abs().idxmin())
+        return df["Axis_Str"].iloc[idx]
 
     # 1. Higher-Timeframe (4H) Bullish & Bearish Fair Value Gaps (FVG)
     bull_fvg, bear_fvg = None, None
@@ -117,13 +117,13 @@ else:
             if bull_fvg and bear_fvg:
                 break
 
-    # 2. Institutional Bullish Order Block (Last red candle before high-volume green impulse)
+    # 2. Institutional Bullish Order Block
     bull_ob = None
     for i in range(len(df) - 2, 1, -1):
         is_red = df["Close"].iloc[i] < df["Open"].iloc[i]
         next_strong_green = (df["Close"].iloc[i + 1] > df["Open"].iloc[i + 1]) and (df["Volume"].iloc[i + 1] >= 1.4 * v_avg.iloc[i + 1])
         if is_red and next_strong_green:
-            bull_ob = (i, float(df["Low"].iloc[i]), float(df["High"].iloc[i]))
+            bull_ob = (df["Axis_Str"].iloc[i], float(df["Low"].iloc[i]), float(df["High"].iloc[i]))
             break
 
     # 3. Market Structure: Swing Highs -> BOS & CHoCH
@@ -131,9 +131,9 @@ else:
     sigs, last_sh = [], None
     for i in range(4, len(df)):
         if df["SH"].iloc[i - 4]:
-            last_sh = (i - 4, float(df["High"].iloc[i - 4]))
+            last_sh = (df["Axis_Str"].iloc[i - 4], float(df["High"].iloc[i - 4]))
         if last_sh and float(df["Close"].iloc[i - 1]) <= last_sh[1] and float(df["Close"].iloc[i]) > last_sh[1]:
-            sigs.append({"t_idx": i, "x0_idx": last_sh[0], "y": round(last_sh[1], 2)})
+            sigs.append({"t_str": df["Axis_Str"].iloc[i], "x0_str": last_sh[0], "y": round(last_sh[1], 2)})
             last_sh = None
 
     # 4. Liquidity Pools (BSL / SSL) & Equilibrium (50%)
@@ -169,35 +169,35 @@ else:
     m4.metric("🎯 Target 1 (1.5R)", f"₹{t1_p:,.2f}", "Book 60% Profit")
     m5.metric("🚀 Target 2 (BSL / 2.5R)", f"₹{t2_p:,.2f}", "Full Liquidity Target")
 
-    st.info(
-        f"**⚡ Beginner SMC Execution Rule for {raw_sym}:**  \n"
-        f"1. **Smart Entry:** Place a Limit Buy around **₹{entry_p:,.2f}** (aligned with VWAP ₹{latest_vwap:,.2f} & institutional demand). Avoid chasing far above VWAP.  \n"
-        f"2. **Zero-Loss Lock:** Once price reaches **₹{breakeven_p:,.2f}**, trail your Stop-Loss from ₹{sl_p:,.2f} up to your entry price (**₹{entry_p:,.2f}**) to make the trade 100% risk-free.  \n"
-        f"3. **Profit Booking:** Book 60% at **₹{t1_p:,.2f}** and trail the rest toward Buy-Side Liquidity (**₹{t2_p:,.2f}**)."
+    # Quick Zoom Range Selector (Just like Kite's bottom 1d | 5d | All selector)
+    z_col1, z_col2 = st.columns([2, 3])
+    zoom_preset = z_col1.radio(
+        "Quick Zoom Window (or Scroll Wheel on Chart to Expand Time Dynamically)",
+        ["Last 1 Day (Intraday)", "Last 2 Days", "All Loaded Candles"],
+        index=0,
+        horizontal=True,
     )
+    z_col2.caption("💡 **Tip:** Scroll your mouse wheel up/down anywhere on the chart to expand/compress candles—the bottom time axis automatically subdivides down to exact **5m / 15m / 1h** intervals!")
 
-    # Numeric index X-axis so every candle has exact spacing & dense interactive time labels
-    x_idx = np.arange(len(df))
-    end_idx = len(df) - 1
+    end_str = df["Axis_Str"].iloc[-1]
 
     fig = make_subplots(
         rows=2,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.03,
+        vertical_spacing=0.02,
         row_heights=[0.78, 0.22],
     )
 
-    # Candlesticks with full timestamp hover
+    # Candlesticks
     fig.add_trace(
         go.Candlestick(
-            x=x_idx,
+            x=df["Axis_Str"],
             open=df["Open"],
             high=df["High"],
             low=df["Low"],
             close=df["Close"],
             name=ticker,
-            text=df["Hover_Time"],
             increasing_line_color="#00E676",
             decreasing_line_color="#FF5252",
         ),
@@ -207,31 +207,19 @@ else:
 
     # VWAP & 20 EMA
     fig.add_trace(
-        go.Scatter(
-            x=x_idx, y=df["VWAP"], mode="lines", name="VWAP",
-            text=df["Hover_Time"], hovertemplate="VWAP: ₹%{y:,.2f}<br>%{text}<extra></extra>",
-            line=dict(color="#FFD700", width=1.5),
-        ),
+        go.Scatter(x=df["Axis_Str"], y=df["VWAP"], mode="lines", name="VWAP", line=dict(color="#FFD700", width=1.5)),
         row=1,
         col=1,
     )
     fig.add_trace(
-        go.Scatter(
-            x=x_idx, y=df["EMA20"], mode="lines", name="20 EMA",
-            text=df["Hover_Time"], hovertemplate="20 EMA: ₹%{y:,.2f}<br>%{text}<extra></extra>",
-            line=dict(color="#29B6F6", width=1.2),
-        ),
+        go.Scatter(x=df["Axis_Str"], y=df["EMA20"], mode="lines", name="20 EMA", line=dict(color="#29B6F6", width=1.2)),
         row=1,
         col=1,
     )
 
     # Volume Bars
     fig.add_trace(
-        go.Bar(
-            x=x_idx, y=df["Volume"], name="Volume",
-            text=df["Hover_Time"], hovertemplate="Vol: %{y:,.0f}<br>%{text}<extra></extra>",
-            marker_color=v_col,
-        ),
+        go.Bar(x=df["Axis_Str"], y=df["Volume"], name="Volume", marker_color=v_col),
         row=2,
         col=1,
     )
@@ -239,38 +227,37 @@ else:
     # Layer 1: 4H FVG Zones
     if "4H FVG" in show_layers:
         if bull_fvg:
-            xs_idx = map_time_to_idx(bull_fvg[0])
+            xs_str = map_time_to_str(bull_fvg[0])
             fig.add_shape(
-                type="rect", x0=xs_idx, x1=end_idx, y0=bull_fvg[1], y1=bull_fvg[2],
+                type="rect", x0=xs_str, x1=end_str, y0=bull_fvg[1], y1=bull_fvg[2],
                 fillcolor="rgba(0, 230, 118, 0.14)", line=dict(color="rgba(0, 230, 118, 0.4)", width=1),
                 layer="below", row=1, col=1,
             )
             fig.add_annotation(
-                x=xs_idx, y=bull_fvg[2], text=f"4H Demand FVG (₹{bull_fvg[1]:,.1f}–₹{bull_fvg[2]:,.1f})",
+                x=xs_str, y=bull_fvg[2], text=f"4H Demand FVG (₹{bull_fvg[1]:,.1f}–₹{bull_fvg[2]:,.1f})",
                 showarrow=False, xanchor="left", yshift=10, font=dict(size=10, color="#00E676"), row=1, col=1,
             )
         if bear_fvg:
-            xs_b_idx = map_time_to_idx(bear_fvg[0])
+            xs_b_str = map_time_to_str(bear_fvg[0])
             fig.add_shape(
-                type="rect", x0=xs_b_idx, x1=end_idx, y0=bear_fvg[1], y1=bear_fvg[2],
+                type="rect", x0=xs_b_str, x1=end_str, y0=bear_fvg[1], y1=bear_fvg[2],
                 fillcolor="rgba(255, 82, 82, 0.12)", line=dict(color="rgba(255, 82, 82, 0.4)", width=1),
                 layer="below", row=1, col=1,
             )
             fig.add_annotation(
-                x=xs_b_idx, y=bear_fvg[1], text=f"4H Supply FVG (₹{bear_fvg[1]:,.1f}–₹{bear_fvg[2]:,.1f})",
+                x=xs_b_str, y=bear_fvg[1], text=f"4H Supply FVG (₹{bear_fvg[1]:,.1f}–₹{bear_fvg[2]:,.1f})",
                 showarrow=False, xanchor="left", yshift=-12, font=dict(size=10, color="#FF5252"), row=1, col=1,
             )
 
     # Layer 2: Institutional Bullish Order Block
     if "Order Blocks" in show_layers and bull_ob:
-        xs_ob_idx = bull_ob[0]
         fig.add_shape(
-            type="rect", x0=xs_ob_idx, x1=end_idx, y0=bull_ob[1], y1=bull_ob[2],
+            type="rect", x0=bull_ob[0], x1=end_str, y0=bull_ob[1], y1=bull_ob[2],
             fillcolor="rgba(41, 182, 246, 0.16)", line=dict(color="#29B6F6", width=1, dash="dot"),
             layer="below", row=1, col=1,
         )
         fig.add_annotation(
-            x=xs_ob_idx, y=bull_ob[1], text=f"🏦 Bullish OB (₹{bull_ob[1]:,.1f}–₹{bull_ob[2]:,.1f})",
+            x=bull_ob[0], y=bull_ob[1], text=f"🏦 Bullish OB (₹{bull_ob[1]:,.1f}–₹{bull_ob[2]:,.1f})",
             showarrow=False, xanchor="left", yshift=-12, font=dict(size=10, color="#29B6F6"), row=1, col=1,
         )
 
@@ -279,11 +266,11 @@ else:
         for idx_s, s in enumerate(sigs[-3:]):
             is_latest = idx_s == len(sigs[-3:]) - 1
             fig.add_shape(
-                type="line", x0=s["x0_idx"], x1=s["t_idx"], y0=s["y"], y1=s["y"],
+                type="line", x0=s["x0_str"], x1=s["t_str"], y0=s["y"], y1=s["y"],
                 line=dict(color="#00E676", width=1.4, dash="dot"), row=1, col=1,
             )
             fig.add_annotation(
-                x=s["t_idx"], y=s["y"],
+                x=s["t_str"], y=s["y"],
                 text=f"CHoCH ▲ @ ₹{s['y']}" if is_latest else f"BOS ▲ @ ₹{s['y']}",
                 showarrow=False, yshift=12, font=dict(size=10, color="#00E676"), row=1, col=1,
             )
@@ -292,12 +279,12 @@ else:
     if "Liquidity (BSL/SSL)" in show_layers:
         fig.add_hline(
             y=bsl_level, line_dash="dot", line_color="#AB47BC", line_width=1.2,
-            annotation_text=f"💧 BSL (Buy-Side Liquidity): ₹{bsl_level:,.2f}",
+            annotation_text=f"💧 BSL: ₹{bsl_level:,.2f}",
             annotation_position="top left", annotation_font_color="#CE93D8", row=1, col=1,
         )
         fig.add_hline(
             y=ssl_level, line_dash="dot", line_color="#FF7043", line_width=1.2,
-            annotation_text=f"💧 SSL (Sell-Side Liquidity): ₹{ssl_level:,.2f}",
+            annotation_text=f"💧 SSL: ₹{ssl_level:,.2f}",
             annotation_position="bottom left", annotation_font_color="#FFAB91", row=1, col=1,
         )
 
@@ -305,14 +292,14 @@ else:
     if "Discount/Premium 50%" in show_layers:
         fig.add_hline(
             y=eq_level, line_dash="dashdot", line_color="#9E9E9E", line_width=1.0,
-            annotation_text=f"⚖️ 50% Equilibrium: ₹{eq_level:,.2f}",
+            annotation_text=f"⚖️ 50% EQ: ₹{eq_level:,.2f}",
             annotation_position="top right", annotation_font_color="#BDBDBD", row=1, col=1,
         )
 
     # Core Execution Lines (BUY, SL, T1, T2)
     fig.add_hline(
         y=entry_p, line_dash="solid", line_color="#FFD700", line_width=1.6,
-        annotation_text=f"🟡 BUY ZONE: ₹{entry_p:,.2f}",
+        annotation_text=f"🟡 BUY: ₹{entry_p:,.2f}",
         annotation_position="bottom left", annotation_font_color="#FFD700", row=1, col=1,
     )
     fig.add_hline(
@@ -322,52 +309,78 @@ else:
     )
     fig.add_hline(
         y=t1_p, line_dash="dash", line_color="#29B6F6", line_width=1.4,
-        annotation_text=f"🎯 T1 (1.5R): ₹{t1_p:,.2f}",
+        annotation_text=f"🎯 T1: ₹{t1_p:,.2f}",
         annotation_position="top left", annotation_font_color="#29B6F6", row=1, col=1,
     )
     fig.add_hline(
         y=t2_p, line_dash="dash", line_color="#00E676", line_width=1.4,
-        annotation_text=f"🚀 T2 (2.5R): ₹{t2_p:,.2f}",
+        annotation_text=f"🚀 T2: ₹{t2_p:,.2f}",
         annotation_position="top right", annotation_font_color="#00E676", row=1, col=1,
     )
 
-    # Dense TradingView / Kite Style Tick Spacing (shows every hour/minute cleanly & expands on scroll-zoom)
-    step = max(1, len(df) // 16)
-    tick_positions = list(range(0, len(df), step))
-    if (len(df) - 1) not in tick_positions:
-        tick_positions.append(len(df) - 1)
-    tick_labels = [df["X_Label"].iloc[idx] for idx in tick_positions]
+    # Calculate default initial X-axis range based on user's selected zoom preset
+    if zoom_preset == "Last 1 Day (Intraday)" and tf_choice != "1D":
+        last_date = df["Time"].dt.date.iloc[-1]
+        start_idx = max(0, int(df[df["Time"].dt.date == last_date].index[0]) - 5)
+    elif zoom_preset == "Last 2 Days" and tf_choice != "1D":
+        unique_dates = sorted(df["Time"].dt.date.unique())
+        target_d = unique_dates[-2] if len(unique_dates) >= 2 else unique_dates[-1]
+        start_idx = max(0, int(df[df["Time"].dt.date >= target_d].index[0]))
+    else:
+        start_idx = 0
 
-    # Default initial zoom to the most recent ~120 candles (like TradingView/Kite) so every hour/minute is crisp
-    default_start = max(0, len(df) - 120)
-
+    # Key TradingView / Kite Axis Configuration:
+    # - type="category" + tickmode="auto" + nticks=15 makes Plotly dynamically recalculate
+    #   and display exact minute/hour ticks automatically whenever you zoom or pan!
+    # - showspikes=True + spikemode="across" creates the exact Kite/TradingView crosshair & time badge!
     fig.update_layout(
-        title=f"SMC & Institutional Flow: {raw_sym} ({tf_choice}) | LTP: ₹{ltp:,.2f} | Yellow: VWAP | Blue: 20 EMA",
+        title=f"{raw_sym} ({tf_choice}) | LTP: ₹{ltp:,.2f} | Yellow: VWAP | Blue: 20 EMA",
         template="plotly_dark",
-        height=660,
+        height=680,
         dragmode="pan",
         hovermode="x unified",
         showlegend=False,
-        margin=dict(l=10, r=65, t=45, b=45),
-        yaxis=dict(side="right", title="Price (₹)", showgrid=True, gridcolor="rgba(255,255,255,0.06)"),
+        margin=dict(l=10, r=65, t=45, b=40),
+        yaxis=dict(
+            side="right",
+            title="Price (₹)",
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.06)",
+            showspikes=True,
+            spikemode="across",
+            spikesnap="cursor",
+            spikecolor="#78909C",
+            spikethickness=1,
+            spikedash="dash",
+        ),
         yaxis2=dict(side="right", title="Volume", showgrid=False),
         xaxis=dict(
+            type="category",
             rangeslider_visible=False,
-            range=[default_start, len(df) + 2],
-            tickmode="array",
-            tickvals=tick_positions,
-            ticktext=tick_labels,
-            tickfont=dict(size=11, color="#CFD8DC"),
+            range=[start_idx, len(df) + 3],
+            showspikes=True,
+            spikemode="across",
+            spikesnap="cursor",
+            spikecolor="#78909C",
+            spikethickness=1,
+            spikedash="dash",
             showgrid=True,
             gridcolor="rgba(255,255,255,0.06)",
         ),
         xaxis2=dict(
+            type="category",
             rangeslider_visible=False,
-            range=[default_start, len(df) + 2],
-            tickmode="array",
-            tickvals=tick_positions,
-            ticktext=tick_labels,
-            tickfont=dict(size=11, color="#CFD8DC"),
+            range=[start_idx, len(df) + 3],
+            tickmode="auto",
+            nticks=15,
+            tickangle=0,
+            tickfont=dict(size=11, color="#B0BEC5"),
+            showspikes=True,
+            spikemode="across",
+            spikesnap="cursor",
+            spikecolor="#78909C",
+            spikethickness=1,
+            spikedash="dash",
             showgrid=True,
             gridcolor="rgba(255,255,255,0.06)",
         ),
