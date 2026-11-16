@@ -15,7 +15,9 @@ tf_choice = c2.radio("Select Candle Interval", ["1m", "3m", "5m", "15m", "30m", 
 
 def clean_df(d):
     if d is None or d.empty: return pd.DataFrame()
-    if isinstance(d.columns, pd.MultiIndex): d.columns = [c[0] for c in d.columns]
+    if isinstance(d.columns, pd.MultiIndex):
+        lvl0 = [str(x) for x in d.columns.get_level_values(0)]
+        d.columns = d.columns.get_level_values(0 if "Close" in lvl0 else -1)
     return d.loc[:, ~d.columns.duplicated()]
 
 @st.cache_data(ttl=60)
@@ -74,11 +76,4 @@ else:
     fig.add_hline(y=t1_p, line_dash="dash", line_color="#29B6F6", line_width=1.4, annotation_text=f"🎯 T1: ₹{t1_p:,.2f}", annotation_position="top left", annotation_font_color="#29B6F6", row=1, col=1)
     fig.add_hline(y=t2_p, line_dash="dash", line_color="#00E676", line_width=1.4, annotation_text=f"🚀 T2: ₹{t2_p:,.2f}", annotation_position="top right", annotation_font_color="#00E676", row=1, col=1)
     rb = [dict(bounds=["sat", "mon"])] + ([dict(bounds=[15.5, 9.25], pattern="hour")] if tf_choice != "1D" else [])
-    fig.update_layout(title=f"Institutional SMC & VWAP Chart: {ticker} ({tf_choice}) | LTP: ₹{ltp:,.2f}", template="plotly_dark", height=600, dragmode="pan", hovermode="x unified", showlegend=False, margin=dict(l=10, r=60, t=45, b=30), yaxis=dict(side="right", title="Price (₹)", fixedrange=False), yaxis2=dict(side="right", title="Vol", fixedrange=False), xaxis2=dict(rangeslider_visible=False, rangebreaks=rb), xaxis=dict(rangeslider_visible=False, rangebreaks=rb))
-    st.plotly_chart(fig, width="stretch", config={"scrollZoom": True})
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Buy Entry / CHoCH", f"₹{entry_p:,.2f}", "4H FVG + VWAP")
-    m2.metric("Recommended SL", f"₹{sl_p:,.2f}", "Protected Zone")
-    m3.metric("Target 1 (1.5R)", f"₹{t1_p:,.2f}", "Partial Booking")
-    m4.metric("Target 2 (Major)", f"₹{t2_p:,.2f}", "Full Trend Exit")
+    fig.update_layout(title=f"Institutional SMC & VWAP Chart: {ticker} ({tf_choice}) | LTP: ₹{ltp:,.2f}", template="plotly_dark", height=600, dragmode="pan", hovermode="x unified", showlegend=False, margin=dict(l=10, r=60, t=45, b=30), yaxis=dict(side="right", title="Price (₹)", fixedrange=False), yaxis2=dict(side="right", title="Vol
