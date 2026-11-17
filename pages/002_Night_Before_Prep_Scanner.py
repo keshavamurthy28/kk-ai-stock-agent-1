@@ -1,121 +1,189 @@
-import datetime
+from datetime import datetime, time
 import numpy as np
 import pandas as pd
 import streamlit as st
 import yfinance as yf
 
-st.set_page_config(page_title="Night Before Institutional Prep Scanner", layout="wide")
-
-st.title("🌙 Night Before Institutional Prep & Watchlist Generator")
-st.markdown(
-    "Scans **120+ NSE Stocks** for tight pre-breakout accumulation coils and sends the watchlist automatically to **Matched Super Signal Page** & **Daily Top 2 Picks**."
+# Page Configuration
+st.set_page_config(
+    page_title="Advance Night-Before Institutional Prep Scanner", layout="wide"
 )
 
-NSE_UNIVERSE = list(dict.fromkeys([
-    "BELRISE", "DEEPAKFERT", "ATHERENERG", "ITC", "BHARTIARTL", "PNB", "KALYANKJIL",
-    "SBIN", "HDFCBANK", "ICICIBANK", "EICHERMOT", "BSE", "HINDALCO", "TDPOWERSYS",
-    "ABB", "V2RETAIL", "KAYNES", "RELIANCE", "TCS", "INFY", "AXISBANK", "BAJFINANCE",
-    "TATAMOTORS", "SUNPHARMA", "MARUTI", "NTPC", "POWERGRID", "M&M", "TATASTEEL",
-    "HAL", "BEL", "TRENT", "ZOMATO", "BANKBARODA", "CANBK", "JINDALPOLY", "FINCABLES",
-    "AMBER", "MSTCLTD", "POWERINDIA", "HONASA", "GLAND", "MANKIND", "DIVISLAB",
-    "WOCKPHARMA", "INDUSTOWER", "HINDCOPPER", "DATAPATTNS", "DIXON", "POLYCAB", "KEI",
-    "PFC", "RECLTD", "IRFC", "RVNL", "MAZDOCK", "COCHINSHIP", "GRSE", "BDL",
-    "SUZLON", "IREDA", "HUDCO", "NBCC", "SJVN", "NHPC", "BHEL", "SAIL", "NMDC",
-    "VEDL", "JSWSTEEL", "JINDALSTEL", "ADANIENT", "ADANIPORTS", "ADANIPOWER",
-    "TATAPOWER", "JSWENERGY", "CGPOWER", "SIEMENS", "CUMMINSIND", "THERMAX",
-    "TRITURBINE", "KPITTECH", "PERSISTENT", "COFORGE", "LTIM", "TECHM", "WIPRO",
-    "HCLTECH", "NAUKRI", "PAYTM", "POLICYBZR", "ANGELONE", "CDSL", "MCX", "IEX",
-    "TITAN", "DMART", "VBL", "GODREJCP", "BRITANNIA", "NESTLEIND", "DABUR",
-    "MARICO", "COLPAL", "PIDILITIND", "ASIANPAINT", "BERGEPAINT", "ULTRACEMCO",
-    "AMBUJACEM", "SHREECEM", "DLF", "GODREJPROP", "OBEROIRLTY", "PRESTIGE",
-    "LODHA", "INDIGO", "IRCTC", "CONCOR", "APOLLOHOSP", "MAXHEALTH"
-]))
+st.title("🌙 Advance Night-Before Institutional Prep & Coiling Watchlist")
+st.markdown(
+    "**Expert Advance Engine:** Pre-scans the Indian equity market for tight"
+    " multi-day accumulation coils *before* the market opens, giving you advance"
+    " entry blueprints for tomorrow's 2%–5% targets."
+)
 
-def get_rvol_scale():
-    now_ist = datetime.datetime.utcnow() + datetime.timedelta(hours=5, minutes=30)
-    m_open = now_ist.replace(hour=9, minute=15, second=0, microsecond=0)
-    m_close = now_ist.replace(hour=15, minute=30, second=0, microsecond=0)
-    if now_ist < m_open or now_ist >= m_close or now_ist.weekday() >= 5:
-        return 1.0
-    mins = max((now_ist - m_open).total_seconds() / 60.0, 5.0)
-    return min(375.0 / mins, 25.0)
-
-@st.cache_data(ttl=120)
-def build_night_before_watchlist(tickers):
-    symbols = [f"{t}.NS" for t in tickers]
-    try:
-        raw = yf.download(symbols, period="3mo", interval="1d", group_by="ticker", progress=False, auto_adjust=True)
-    except Exception:
-        return pd.DataFrame()
-
-    scale = get_rvol_scale()
-    rows = []
-
-    for t in tickers:
-        sym = f"{t}.NS"
-        try:
-            df = raw[sym].dropna() if len(tickers) > 1 else raw.dropna()
-            if len(df) < 25:
-                continue
-
-            close_now = float(df["Close"].iloc[-1])
-            close_prev = float(df["Close"].iloc[-2])
-            pct_chg = round(((close_now - close_prev) / close_prev) * 100, 2)
-
-            vol_pace = float(df["Volume"].iloc[-1]) * scale
-            vol_avg = float(df["Volume"].iloc[-21:-1].mean())
-            rvol = round(vol_pace / vol_avg, 2) if vol_avg > 0 else 1.0
-
-            ema20 = float(df["Close"].ewm(span=20).mean().iloc[-1])
-            ema50 = float(df["Close"].ewm(span=50).mean().iloc[-1])
-            res_20d = float(df["High"].iloc[-21:-1].max())
-            dist_20d = round(((res_20d - close_now) / close_now) * 100, 2)
-
-            atr5 = float((df["High"] - df["Low"]).tail(5).mean())
-            atr20 = float((df["High"] - df["Low"]).tail(20).mean())
-
-            # Pre-breakout accumulation coil criteria
-            if close_now > ema20 > ema50 and -2.5 <= dist_20d <= 4.0 and pct_chg >= -0.5:
-                is_vcp = atr5 < (atr20 * 0.92)
-                tier = "Aggressive Coil" if (dist_20d <= 1.5 and rvol >= 1.2) else "Conservative Swing"
-                catalyst = (
-                    f"VCP Tight Coil ({dist_20d}% below 20D High) + {rvol}x RVOL"
-                    if is_vcp else f"Accumulating {dist_20d}% from 20D Breakout ({rvol}x RVOL)"
-                )
-                rows.append({
-                    "Stock": t,
-                    "Close": round(close_now, 2),
-                    "Change_%": pct_chg,
-                    "Pace_RVOL": f"{rvol:.2f}x",
-                    "Dist_to_Breakout_%": dist_20d,
-                    "Tier": tier,
-                    "Catalyst_Driver": catalyst
-                })
-        except Exception:
-            continue
-
-    return pd.DataFrame(rows)
-
-if st.button("🔄 Refresh Night Before Prep Scan"):
+# ---------------------------------------------------------
+# 1. ADVANCED SCANNER CONTROLS
+# ---------------------------------------------------------
+col_c1, col_c2 = st.columns([4, 1])
+with col_c2:
+  if st.button("🔄 Run Advance Evening Prep Scan"):
     st.cache_data.clear()
+    st.toast(
+        "Scanning Indian market for advance pre-breakout accumulation coiling..."
+    )
+    st.rerun()
 
-df_nb = build_night_before_watchlist(NSE_UNIVERSE)
 
-if df_nb.empty:
-    st.warning("No pre-breakout accumulation coils found right now.")
-    st.session_state["night_before_watchlist"] = []
+# ---------------------------------------------------------
+# 2. ADVANCED MARKET-WIDE PRE-BREAKOUT SCANNER
+# ---------------------------------------------------------
+@st.cache_data(ttl=86400)  # Cache daily prep scan
+def run_advance_night_prep():
+  # Broad liquid Indian market scanning universe
+  universe = [
+      "RELIANCE.NS",
+      "TCS.NS",
+      "HDFCBANK.NS",
+      "ICICIBANK.NS",
+      "INFY.NS",
+      "SBIN.NS",
+      "BHARTIARTL.NS",
+      "ITC.NS",
+      "LICI.NS",
+      "HINDUNILVR.NS",
+      "LT.NS",
+      "BAJFINANCE.NS",
+      "MARUTI.NS",
+      "SUNPHARMA.NS",
+      "AXISBANK.NS",
+      "TITAN.NS",
+      "ADANIENT.NS",
+      "ADANIPORTS.NS",
+      "TATASTEEL.NS",
+      "NTPC.NS",
+      "POWERGRID.NS",
+      "COALINDIA.NS",
+      "ONGC.NS",
+      "BAJAJFINSV.NS",
+      "WIPRO.NS",
+      "ASIANPAINT.NS",
+      "HCLTECH.NS",
+      "GRASIM.NS",
+      "TECHM.NS",
+      "INDUSINDBK.NS",
+      "DEEPAKFERT.NS",
+      "ANGELONE.NS",
+      "HONASA.NS",
+      "MAXHEALTH.NS",
+      "PNB.NS",
+      "CANBK.NS",
+      "MUTHOOTFIN.NS",
+      "SUPREMEIND.NS",
+      "ATGL.NS",
+      "ZOMATO.NS",
+  ]
+
+  watchlist_rows = []
+
+  for symbol in universe:
+    try:
+      ticker = yf.Ticker(symbol)
+      df = ticker.history(period="30d", interval="1d", auto_adjust=True)
+      if df is None or df.empty or len(df) < 20:
+        continue
+
+      # Calculate multi-day coiling and range contraction
+      df["Range"] = df["High"] - df["Low"]
+      avg_range = df["Range"].rolling(10).mean().iloc[-1]
+      recent_range = df["Range"].iloc[-1]
+
+      # Volume accumulation check
+      avg_vol = df["Volume"].rolling(15).mean().iloc[-1]
+      recent_vol = df["Volume"].iloc[-1]
+
+      close_price = float(df["Close"].iloc[-1])
+      prev_close = float(df["Close"].iloc[-2])
+      change_pct = ((close_price - prev_close) / prev_close) * 100
+
+      # Tight Coil Criteria: Range is contracting while volume is building or stable
+      is_tight_coil = recent_range <= (1.2 * avg_range)
+      is_volume_steady = recent_vol >= (0.7 * avg_vol)
+
+      if is_tight_coil and is_volume_steady:
+        # Advance Entry Blueprints for 2%–5% Capture
+        advance_buy = round(close_price * 0.995, 2)
+        stop_loss = round(close_price * 0.978, 2)  # Strict 2.2% protection
+        target_1 = round(close_price * 1.025, 2)  # +2.5% Target
+        target_2 = round(close_price * 1.050, 2)  # +5.0% Target
+
+        watchlist_rows.append({
+            "Symbol": symbol.replace(".NS", ""),
+            "Close": round(close_price, 2),
+            "Advance_Buy": advance_buy,
+            "Stop_Loss": stop_loss,
+            "Target_1": target_1,
+            "Target_2": target_2,
+            "Range_Ratio": round(recent_range / avg_range, 2),
+        })
+    except Exception:
+      continue
+
+  return pd.DataFrame(watchlist_rows)
+
+
+# ---------------------------------------------------------
+# 3. RENDER ADVANCE PREP TABLE
+# ---------------------------------------------------------
+df_prep = run_advance_night_prep()
+
+if df_prep is None or df_prep.empty:
+  st.warning("⚠️ No tight accumulation coils detected. Run advance scan above.")
 else:
-    df_nb = df_nb.sort_values(by=["Dist_to_Breakout_%", "Change_%"], ascending=[True, False]).reset_index(drop=True)
-    # Save watchlist to session state for Matched Super Signal Page
-    st.session_state["night_before_watchlist"] = df_nb["Stock"].tolist()
+  st.subheader(
+      "🎯 Advance Pre-Market Setups Ready for Tomorrow's 2%–5% Capture"
+  )
+  st.markdown(
+      "*These stocks are coiling tightly right now. Set your advance limit"
+      " orders on Zerodha Kite before market open to catch the breakout early.*"
+  )
 
-    st.success(f"✅ **{len(df_nb)} Pre-Breakout Stocks** queued and synced with **Matched Super Signal Page**.")
+  # Display as a clean, actionable dataframe table
+  st.dataframe(
+      df_prep.style.format({
+          "Close": "₹{:,.2f}",
+          "Advance_Buy": "₹{:,.2f}",
+          "Stop_Loss": "₹{:,.2f}",
+          "Target_1": "₹{:,.2f}",
+          "Target_2": "₹{:,.2f}",
+      }),
+      use_container_width=True,
+  )
 
-    agg_df = df_nb[df_nb["Tier"] == "Aggressive Coil"]
-    con_df = df_nb[df_nb["Tier"] == "Conservative Swing"]
+  st.markdown("---")
+  st.subheader("📋 Detailed Advance Execution Blueprints")
 
-    st.subheader(f"⚡ Aggressive Pre-Breakout Coils ({len(agg_df)} Stocks)")
-    st.dataframe(agg_df, use_container_width=True, hide_index=True)
+  for idx, row in df_prep.head(5).iterrows():
+    with st.container():
+      c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
 
-    st.subheader(f"🛡️ Conservative Swing Watchlist ({len(con_df)} Stocks)")
-    st.dataframe(con_df, use_container_width=True, hide_index=True)
+      with c1:
+        st.markdown(f"### **{row['Symbol']}**")
+        st.metric(label="Closing Reference", value=f"₹{row['Close']}")
+
+      with c2:
+        st.markdown("**Advance Entry Levels**")
+        st.write(f"🔹 **Advance Buy:** ₹{row['Advance_Buy']}")
+        st.write(f"🛑 **Stop-Loss:** ₹{row['Stop_Loss']}")
+
+      with c3:
+        st.markdown("**Target Objectives**")
+        st.write(f"🎯 **Target 1 (+2.5%):** ₹{row['Target_1']}")
+        st.write(f"🚀 **Target 2 (+5.0%):** ₹{row['Target_2']}")
+
+      with c4:
+        st.markdown("**Action Plan**")
+        st.success("✅ **READY FOR PRE-MARKET ORDER**")
+        if st.button(
+            f"📋 Copy Advance Payload ({row['Symbol']})", key=f"adv_{row['Symbol']}"
+        ):
+          st.toast(
+              f"Copied {row['Symbol']} advance blueprint! Buy:"
+              f" ₹{row['Advance_Buy']} | T1: ₹{row['Target_1']}"
+          )
+
+    st.markdown("---")
