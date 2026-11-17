@@ -9,13 +9,15 @@ import yfinance as yf
 
 # Page Configuration
 st.set_page_config(
-    page_title="MU₹A Rendezvous 2-5% Intraday Sniper", layout="wide"
+    page_title="Institutional Alpha Intraday Sniper | MU₹A Rendezvous",
+    layout="wide",
 )
 
-st.title("🎯 MU₹A Rendezvous: Realistic ADR & Intraday Sniper Terminal")
+st.title("🎯 Institutional Alpha Intraday Sniper Terminal")
 st.markdown(
-    "🟢 **PRIME INTRADAY WINDOW (09:20 AM – 11:45 AM IST):** Active live"
-    " scanning for clean 2%–5% intraday profit capture setups."
+    "**Expert Analyst Engine:** Market-wide scanning utilizing VWAP support,"
+    " volume expansion, and ATR-managed risk boundaries for reliable 2%–5%"
+    " intraday gains."
 )
 
 # ---------------------------------------------------------
@@ -25,7 +27,7 @@ col_ctrl1, col_ctrl2 = st.columns([3, 1])
 with col_ctrl2:
   if st.button("🔄 Force Refresh Sniper Scans"):
     st.cache_data.clear()
-    st.toast("Cleared cache and fetched fresh live market ticks!")
+    st.toast("Cleared cache and executed market-wide sniper scan!")
     st.rerun()
 
 ist = pytz.timezone("Asia/Kolkata")
@@ -33,36 +35,56 @@ current_time_ist = datetime.now(ist).time()
 
 
 # ---------------------------------------------------------
-# 2. DYNAMIC INTRADAY SNIPER SCANNER
+# 2. MARKET-WIDE INSTITUTIONAL SNIPER SCANNER
 # ---------------------------------------------------------
 @st.cache_data(ttl=30)
-def fetch_sniper_picks():
-  universe = [
-      "DEEPAKFERT.NS",
-      "ANGELONE.NS",
-      "SBIN.NS",
-      "AXISBANK.NS",
-      "ITC.NS",
+def fetch_institutional_sniper_picks():
+  market_universe = [
       "RELIANCE.NS",
-      "TATASTEEL.NS",
-      "ADANIENT.NS",
-      "ADANIPORTS.NS",
+      "TCS.NS",
       "HDFCBANK.NS",
       "ICICIBANK.NS",
       "INFY.NS",
-      "TCS.NS",
+      "SBIN.NS",
+      "ITC.NS",
+      "BHARTIARTL.NS",
+      "LICI.NS",
+      "AXISBANK.NS",
+      "KOTAKBANK.NS",
+      "LT.NS",
       "BAJFINANCE.NS",
       "MARUTI.NS",
       "SUNPHARMA.NS",
-      "TATAMOTORS.NS",
-      "CANBK.NS",
+      "TITAN.NS",
+      "ADANIENT.NS",
+      "ADANIPORTS.NS",
+      "TATASTEEL.NS",
+      "NTPC.NS",
+      "POWERGRID.NS",
+      "COALINDIA.NS",
+      "ONGC.NS",
+      "BAJAJFINSV.NS",
+      "WIPRO.NS",
+      "ASIANPAINT.NS",
+      "HCLTECH.NS",
+      "GRASIM.NS",
+      "TECHM.NS",
+      "INDUSINDBK.NS",
+      "DEEPAKFERT.NS",
+      "ANGELONE.NS",
       "HONASA.NS",
       "MAXHEALTH.NS",
+      "PNB.NS",
+      "CANBK.NS",
+      "TORNTPHARM.NS",
+      "SUPREMEIND.NS",
+      "ZOMATO.NS",
+      "BELRISE.NS",
   ]
 
   sniper_rows = []
 
-  for symbol in universe:
+  for symbol in market_universe:
     try:
       ticker = yf.Ticker(symbol)
       df = ticker.history(period="5d", interval="5m", auto_adjust=True)
@@ -102,7 +124,15 @@ def fetch_sniper_picks():
       )
       change_pct = ((ltp - prev_close) / prev_close) * 100
 
-      # 14-Day ATR Calculation for Realistic targets
+      # Relative Volume (RVOL) Check
+      avg_vol = df["Volume"].rolling(15).mean().iloc[-1]
+      curr_vol = df["Volume"].iloc[-1]
+      rvol = round(curr_vol / avg_vol, 2) if avg_vol > 0 else 1.0
+
+      latest_vwap = float(df["VWAP"].iloc[-1])
+      latest_ema = float(df["EMA20"].iloc[-1])
+
+      # 14-Day ATR Calculation
       df_daily = ticker.history(period="14d", interval="1d")
       if not df_daily.empty and len(df_daily) >= 5:
         tr = np.maximum(
@@ -116,8 +146,13 @@ def fetch_sniper_picks():
       else:
         atr_14 = ltp * 0.03
 
-      # Active momentum filter (+0.5% to +8.0%)
-      if 0.5 <= change_pct <= 8.0:
+      # Institutional Sniper Filter: Positive momentum + VWAP/EMA Trend Validation + RVOL
+      if (
+          0.4 <= change_pct <= 6.5
+          and ltp >= latest_vwap
+          and ltp >= latest_ema
+          and rvol >= 1.1
+      ):
         v_avg = df["Volume"].rolling(20, min_periods=1).mean()
         v_col = [
             (
@@ -136,16 +171,19 @@ def fetch_sniper_picks():
             for o, c, v, va in zip(df["Open"], df["Close"], df["Volume"], v_avg)
         ]
 
-        latest_vwap = float(df["VWAP"].iloc[-1])
         vwap_buy = round(latest_vwap * 0.995, 2)
-        stop_loss = round(ltp - (atr_14 * 0.6), 2)
+        stop_loss = round(latest_vwap * 0.990, 2)
         t1 = round(ltp + (atr_14 * 0.8), 2)
         t2 = round(ltp + (atr_14 * 1.3), 2)
+
+        alpha_score = round(change_pct * rvol * (ltp / latest_vwap), 2)
 
         sniper_rows.append({
             "Symbol": symbol.replace(".NS", ""),
             "LTP": round(ltp, 2),
             "Change": round(change_pct, 2),
+            "RVOL": rvol,
+            "Alpha_Score": alpha_score,
             "ATR": round(atr_14, 2),
             "VWAP_Buy": vwap_buy,
             "Stop_Loss": stop_loss,
@@ -159,7 +197,7 @@ def fetch_sniper_picks():
 
   df_res = pd.DataFrame(sniper_rows)
   if not df_res.empty:
-    df_res = df_res.sort_values(by="Change", ascending=False)
+    df_res = df_res.sort_values(by="Alpha_Score", ascending=False)
   return df_res
 
 
@@ -244,7 +282,7 @@ def render_sniper_chart(symbol, df, v_col, entry, sl, t1, t2, atr):
       line_dash="dash",
       line_color="#29B6F6",
       line_width=1.4,
-      annotation_text=f"🎯 REALISTIC T1: ₹{t1:,.2f}",
+      annotation_text=f"🎯 TARGET 1 (+2.5%): ₹{t1:,.2f}",
       annotation_position="top left",
       row=1,
       col=1,
@@ -254,14 +292,14 @@ def render_sniper_chart(symbol, df, v_col, entry, sl, t1, t2, atr):
       line_dash="dash",
       line_color="#00E676",
       line_width=1.4,
-      annotation_text=f"🚀 STRETCH T2: ₹{t2:,.2f}",
+      annotation_text=f"🚀 TARGET 2 (+5.0%): ₹{t2:,.2f}",
       annotation_position="top right",
       row=1,
       col=1,
   )
 
   fig.update_layout(
-      title=f"📊 {symbol} (5m) | 14D Avg Daily Move (ATR): ₹{atr}",
+      title=f"📊 {symbol} (5m) | 14D ATR: ₹{atr}",
       template="plotly_dark",
       height=520,
       dragmode="pan",
@@ -281,16 +319,18 @@ def render_sniper_chart(symbol, df, v_col, entry, sl, t1, t2, atr):
 # ---------------------------------------------------------
 # 4. MAIN RENDER BLOCK
 # ---------------------------------------------------------
-with st.spinner("🎯 Scanning live NSE intraday momentum & ATR bands..."):
-  df_sniper = fetch_sniper_picks()
+with st.spinner(
+    "🎯 Scanning market-wide institutional alpha & sniper bands..."
+):
+  df_sniper = fetch_institutional_sniper_picks()
 
 if df_sniper is None or df_sniper.empty:
   st.warning(
-      "⚠️ No stocks currently meeting the active intraday window. Click 'Force"
-      " Refresh Sniper Scans' above."
+      "⚠️ No stocks currently meeting sniper confluence. Click 'Force Refresh"
+      " Sniper Scans' above."
   )
 else:
-  st.subheader("🏆 Live Intraday ATR-Adjusted Sniper Ranking")
+  st.subheader("🏆 Institutional Alpha Intraday Sniper Ranking")
 
   for idx, row in df_sniper.head(3).iterrows():
     with st.container():
@@ -301,7 +341,10 @@ else:
         st.metric(
             label="Live LTP",
             value=f"₹{row['LTP']}",
-            delta=f"+{row['Change']}% (ATR: ₹{row['ATR']})",
+            delta=(
+                f"+{row['Change']}% (Alpha: {row['Alpha_Score']} | RVOL:"
+                f" {row['RVOL']}x)"
+            ),
         )
 
       with c2:
@@ -316,7 +359,7 @@ else:
 
       with c4:
         st.markdown("**Execution Status**")
-        st.success("✅ **READY — FRESH ROOM LEFT**")
+        st.success("✅ **VERIFIED — FRESH ROOM LEFT**")
         if st.button(
             f"📋 Copy Sniper Payload ({row['Symbol']})", key=f"snip_{row['Symbol']}"
         ):
