@@ -54,7 +54,6 @@ def fetch_top_picks_with_smc():
     try:
       ticker = yf.Ticker(symbol)
       df = ticker.history(period="15d", interval="15m", auto_adjust=True)
-      df4 = ticker.history(period="60d", interval="1h", auto_adjust=True)
 
       if df is None or df.empty or len(df) < 5:
         continue
@@ -111,15 +110,21 @@ def fetch_top_picks_with_smc():
       change_pct = ((ltp - prev_close) / prev_close) * 100
       gap_pct = ((open_price - prev_close) / prev_close) * 100
 
+      # Execution Levels calculation
+      limit_buy = round(ltp * 0.992, 2)
+      stop_loss = round(ltp * 0.975, 2)
+      target_1 = round(ltp * 1.025, 2)
+      target_2 = round(ltp * 1.050, 2)
+
       data_rows.append({
           "Symbol": symbol.replace(".NS", ""),
           "LTP": round(ltp, 2),
           "Change": round(change_pct, 2),
           "Gap_Pct": round(gap_pct, 2),
-          "Limit_Buy": round(ltp * 0.992, 2),
-          "Stop_Loss": round(ltp * 0.975, 2),
-          "Target_1": round(ltp * 1.025, 2),
-          "Target_2": round(ltp * 1.050, 2),
+          "Limit_Buy": limit_buy,
+          "Stop_Loss": stop_loss,
+          "Target_1": target_1,
+          "Target_2": target_2,
           "DataFrame": df,
           "Volume_Colors": v_col,
       })
@@ -130,10 +135,9 @@ def fetch_top_picks_with_smc():
 
 
 # ---------------------------------------------------------
-# 3. ADVANCED SMC PLOTTING FUNCTION (Matched to Graph Page)
+# 3. ADVANCED SMC PLOTTING FUNCTION WITH GOLD BUY/SL/TARGET LINES
 # ---------------------------------------------------------
-def render_advanced_smc_chart(symbol, df, v_col):
-  end_str = df["Axis_Str"].iloc[-1]
+def render_advanced_smc_chart(symbol, df, v_col, entry, sl, t1, t2):
   fig = make_subplots(
       rows=2,
       cols=1,
@@ -194,9 +198,55 @@ def render_advanced_smc_chart(symbol, df, v_col):
       col=1,
   )
 
-  # Layout styling matching the Advanced SMC Terminal
+  # --- CRITICAL FIX: ADDING BACK GOLD BUY, SL, & TARGET LINES ---
+  fig.add_hline(
+      y=entry,
+      line_dash="solid",
+      line_color="#FFD700",
+      line_width=1.6,
+      annotation_text=f"🟡 BUY: ₹{entry:,.2f}",
+      annotation_position="bottom left",
+      annotation_font_color="#FFD700",
+      row=1,
+      col=1,
+  )
+  fig.add_hline(
+      y=sl,
+      line_dash="solid",
+      line_color="#FF5252",
+      line_width=1.6,
+      annotation_text=f"🛑 SL: ₹{sl:,.2f}",
+      annotation_position="bottom right",
+      annotation_font_color="#FF5252",
+      row=1,
+      col=1,
+  )
+  fig.add_hline(
+      y=t1,
+      line_dash="dash",
+      line_color="#29B6F6",
+      line_width=1.4,
+      annotation_text=f"🎯 T1: ₹{t1:,.2f}",
+      annotation_position="top left",
+      annotation_font_color="#29B6F6",
+      row=1,
+      col=1,
+  )
+  fig.add_hline(
+      y=t2,
+      line_dash="dash",
+      line_color="#00E676",
+      line_width=1.4,
+      annotation_text=f"🚀 T2: ₹{t2:,.2f}",
+      annotation_position="top right",
+      annotation_font_color="#00E676",
+      row=1,
+      col=1,
+  )
+
+  # Layout styling
   fig.update_layout(
-      title=f"📊 {symbol} (15m) | Institutional SMC Structure, VWAP & Volume",
+      title=f"📊 {symbol} (15m) | Institutional SMC Structure, VWAP & Levels",
       template="plotly_dark",
       height=550,
       dragmode="pan",
@@ -286,12 +336,18 @@ else:
                 f" ₹{row['Limit_Buy']}"
             )
 
-      # MATCHED ADVANCED SMC GRAPH EXPANDER
+      # EXPANDER WITH RENDERED GOLD BUY, SL, & TARGET LINES
       with st.expander(
           f"📈 View Advanced SMC Chart & VWAP Structure for {row['Symbol']}"
       ):
         fig = render_advanced_smc_chart(
-            row["Symbol"], row["DataFrame"], row["Volume_Colors"]
+            row["Symbol"],
+            row["DataFrame"],
+            row["Volume_Colors"],
+            row["Limit_Buy"],
+            row["Stop_Loss"],
+            row["Target_1"],
+            row["Target_2"],
         )
         st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
