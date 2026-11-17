@@ -198,7 +198,7 @@ def render_advanced_smc_chart(symbol, df, v_col, entry, sl, t1, t2):
       col=1,
   )
 
-  # --- CRITICAL FIX: ADDING BACK GOLD BUY, SL, & TARGET LINES ---
+  # Gold Buy, SL, & Target Lines
   fig.add_hline(
       y=entry,
       line_dash="solid",
@@ -275,8 +275,15 @@ def render_advanced_smc_chart(symbol, df, v_col, entry, sl, t1, t2):
 
 
 # ---------------------------------------------------------
-# 4. MAIN RENDER BLOCK
+# 4. MAIN RENDER BLOCK WITH DEDICATED REFRESH BUTTON
 # ---------------------------------------------------------
+col_top_left, col_top_right = st.columns([4, 1])
+with col_top_right:
+  if st.button("🔄 Refresh Live Data"):
+    st.cache_data.clear()
+    st.toast("Cleared cache and fetched latest live ticks!")
+    st.rerun()
+
 with st.spinner(
     "🔄 Fetching live NSE market data and calculating SMC structures..."
 ):
@@ -288,6 +295,7 @@ if top_picks_df is None or top_picks_df.empty:
       " session."
   )
   if st.button("🔄 Force Refresh Data"):
+    st.cache_data.clear()
     st.rerun()
 else:
   st.subheader("🏆 Today's Filtered Rank #1 & #2 Setups")
