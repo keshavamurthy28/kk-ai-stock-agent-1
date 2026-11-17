@@ -1,6 +1,7 @@
 from datetime import datetime, time
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import pytz
 import streamlit as st
 import yfinance as yf
@@ -41,34 +42,34 @@ else:
 
 
 # ---------------------------------------------------------
-# 2. DATA FETCHING & PIPELINE FUNCTION
+# 2. DATA & CHART PLOTTING FUNCTION
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def fetch_top_picks_data():
-  # Placeholder list of symbols (replace with your scanner dataframe source)
   watchlist = ["ITC.NS", "HONASA.NS", "PNB.NS", "MAXHEALTH.NS", "SBIN.NS"]
   data_rows = []
 
   for symbol in watchlist:
     try:
       ticker = yf.Ticker(symbol)
-      hist = ticker.history(period="5d")
+      hist = ticker.history(period="5d", interval="15m")
       if len(hist) >= 2:
-        prev_close = hist["Close"].iloc[-2]
+        prev_close = ticker.history(period="5d")["Close"].iloc[-2]
         open_price = hist["Open"].iloc[-1]
         ltp = hist["Close"].iloc[-1]
         change_pct = ((ltp - prev_close) / prev_close) * 100
-        gap_pct = ((open_prev_diff := open_price - prev_close) / prev_close) * 100
+        gap_pct = ((open_price - prev_close) / prev_close) * 100
 
         data_rows.append({
             "Symbol": symbol.replace(".NS", ""),
             "LTP": round(ltp, 2),
             "Change": round(change_pct, 2),
             "Gap_Pct": round(gap_pct, 2),
-            "Limit_Buy": round(ltp * 0.992, 2),  # Smart pullback entry
-            "Stop_Loss": round(ltp * 0.975, 2),  # Strict 1.5% - 2% SL
-            "Target_1": round(ltp * 1.025, 2),  # ~2.5% Target 1
-            "Target_2": round(ltp * 1.050, 2),  # ~5.0% Stretch Target 2
+            "Limit_Buy": round(ltp * 0.992, 2),
+            "Stop_Loss": round(ltp * 0.975, 2),
+            "Target_1": round(ltp * 1.025, 2),
+            "Target_2": round(ltp * 1.050, 2),
+            "History": hist,  # Storing history for plotting
         })
     except Exception:
       continue
@@ -76,17 +77,40 @@ def fetch_top_picks_data():
   return pd.DataFrame(data_rows)
 
 
+def plot_smc_chart(symbol, hist):
+  fig = go.Figure(
+      data=[
+          go.Candlestick(
+              x=hist.index,
+              open=hist["Open"],
+              high=hist["High"],
+              low=hist["Low"],
+              close=hist["Close"],
+              name="Price (15m)",
+          )
+      ]
+  )
+  fig.update_layout(
+      title=f"📊 {symbol} — Intraday SMC Structure & Levels",
+      yaxis_title="Price (₹)",
+      xaxis_title="Time",
+      template="plotly_dark",
+      height=350,
+      margin=dict(l=10, r=10, t=30, b=10),
+  )
+  return fig
+
+
 # ---------------------------------------------------------
-# 3. MAIN RENDER BLOCK WITH SPINNER & FALLBACK
+# 3. MAIN RENDER BLOCK
 # ---------------------------------------------------------
-with st.spinner("🔄 Fetching live NSE market data and calculating SMC levels..."):
+with st.spinner("🔄 Fetching live NSE market data and calculating levels..."):
   top_picks_df = fetch_top_picks_data()
 
 if top_picks_df is None or top_picks_df.empty:
   st.info(
       "⚠️ No stocks currently match all strict confluence filters for today's"
-      " session, or live data is still syncing. Check your connection or click"
-      " 'Force Refresh' below."
+      " session."
   )
   if st.button("🔄 Force Refresh Data"):
     st.rerun()
@@ -94,7 +118,6 @@ else:
   st.subheader("🏆 Today's Filtered Rank #1 & #2 Setups")
 
   for index, row in top_picks_df.head(2).iterrows():
-    # Gap-Up Check (> 1.5% Auto-Reject Filter)
     is_chased = row["Gap_Pct"] > 1.5
 
     with st.container():
@@ -133,9 +156,11 @@ else:
               f"📋 Copy Kite Order Payload ({row['Symbol']})",
               key=f"btn_{row['Symbol']}",
           ):
-            st.toast(
-                f"Copied order details for {row['Symbol']}! Limit:"
-                f" ₹{row['Limit_Buy']}"
-            )
+            st.toast(f"Copied order details for {row['Symbol']}!")
+
+      # Inline Chart Expandable Section
+      with st.expander(f"📈 View Live SMC Chart & Structure for {row['Symbol']}"):
+        fig = plot_smc_chart(row["Symbol"], row["History"])
+        st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("---")
