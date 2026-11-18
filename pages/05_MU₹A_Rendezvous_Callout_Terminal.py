@@ -10,7 +10,7 @@ import yfinance as yf
 st.set_page_config(page_title="MU$₹A Rendezvous Advance Callouts", layout="wide")
 
 st.header("⚙️ Terminal Control Center")
-if st.button("🔄 Refresh Live Scans", type="primary", use_container_width=True):
+if st.button("🔄 Refresh Live Scans", type="primary"):  # Removed full-width
   st.cache_data.clear()
   st.success("Cache cleared! Fetching fresh data...")
   st.rerun()
