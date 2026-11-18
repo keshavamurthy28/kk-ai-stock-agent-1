@@ -97,6 +97,13 @@ def run_advance_night_prep():
       recent_vol = df["Volume"].iloc[-1]
 
       close_price = float(df["Close"].iloc[-1])
+      # Fetch live/recent LTP if available, fallback to close price
+      ltp = (
+          float(ticker.history(period="1d")["Close"].iloc[-1])
+          if not ticker.history(period="1d").empty
+          else close_price
+      )
+
       prev_close = float(df["Close"].iloc[-2])
       change_pct = ((close_price - prev_close) / prev_close) * 100
 
@@ -106,13 +113,14 @@ def run_advance_night_prep():
 
       if is_tight_coil and is_volume_steady:
         # Advance Entry Blueprints for 2%–5% Capture
-        advance_buy = round(close_price * 0.995, 2)
+        advance_buy = round( close_price * 0.995, 2)
         stop_loss = round(close_price * 0.978, 2)  # Strict 2.2% protection
         target_1 = round(close_price * 1.025, 2)  # +2.5% Target
         target_2 = round(close_price * 1.050, 2)  # +5.0% Target
 
         watchlist_rows.append({
             "Symbol": symbol.replace(".NS", ""),
+            "LTP": round(ltp, 2),
             "Close": round(close_price, 2),
             "Advance_Buy": advance_buy,
             "Stop_Loss": stop_loss,
@@ -123,7 +131,22 @@ def run_advance_night_prep():
     except Exception:
       continue
 
-  return pd.DataFrame(watchlist_rows)
+  # Reorder columns explicitly to place LTP right after Symbol
+  df_res = pd.DataFrame(watchlist_rows)
+  if not df_res.empty:
+    df_res = df_res[
+        [
+            "Symbol",
+            "LTP",
+            "Close",
+            "Advance_Buy",
+            "Stop_Loss",
+            "Target_1",
+            "Target_2",
+            "Range_Ratio",
+        ]
+    ]
+  return df_res
 
 
 # ---------------------------------------------------------
@@ -142,9 +165,10 @@ else:
       " orders on Zerodha Kite before market open to catch the breakout early.*"
   )
 
-  # Display as a clean, actionable dataframe table
+  # Display as a clean, actionable dataframe table with LTP right next to Symbol
   st.dataframe(
       df_prep.style.format({
+          "LTP": "₹{:,.2f}",
           "Close": "₹{:,.2f}",
           "Advance_Buy": "₹{:,.2f}",
           "Stop_Loss": "₹{:,.2f}",
@@ -163,7 +187,11 @@ else:
 
       with c1:
         st.markdown(f"### **{row['Symbol']}**")
-        st.metric(label="Closing Reference", value=f"₹{row['Close']}")
+        st.metric(
+            label="Live LTP / Close",
+            value=f"₹{row['LTP']}",
+            delta=f"Close: ₹{row['Close']}",
+        )
 
       with c2:
         st.markdown("**Advance Entry Levels**")
