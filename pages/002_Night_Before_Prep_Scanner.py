@@ -12,8 +12,8 @@ st.set_page_config(
 st.title("🌙 Advance Night-Before Institutional Prep & Coiling Watchlist")
 st.markdown(
     "**Expert Advance Engine:** Pre-scans the Indian equity market for tight"
-    " multi-day accumulation coils *before* the market opens, giving you advance"
-    " entry blueprints for tomorrow's 2%–5% targets."
+    " multi-day accumulation coils *before*кті the market opens, giving you"
+    " advance entry blueprints for tomorrow's 2%–5% targets."
 )
 
 # ---------------------------------------------------------
@@ -105,7 +105,7 @@ def run_advance_night_prep():
       )
 
       prev_close = float(df["Close"].iloc[-2])
-      change_pct = ((close_price - prev_close) / prev_close) * 100
+      change_pct = round(((close_price - prev_close) / prev_close) * 100, 2)
 
       # Tight Coil Criteria: Range is contracting while volume is building or stable
       is_tight_coil = recent_range <= (1.2 * avg_range)
@@ -113,7 +113,7 @@ def run_advance_night_prep():
 
       if is_tight_coil and is_volume_steady:
         # Advance Entry Blueprints for 2%–5% Capture
-        advance_buy = round( close_price * 0.995, 2)
+        advance_buy = round(close_price * 0.995, 2)
         stop_loss = round(close_price * 0.978, 2)  # Strict 2.2% protection
         target_1 = round(close_price * 1.025, 2)  # +2.5% Target
         target_2 = round(close_price * 1.050, 2)  # +5.0% Target
@@ -122,6 +122,7 @@ def run_advance_night_prep():
             "Symbol": symbol.replace(".NS", ""),
             "LTP": round(ltp, 2),
             "Close": round(close_price, 2),
+            "Change_%": change_pct,
             "Advance_Buy": advance_buy,
             "Stop_Loss": stop_loss,
             "Target_1": target_1,
@@ -131,7 +132,7 @@ def run_advance_night_prep():
     except Exception:
       continue
 
-  # Reorder columns explicitly to place LTP right after Symbol
+  # Reorder columns explicitly to place Change_% right after LTP and Close
   df_res = pd.DataFrame(watchlist_rows)
   if not df_res.empty:
     df_res = df_res[
@@ -139,6 +140,7 @@ def run_advance_night_prep():
             "Symbol",
             "LTP",
             "Close",
+            "Change_%",
             "Advance_Buy",
             "Stop_Loss",
             "Target_1",
@@ -165,11 +167,12 @@ else:
       " orders on Zerodha Kite before market open to catch the breakout early.*"
   )
 
-  # Display as a clean, actionable dataframe table with LTP right next to Symbol
+  # Display as a clean, actionable dataframe table with Change_% included
   st.dataframe(
       df_prep.style.format({
           "LTP": "₹{:,.2f}",
           "Close": "₹{:,.2f}",
+          "Change_%": "{:+.2f}%",
           "Advance_Buy": "₹{:,.2f}",
           "Stop_Loss": "₹{:,.2f}",
           "Target_1": "₹{:,.2f}",
@@ -190,7 +193,7 @@ else:
         st.metric(
             label="Live LTP / Close",
             value=f"₹{row['LTP']}",
-            delta=f"Close: ₹{row['Close']}",
+            delta=f"{row['Change_%']}% (Close: ₹{row['Close']})",
         )
 
       with c2:
