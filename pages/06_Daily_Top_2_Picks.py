@@ -13,23 +13,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# --- CLEAN SIDEBAR NAVIGATION ---
-st.sidebar.markdown("### 🧭 Hedge Fund Navigation Workflow")
-st.sidebar.markdown(
-    "- 🗺️ **[Sector Rotation & Macro Pulse](Sector_Rotation_Scanner)**"
-    f"[cite: 3]"
-)
-st.sidebar.markdown("- ⚡ **[Smart Money Flow Terminal](Smart_Money_Pulse)**")
-st.sidebar.markdown(
-    "- 🌙 **[Night-Before Prep & Coiling](Night_Before_Prep_Scanner)**"
-)
-st.sidebar.markdown(
-    "- 🎯 **[Live Super-Signal Triggers](Matched_Super_Signal_Page)**"
-)
-st.sidebar.markdown("- 📈 **[Intraday Sniper Terminal](PRIME_2-5_INTRADAY_SNIPER)**")
-st.sidebar.markdown("- 🔥 **[Master Pipeline Top 2 Picks](Daily_Top_2_Picks)**")
-st.sidebar.markdown("---")
-
 st.title(
     "🔥 Master Pipeline Top 2 Picks: Adaptive Bullish Long / Bearish Short"
     " Terminal"
@@ -55,7 +38,6 @@ with col_r2:
 
 @st.cache_data(ttl=120)
 def evaluate_market_posture_and_picks():
-  # Check Nifty 50 live trend to determine market bias (Bullish vs Bearish)
   nifty = yf.Ticker("^NSEI")
   df_nifty = nifty.history(period="5d", interval="1d", auto_adjust=True)
   market_bias = "BULLISH"
@@ -68,7 +50,6 @@ def evaluate_market_posture_and_picks():
     if nifty_chg < -0.4:
       market_bias = "BEARISH"
 
-  # Access upstream sniper and smart money cache
   universe = [
       "RELIANCE.NS",
       "TCS.NS",
@@ -103,16 +84,13 @@ def evaluate_market_posture_and_picks():
       prev_close = float(df["Close"].iloc[-2])
       change_pct = round(((ltp - prev_close) / prev_close) * 100, 2)
 
-      # Pipeline evaluation based on market posture
       if market_bias == "BULLISH" and change_pct > 0.3:
-        # Looking for strong long candidates
         score = change_pct
         action = "BUY (LONG)"
         sl = round(ltp * 0.985, 2)
         t1 = round(ltp * 1.025, 2)
         t2 = round(ltp * 1.050, 2)
       elif market_bias == "BEARISH" and change_pct < -0.3:
-        # Looking for weak distribution candidates to short / book profit
         score = abs(change_pct)
         action = "SELL / SHORT"
         sl = round(ltp * 1.015, 2)
@@ -144,7 +122,7 @@ def evaluate_market_posture_and_picks():
 
 market_bias, nifty_chg, df_picks = evaluate_market_posture_and_picks()
 
-# Display Market Posture Banner
+# Display Market Posture Banner based on Live Breadth
 if market_bias == "BULLISH":
   st.success(
       f"🟢 **Live Market Posture: BULLISH (Nifty Change: {nifty_chg:+.2f}%)** —"
