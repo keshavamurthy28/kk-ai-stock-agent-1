@@ -212,9 +212,7 @@ def fetch_complete_sector_breadth():
   )
 
 
-with st.spinner(
-    "Syncing live 31+ sector performance metrics & Trendlyne breadth..."
-):
+with st.spinner("Syncing live 31+ sector performance metrics..."):
   (
       index_metrics,
       df_stocks,
@@ -235,7 +233,6 @@ for i, (name, _) in enumerate(MACRO_INDICES.items()):
 
 st.markdown("---")
 
-# Navigation Breadcrumb Bar
 b1, _ = st.columns([1.2, 4])
 with b1:
   if st.button("🏠 All Sectors", use_container_width=True):
@@ -357,7 +354,7 @@ elif st.session_state.nav_sector:
     st.rerun()
 
 # =========================================================
-# LEVEL 1 VIEW: 31+ SECTOR HEATMAP & TRENDLYNE DATA TABLE
+# LEVEL 1 VIEW: 31+ SECTOR HEATMAP & TABLE
 # =========================================================
 else:
   st.subheader("🗺️ Sector Heatmap & Breadth Analysis (Over 31+ Sectors)")
@@ -409,18 +406,8 @@ else:
         "📊 Sector Analysis and Scores Table (Advances, Declines & Momentum)"
     )
 
-    styled_table = (
-        df_sector_table.sort_values(by="Day Change %", ascending=False)
-        .style.format({
-            "Day Change %": "{:+.2f}%",
-            "Sector Momentum Score": "{:.1f}",
-            "Advances/Declines Ratio": "{:.2f}",
-        })
-        .background_gradient(subset=["Day Change %"], cmap="RdYlGn", vmin=-3, vmax=3)
-    )
-
     table_selection = st.dataframe(
-        styled_table,
+        df_sector_table.sort_values(by="Day Change %", ascending=False),
         use_container_width=True,
         hide_index=True,
         on_select="rerun",
