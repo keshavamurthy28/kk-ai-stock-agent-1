@@ -9,11 +9,26 @@ import yfinance as yf
 
 # Page Configuration
 st.set_page_config(
-    page_title=(
-        "Institutional Alpha & Quality Value Terminal | Indian Market"
-    ),
+    page_title="Institutional Alpha & Quality Value Terminal | Indian Market",
     layout="wide",
 )
+
+# --- CLEAN SIDEBAR NAVIGATION ---
+st.sidebar.markdown("### 🧭 Hedge Fund Navigation Workflow")
+st.sidebar.markdown(
+    "- 🗺️ **[Sector Rotation & Macro Pulse](Sector_Rotation_Scanner)**"
+    f"[cite: 3]"
+)
+st.sidebar.markdown("- ⚡ **[Smart Money Flow Terminal](Smart_Money_Pulse)**")
+st.sidebar.markdown(
+    "- 🌙 **[Night-Before Prep & Coiling](Night_Before_Prep_Scanner)**"
+)
+st.sidebar.markdown(
+    "- 🎯 **[Live Super-Signal Triggers](Matched_Super_Signal_Page)**"
+)
+st.sidebar.markdown("- 📈 **[Intraday Sniper Terminal](PRIME_2-5_INTRADAY_SNIPER)**")
+st.sidebar.markdown("- 🔥 **[Daily Top 2 Alpha Picks](Daily_Top_2_Picks)**")
+st.sidebar.markdown("---")
 
 st.title(
     "🎯 Institutional Alpha & Fundamental Quality Terminal: Anti-Trap Intraday"
@@ -25,6 +40,59 @@ st.markdown(
     " with **Multi-Factor Volume Expansion** and **VWAP Alignment** to filter"
     " out stagnant value traps."
 )
+
+# Comprehensive Stock-to-Sector Mapping (Unified across the workspace)
+STOCK_SECTOR_MAP = {
+    "RELIANCE": "Energy & Oil",
+    "TCS": "Software & Services",
+    "HDFCBANK": "Banking & Finance",
+    "ICICIBANK": "Banking & Finance",
+    "INFY": "Software & Services",
+    "SBIN": "Banking & Finance",
+    "ITC": "FMCG",
+    "BHARTIARTL": "Telecommunications",
+    "LICI": "Financial Services",
+    "AXISBANK": "Banking & Finance",
+    "KOTAKBANK": "Banking & Finance",
+    "LT": "Capital Goods",
+    "BAJFINANCE": "Banking & Finance",
+    "MARUTI": "Automobiles",
+    "SUNPHARMA": "Healthcare",
+    "TITAN": "Consumer Durables",
+    "ADANIENT": "Diversified",
+    "ADANIPORTS": "Transportation",
+    "TATASTEEL": "Metals & Mining",
+    "NTPC": "Energy & Oil",
+    "POWERGRID": "Energy & Oil",
+    "COALINDIA": "Energy & Oil",
+    "ONGC": "Energy & Oil",
+    "BAJAJFINSV": "Banking & Finance",
+    "WIPRO": "Software & Services",
+    "ASIANPAINT": "Consumer Durables",
+    "HCLTECH": "Software & Services",
+    "GRASIM": "Cement & Construction",
+    "TECHM": "Software & Services",
+    "INDUSINDBK": "Banking & Finance",
+    "DEEPAKFERT": "Fertilizers",
+    "ANGELONE": "Financial Services",
+    "HONASA": "FMCG",
+    "MAXHEALTH": "Healthcare",
+    "PNB": "Banking & Finance",
+    "CANBK": "Banking & Finance",
+    "TORNTPHARM": "Healthcare",
+    "SUPREMEIND": "Capital Goods",
+    "ETERNAL": "Retailing",
+    "BELRISE": "Automobiles",
+    "TATACOMM": "Telecommunications",
+    "PIDILITEIND": "Chemicals",
+    "SRF": "Chemicals",
+    "HAL": "Defense & Aerospace",
+    "BEL": "Defense & Aerospace",
+    "TVSMOTOR": "Automobiles",
+    "BOSCHLTD": "Automobiles",
+    "MUTHOOTFIN": "Banking & Finance",
+    "CHOLAFIN": "Banking & Finance",
+}
 
 # ---------------------------------------------------------
 # 1. LIVE CONTROL PANEL & REFRESH
@@ -45,73 +113,21 @@ current_time_ist = datetime.now(ist).time()
 # ---------------------------------------------------------
 @st.cache_data(ttl=300)
 def fetch_institutional_alpha_picks():
-  # Broad, high-liquidity NSE universe spanning Nifty 50, Nifty Next 50, and High-Volume Midcaps
-  market_universe = [
-      "RELIANCE.NS",
-      "TCS.NS",
-      "HDFCBANK.NS",
-      "ICICIBANK.NS",
-      "INFY.NS",
-      "SBIN.NS",
-      "ITC.NS",
-      "BHARTIARTL.NS",
-      "LICI.NS",
-      "AXISBANK.NS",
-      "KOTAKBANK.NS",
-      "LT.NS",
-      "BAJFINANCE.NS",
-      "MARUTI.NS",
-      "SUNPHARMA.NS",
-      "TITAN.NS",
-      "ADANIENT.NS",
-      "ADANIPORTS.NS",
-      "TATASTEEL.NS",
-      "NTPC.NS",
-      "POWERGRID.NS",
-      "COALINDIA.NS",
-      "ONGC.NS",
-      "BAJAJFINSV.NS",
-      "WIPRO.NS",
-      "ASIANPAINT.NS",
-      "HCLTECH.NS",
-      "GRASIM.NS",
-      "TECHM.NS",
-      "INDUSINDBK.NS",
-      "DEEPAKFERT.NS",
-      "ANGELONE.NS",
-      "HONASA.NS",
-      "MAXHEALTH.NS",
-      "PNB.NS",
-      "CANBK.NS",
-      "TORNTPHARM.NS",
-      "SUPREMEIND.NS",
-      "ETERNAL.NS",  # Updated from ZOMATO
-      "BELRISE.NS",
-      "TATACOMM.NS",
-      "PIDILITEIND.NS",
-      "SRF.NS",
-      "HAL.NS",
-      "BEL.NS",
-      "TVSMOTOR.NS",
-      "BOSCHLTD.NS",
-      "MUTHOOTFIN.NS",
-      "CHOLAFIN.NS",
-  ]
-
+  market_universe = [f"{sym}.NS" for sym in STOCK_SECTOR_MAP.keys()]
   alpha_scored_stocks = []
 
   for symbol in market_universe:
+    clean_sym = symbol.replace(".NS", "")
+    sector_name = STOCK_SECTOR_MAP.get(clean_sym, "General")
+
     try:
       ticker = yf.Ticker(symbol)
 
       # --- FUNDAMENTAL FILTER (Anti-Trap Protection) ---
-      # Fetch basic info/financials to ensure company is profitable & fundamentally sound
       info = ticker.info
       net_income = info.get("netIncomeToCommon", 1)
-      trailing_pe = info.get("trailingPE", 0)
       profit_margins = info.get("profitMargins", 0)
 
-      # Anti-Trap Criteria: Must have positive net income and positive profit margins (avoids burning cash traps)
       if (
           net_income is not None
           and net_income <= 0
@@ -152,7 +168,6 @@ def fetch_institutional_alpha_picks():
 
       ltp = float(df["Close"].iloc[-1])
 
-      # Extract previous day close from dataframe dates cleanly (Eliminates extra API calls)
       df["Date"] = df["Time"].dt.date
       unique_dates = df["Date"].unique()
       if len(unique_dates) >= 2:
@@ -164,7 +179,7 @@ def fetch_institutional_alpha_picks():
 
       change_pct = ((ltp - prev_close) / prev_close) * 100
 
-      # Relative Volume (RVOL) Surge Calculation (Using last completed candle to avoid live candle bias)
+      # Relative Volume (RVOL) Surge Calculation
       avg_vol = df["Volume"].iloc[-20:-2].mean()
       curr_vol = df["Volume"].iloc[-2]
       rvol = round(curr_vol / avg_vol, 2) if avg_vol > 0 else 1.0
@@ -172,10 +187,6 @@ def fetch_institutional_alpha_picks():
       latest_vwap = float(df["VWAP"].iloc[-1])
       latest_ema = float(df["EMA20"].iloc[-1])
 
-      # EXPERT ALPHA & MOMENTUM FILTER:
-      # 1. Positive intraday momentum (+0.3% to +5.5%)
-      # 2. Institutional validation: Price above VWAP & 20 EMA
-      # 3. Active volume participation (RVOL >= 1.1x)
       if (
           0.3 <= change_pct <= 5.5
           and ltp >= latest_vwap
@@ -200,17 +211,16 @@ def fetch_institutional_alpha_picks():
             for o, c, v, va in zip(df["Open"], df["Close"], df["Volume"], v_avg)
         ]
 
-        # Precision Risk-Reward Calculation
         limit_buy = round(ltp * 0.994, 2)
         stop_loss = round(latest_vwap * 0.992, 2)
         target_1 = round(ltp * 1.025, 2)
         target_2 = round(ltp * 1.048, 2)
 
-        # Composite Alpha Score
         alpha_score = round(change_pct * rvol * (ltp / latest_vwap), 2)
 
         alpha_scored_stocks.append({
-            "Symbol": symbol.replace(".NS", ""),
+            "Symbol": clean_sym,
+            "Sector": sector_name,
             "LTP": round(ltp, 2),
             "Change": round(change_pct, 2),
             "RVOL": rvol,
@@ -369,12 +379,16 @@ else:
       " Target)"
   )
 
+  # Sync top alpha picks to session state for cross-page connectivity
+  st.session_state["top_alpha_picks"] = df_alpha.head(2)["Symbol"].tolist()
+
   for idx, row in df_alpha.head(2).iterrows():
     with st.container():
       c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
 
       with c1:
         st.markdown(f"### **#{idx+1} {row['Symbol']}**")
+        st.caption(f"📂 **Sector:** {row['Sector']}")
         st.metric(
             label="Live LTP",
             value=f"₹{row['LTP']}",
@@ -401,12 +415,13 @@ else:
         )
         if st.button(f"📋 Copy Payload ({row['Symbol']})", key=f"alpha_{row['Symbol']}"):
           st.toast(
-              f"Copied {row['Symbol']}! Limit: ₹{row['Limit_Buy']} | T1:"
-              f" ₹{row['Target_1']}"
+              f"Copied {row['Symbol']} ({row['Sector']})! Limit:"
+              f" ₹{row['Limit_Buy']} | T1: ₹{row['Target_1']}"
           )
 
       with st.expander(
           f"📈 Expand Chart & VWAP Structure for #{idx+1} {row['Symbol']}"
+          f" ({row['Sector']})"
       ):
         fig = render_institutional_chart(
             row["Symbol"],
