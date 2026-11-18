@@ -13,9 +13,10 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("🎯 Institutional Alpha Intraday Sniper Terminal")
+st.title("🎯 Institutional Alpha Intraday Sniper Terminal (Anti-Trap)")
 st.markdown(
-    "**Expert Analyst Engine:** Market-wide scanning utilizing VWAP support,"
+    "**Expert Analyst Engine:** Market-wide scanning combining **Fundamental"
+    " Quality Filters** (Positive earnings & profit margins) with VWAP support,"
     " volume expansion, and ATR-managed risk boundaries for reliable 2%–5%"
     " intraday gains."
 )
@@ -37,7 +38,7 @@ current_time_ist = datetime.now(ist).time()
 # ---------------------------------------------------------
 # 2. MARKET-WIDE INSTITUTIONAL SNIPER SCANNER
 # ---------------------------------------------------------
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=60)
 def fetch_institutional_sniper_picks():
   market_universe = [
       "RELIANCE.NS",
@@ -78,8 +79,13 @@ def fetch_institutional_sniper_picks():
       "CANBK.NS",
       "TORNTPHARM.NS",
       "SUPREMEIND.NS",
-      "ZOMATO.NS",
+      "ETERNAL.NS",  # Updated from ZOMATO
       "BELRISE.NS",
+      "TATACOMM.NS",
+      "PIDILITEIND.NS",
+      "SRF.NS",
+      "HAL.NS",
+      "BEL.NS",
   ]
 
   sniper_rows = []
@@ -87,8 +93,22 @@ def fetch_institutional_sniper_picks():
   for symbol in market_universe:
     try:
       ticker = yf.Ticker(symbol)
+
+      # --- FUNDAMENTAL FILTER (Anti-Trap Protection) ---
+      info = ticker.info
+      net_income = info.get("netIncomeToCommon", 1)
+      profit_margins = info.get("profitMargins", 0)
+
+      if (
+          net_income is not None
+          and net_income <= 0
+          or profit_margins is not None
+          and profit_margins < 0.02
+      ):
+        continue  # Skip fundamentally weak or cash-burning stocks
+
       df = ticker.history(period="5d", interval="5m", auto_adjust=True)
-      if df is None or df.empty or len(df) < 15:
+      if df is None or df.empty or len(df) < 20:
         continue
 
       df = df.reset_index()
@@ -117,22 +137,28 @@ def fetch_institutional_sniper_picks():
       )
 
       ltp = float(df["Close"].iloc[-1])
-      prev_close = (
-          ticker.history(period="5d")["Close"].iloc[-2]
-          if len(ticker.history(period="5d")) >= 2
-          else ltp
-      )
+
+      # Clean previous close extraction from DataFrame dates (Avoids extra API requests)
+      df["Date"] = df["Time"].dt.date
+      unique_dates = df["Date"].unique()
+      if len(unique_dates) >= 2:
+        prev_close = float(
+            df[df["Date"] == unique_dates[-2]]["Close"].iloc[-1]
+        )
+      else:
+        prev_close = float(df["Open"].iloc[0])
+
       change_pct = ((ltp - prev_close) / prev_close) * 100
 
-      # Relative Volume (RVOL) Check
-      avg_vol = df["Volume"].rolling(15).mean().iloc[-1]
-      curr_vol = df["Volume"].iloc[-1]
+      # Relative Volume (RVOL) Check using last COMPLETED candle
+      avg_vol = df["Volume"].iloc[-20:-2].mean()
+      curr_vol = df["Volume"].iloc[-2]
       rvol = round(curr_vol / avg_vol, 2) if avg_vol > 0 else 1.0
 
       latest_vwap = float(df["VWAP"].iloc[-1])
       latest_ema = float(df["EMA20"].iloc[-1])
 
-      # 14-Day ATR Calculation
+      # 14-Day ATR Calculation (from daily summary)
       df_daily = ticker.history(period="14d", interval="1d")
       if not df_daily.empty and len(df_daily) >= 5:
         tr = np.maximum(
@@ -197,7 +223,9 @@ def fetch_institutional_sniper_picks():
 
   df_res = pd.DataFrame(sniper_rows)
   if not df_res.empty:
-    df_res = df_res.sort_values(by="Alpha_Score", ascending=False)
+    df_res = df_res.sort_values(by="Alpha_Score", ascending=False).reset_index(
+        drop=True
+    )
   return df_res
 
 
@@ -320,17 +348,19 @@ def render_sniper_chart(symbol, df, v_col, entry, sl, t1, t2, atr):
 # 4. MAIN RENDER BLOCK
 # ---------------------------------------------------------
 with st.spinner(
-    "🎯 Scanning market-wide institutional alpha & sniper bands..."
+    "🎯 Scanning market-wide institutional alpha & anti-trap sniper bands..."
 ):
   df_sniper = fetch_institutional_sniper_picks()
 
 if df_sniper is None or df_sniper.empty:
   st.warning(
-      "⚠️ No stocks currently meeting sniper confluence. Click 'Force Refresh"
-      " Sniper Scans' above."
+      "⚠️ No stocks currently meeting sniper confluence or fundamental quality"
+      " filters. Click 'Force Refresh Sniper Scans' above."
   )
 else:
-  st.subheader("🏆 Institutional Alpha Intraday Sniper Ranking")
+  st.subheader(
+      "🏆 Institutional Alpha Intraday Sniper Ranking (Quality Verified)"
+  )
 
   for idx, row in df_sniper.head(3).iterrows():
     with st.container():
@@ -359,7 +389,7 @@ else:
 
       with c4:
         st.markdown("**Execution Status**")
-        st.success("✅ **VERIFIED — FRESH ROOM LEFT**")
+        st.success("✅ **VERIFIED NON-TRAP SNIPER BUY**")
         if st.button(
             f"📋 Copy Sniper Payload ({row['Symbol']})", key=f"snip_{row['Symbol']}"
         ):
