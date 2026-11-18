@@ -11,10 +11,15 @@ st.set_page_config(
 
 # --- CLEAN SIDEBAR NAVIGATION ---
 st.sidebar.markdown("### 🧭 Hedge Fund Navigation Workflow")
-st.sidebar.markdown("- 🗺️ **[Sector Rotation & Macro Pulse](Sector_Rotation_Scanner)**")
+st.sidebar.markdown(
+    "- 🗺️ **[Sector Rotation & Macro Pulse](Sector_Rotation_Scanner)**"
+)
 st.sidebar.markdown("- ⚡ **[Smart Money Flow Terminal](Smart_Money_Pulse)**")
-st.sidebar.markdown("- 🌙 **[Night-Before Prep & Coiling](Night_Before_Prep_Scanner)**")
+st.sidebar.markdown(
+    "- 🌙 **[Night-Before Prep & Coiling](Night_Before_Prep_Scanner)**"
+)
 st.sidebar.markdown("- 📈 **[Intraday Sniper Terminal](PRIME_2-5_INTRADAY_SNIPER)**")
+st.sidebar.markdown("- 🔥 **[Daily Top 2 Alpha Picks](Daily_Top_2_Picks)**")
 st.sidebar.markdown("---")
 
 st.title(
@@ -39,7 +44,7 @@ with col_c2:
     )
     st.rerun()
 
-# Sector Mapping Dictionary (Consistent with Smart Money Pulse)
+# Sector Mapping Dictionary (Consistent with Smart Money Pulse & Global Taxonomy)
 SECTOR_MAPPING = {
     "Banking & Finance": [
         "HDFCBANK.NS",
@@ -68,7 +73,7 @@ SECTOR_MAPPING = {
         "HINDUNILVR.NS",
         "TITAN.NS",
         "ASIANPAINT.NS",
-        "ZOMATO.NS",
+        "ETERNAL.NS",
         "HONASA.NS",
     ],
     "Infrastructure & Industrials": [
@@ -89,7 +94,6 @@ SECTOR_MAPPING = {
 def run_advance_night_prep():
   watchlist_rows = []
 
-  # Flatten universe with associated sector names
   universe_map = {
       sym: sector for sector, symbols in SECTOR_MAPPING.items() for sym in symbols
   }
@@ -182,6 +186,10 @@ def run_advance_night_prep():
 # ---------------------------------------------------------
 df_prep = run_advance_night_prep()
 
+# Sync computed watchlist to session state for cross-page matching
+if not df_prep.empty:
+  st.session_state["night_before_watchlist"] = df_prep["Symbol"].tolist()
+
 if df_prep is None or df_prep.empty:
   st.warning("⚠️ No tight accumulation coils detected. Run advance scan above.")
 else:
@@ -189,7 +197,6 @@ else:
       "🎯 Smart Money Pre-Market Setups Connected with Sector Flows"
   )
 
-  # Sector Filter Widget
   all_sectors = ["All Sectors"] + sorted(df_prep["Sector"].unique().tolist())
   selected_sector = st.selectbox(
       "🔍 Filter Watchlist by Sector Connection:", all_sectors
