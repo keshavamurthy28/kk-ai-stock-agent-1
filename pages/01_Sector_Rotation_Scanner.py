@@ -15,6 +15,7 @@ st.set_page_config(
 st.sidebar.markdown("### 🧭 Hedge Fund Navigation Workflow")
 st.sidebar.markdown(
     "- 🗺️ **[Sector Rotation & Macro Pulse](Sector_Rotation_Scanner)**"
+    f"[cite: 3]"
 )
 st.sidebar.markdown("- ⚡ **[Smart Money Flow Terminal](Smart_Money_Pulse)**")
 st.sidebar.markdown(
@@ -43,7 +44,6 @@ MACRO_INDICES = {
     "NIFTY IT": "^CNXIT",
 }
 
-# Complete 31+ Sector Dictionary aligned with Trendlyne
 TRENDLYNE_31_SECTORS = {
     "Telecommunications": ["BHARTIARTL.NS", "IDEA.NS", "TATACOMM.NS"],
     "Telecom Services": ["INDUSTOWER.NS", "NELCO.NS"],
@@ -107,14 +107,14 @@ TRENDLYNE_31_SECTORS = {
 }
 
 
-@st.cache_data(ttl=900)
+# LIVE UNCACHED DATA FETCHING (Forces fresh yfinance download on every click)
 def fetch_complete_sector_breadth():
   all_syms = list(MACRO_INDICES.values()) + [
       t for stocks in TRENDLYNE_31_SECTORS.values() for t in stocks
   ]
   raw = yf.download(
       all_syms,
-      period="3mo",
+      period="5d",
       interval="1d",
       group_by="ticker",
       progress=False,
@@ -145,7 +145,7 @@ def fetch_complete_sector_breadth():
     for ticker in tickers:
       try:
         df = raw[ticker].dropna()
-        if len(df) < 15:
+        if len(df) < 2:
           continue
         sym = ticker.replace(".NS", "")
         ohlcv_store[sym] = df
@@ -212,7 +212,15 @@ def fetch_complete_sector_breadth():
   )
 
 
-with st.spinner("Syncing live 31+ sector performance metrics..."):
+# Top Header Controls & Live Refresh Button
+top_c1, top_c2 = st.columns([5, 1])
+with top_c1:
+  st.subheader("🗺️ Sector Heatmap & Breadth Analysis (Over 31+ Sectors)")
+with top_c2:
+  if st.button("🔄 Refresh Live Data", use_container_width=True, type="primary"):
+    st.rerun()
+
+with st.spinner("Fetching live institutional sector performance..."):
   (
       index_metrics,
       df_stocks,
@@ -357,7 +365,6 @@ elif st.session_state.nav_sector:
 # LEVEL 1 VIEW: 31+ SECTOR HEATMAP & TABLE
 # =========================================================
 else:
-  st.subheader("🗺️ Sector Heatmap & Breadth Analysis (Over 31+ Sectors)")
   st.caption(
       "🟢 **Green Boxes:** Bullish Outperformers  |  🔴 **Red Boxes:** Correction"
       " / Distribution Sectors"
