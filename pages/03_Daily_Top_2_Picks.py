@@ -10,18 +10,20 @@ import yfinance as yf
 # Page Configuration
 st.set_page_config(
     page_title=(
-        "Daily Top 2 Picks | Institutional Alpha & SMC Momentum Terminal"
+        "Institutional Alpha & Quality Value Terminal | Indian Market"
     ),
     layout="wide",
 )
 
 st.title(
-    "🎯 Institutional Alpha: Daily Top 2 High-Probability Intraday Setups"
+    "🎯 Institutional Alpha & Fundamental Quality Terminal: Anti-Trap Intraday"
+    " Setups"
 )
 st.markdown(
-    "**Expert Analyst Engine:** Scans the whole Indian stock market using"
-    " multi-factor volume expansion, VWAP alignment, and ATR-managed risk"
-    " structures designed for 2%–5% profit capture."
+    "**Expert Analyst Engine:** Scans high-liquidity Indian equities combining"
+    " **Fundamental Quality Filters** (Positive earnings, healthy margins)"
+    " with **Multi-Factor Volume Expansion** and **VWAP Alignment** to filter"
+    " out stagnant value traps."
 )
 
 # ---------------------------------------------------------
@@ -39,11 +41,11 @@ current_time_ist = datetime.now(ist).time()
 
 
 # ---------------------------------------------------------
-# 2. WHOLE-MARKET INSTITUTIONAL ALPHA SCANNER
+# 2. BROADER MARKET INSTITUTIONAL ALPHA & FUNDAMENTAL SCANNER
 # ---------------------------------------------------------
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def fetch_institutional_alpha_picks():
-  # Comprehensive high-liquidity Indian market equity universe
+  # Broad, high-liquidity NSE universe spanning Nifty 50, Nifty Next 50, and High-Volume Midcaps
   market_universe = [
       "RELIANCE.NS",
       "TCS.NS",
@@ -83,8 +85,17 @@ def fetch_institutional_alpha_picks():
       "CANBK.NS",
       "TORNTPHARM.NS",
       "SUPREMEIND.NS",
-      "ZOMATO.NS",
+      "ETERNAL.NS",  # Updated from ZOMATO
       "BELRISE.NS",
+      "TATACOMM.NS",
+      "PIDILITEIND.NS",
+      "SRF.NS",
+      "HAL.NS",
+      "BEL.NS",
+      "TVSMOTOR.NS",
+      "BOSCHLTD.NS",
+      "MUTHOOTFIN.NS",
+      "CHOLAFIN.NS",
   ]
 
   alpha_scored_stocks = []
@@ -92,8 +103,26 @@ def fetch_institutional_alpha_picks():
   for symbol in market_universe:
     try:
       ticker = yf.Ticker(symbol)
+
+      # --- FUNDAMENTAL FILTER (Anti-Trap Protection) ---
+      # Fetch basic info/financials to ensure company is profitable & fundamentally sound
+      info = ticker.info
+      net_income = info.get("netIncomeToCommon", 1)
+      trailing_pe = info.get("trailingPE", 0)
+      profit_margins = info.get("profitMargins", 0)
+
+      # Anti-Trap Criteria: Must have positive net income and positive profit margins (avoids burning cash traps)
+      if (
+          net_income is not None
+          and net_income <= 0
+          or profit_margins is not None
+          and profit_margins < 0.02
+      ):
+        continue  # Skip fundamentally weak or low-margin trap stocks
+
+      # Fetch intraday 15m price history
       df = ticker.history(period="5d", interval="15m", auto_adjust=True)
-      if df is None or df.empty or len(df) < 15:
+      if df is None or df.empty or len(df) < 20:
         continue
 
       df = df.reset_index()
@@ -104,7 +133,7 @@ def fetch_institutional_alpha_picks():
             df["Time"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
         )
 
-      # Time-axis string formatting for TradingView/Kite alignment
+      # Time-axis string formatting
       is_new_day = df["Time"].dt.date != df["Time"].dt.date.shift(1)
       df["Axis_Str"] = np.where(
           is_new_day,
@@ -122,24 +151,30 @@ def fetch_institutional_alpha_picks():
       )
 
       ltp = float(df["Close"].iloc[-1])
-      prev_close = (
-          ticker.history(period="5d")["Close"].iloc[-2]
-          if len(ticker.history(period="5d")) >= 2
-          else ltp
-      )
+
+      # Extract previous day close from dataframe dates cleanly (Eliminates extra API calls)
+      df["Date"] = df["Time"].dt.date
+      unique_dates = df["Date"].unique()
+      if len(unique_dates) >= 2:
+        prev_close = float(
+            df[df["Date"] == unique_dates[-2]]["Close"].iloc[-1]
+        )
+      else:
+        prev_close = float(df["Open"].iloc[0])
+
       change_pct = ((ltp - prev_close) / prev_close) * 100
 
-      # Relative Volume (RVOL) Surge Calculation
-      avg_vol = df["Volume"].rolling(15).mean().iloc[-1]
-      curr_vol = df["Volume"].iloc[-1]
+      # Relative Volume (RVOL) Surge Calculation (Using last completed candle to avoid live candle bias)
+      avg_vol = df["Volume"].iloc[-20:-2].mean()
+      curr_vol = df["Volume"].iloc[-2]
       rvol = round(curr_vol / avg_vol, 2) if avg_vol > 0 else 1.0
 
       latest_vwap = float(df["VWAP"].iloc[-1])
       latest_ema = float(df["EMA20"].iloc[-1])
 
-      # EXPERT ALPHA FILTER:
+      # EXPERT ALPHA & MOMENTUM FILTER:
       # 1. Positive intraday momentum (+0.3% to +5.5%)
-      # 2. Institutional validation: Price must be above VWAP & 20 EMA
+      # 2. Institutional validation: Price above VWAP & 20 EMA
       # 3. Active volume participation (RVOL >= 1.1x)
       if (
           0.3 <= change_pct <= 5.5
@@ -165,15 +200,13 @@ def fetch_institutional_alpha_picks():
             for o, c, v, va in zip(df["Open"], df["Close"], df["Volume"], v_avg)
         ]
 
-        # Zero-Error 2%–5% Risk-Reward Calculation
-        limit_buy = round(ltp * 0.994, 2)  # Precise pullback entry
-        stop_loss = round(
-            latest_vwap * 0.992, 2
-        )  # Technical stop below VWAP
-        target_1 = round(ltp * 1.025, 2)  # Target 1 (+2.5%)
-        target_2 = round(ltp * 1.048, 2)  # Target 2 (+4.8%)
+        # Precision Risk-Reward Calculation
+        limit_buy = round(ltp * 0.994, 2)
+        stop_loss = round(latest_vwap * 0.992, 2)
+        target_1 = round(ltp * 1.025, 2)
+        target_2 = round(ltp * 1.048, 2)
 
-        # Composite Alpha Score: Combining Momentum, RVOL, and Trend Quality
+        # Composite Alpha Score
         alpha_score = round(change_pct * rvol * (ltp / latest_vwap), 2)
 
         alpha_scored_stocks.append({
@@ -192,10 +225,11 @@ def fetch_institutional_alpha_picks():
     except Exception:
       continue
 
-  # Sort by highest institutional alpha score
   df_res = pd.DataFrame(alpha_scored_stocks)
   if not df_res.empty:
-    df_res = df_res.sort_values(by="Alpha_Score", ascending=False)
+    df_res = df_res.sort_values(by="Alpha_Score", ascending=False).reset_index(
+        drop=True
+    )
   return df_res
 
 
@@ -221,163 +255,4 @@ def render_institutional_chart(symbol, df, v_col, entry, sl, t1, t2):
           increasing_line_color="#00E676",
           decreasing_line_color="#FF5252",
       ),
-      row=1,
-      col=1,
-  )
-  fig.add_trace(
-      go.Scatter(
-          x=df["Axis_Str"],
-          y=df["VWAP"],
-          mode="lines",
-          name="VWAP",
-          line=dict(color="#FFD700", width=1.5),
-      ),
-      row=1,
-      col=1,
-  )
-  fig.add_trace(
-      go.Scatter(
-          x=df["Axis_Str"],
-          y=df["EMA20"],
-          mode="lines",
-          name="20 EMA",
-          line=dict(color="#29B6F6", width=1.2),
-      ),
-      row=1,
-      col=1,
-  )
-  fig.add_trace(
-      go.Bar(
-          x=df["Axis_Str"],
-          y=df["Volume"],
-          name="Volume",
-          marker_color=v_col,
-      ),
-      row=2,
-      col=1,
-  )
-
-  # Execution Level Overlays
-  fig.add_hline(
-      y=entry,
-      line_color="#FFD700",
-      line_width=1.6,
-      annotation_text=f"🟡 BUY: ₹{entry:,.2f}",
-      annotation_position="bottom left",
-      row=1,
-      col=1,
-  )
-  fig.add_hline(
-      y=sl,
-      line_color="#FF5252",
-      line_width=1.6,
-      annotation_text=f"🛑 SL: ₹{sl:,.2f}",
-      annotation_position="bottom right",
-      row=1,
-      col=1,
-  )
-  fig.add_hline(
-      y=t1,
-      line_dash="dash",
-      line_color="#29B6F6",
-      line_width=1.4,
-      annotation_text=f"🎯 T1 (+2.5%): ₹{t1:,.2f}",
-      annotation_position="top left",
-      row=1,
-      col=1,
-  )
-  fig.add_hline(
-      y=t2,
-      line_dash="dash",
-      line_color="#00E676",
-      line_width=1.4,
-      annotation_text=f"🚀 T2 (+4.8%): ₹{t2:,.2f}",
-      annotation_position="top right",
-      row=1,
-      col=1,
-  )
-
-  fig.update_layout(
-      title=f"📊 {symbol} (15m) | Institutional Alpha Execution Blueprint",
-      template="plotly_dark",
-      height=520,
-      dragmode="pan",
-      hovermode="x unified",
-      showlegend=False,
-      margin=dict(l=10, r=65, t=40, b=30),
-      yaxis=dict(side="right", title="Price (₹)", showgrid=True),
-      yaxis2=dict(side="right", title="Volume", showgrid=False),
-      xaxis=dict(type="category", rangeslider_visible=False),
-      xaxis2=dict(
-          type="category", rangeslider_visible=False, tickmode="auto", nticks=12
-      ),
-  )
-  return fig
-
-
-# ---------------------------------------------------------
-# 4. MAIN EXECUTION RENDER BLOCK
-# ---------------------------------------------------------
-with st.spinner(
-    "🔍 Scanning entire Indian market for high-alpha institutional setups..."
-):
-  df_alpha = fetch_institutional_alpha_picks()
-
-if df_alpha is None or df_alpha.empty:
-  st.warning(
-      "⚠️ No stocks currently match strict institutional alpha criteria. Click"
-      " 'Force Refresh Alpha Scan' above."
-  )
-else:
-  st.subheader("🔥 Top 2 Verified Institutional Alpha Picks (2%–5% Target)")
-
-  # Render Top 2 Highest Conviction Picks Automatically
-  for idx, row in df_alpha.head(2).iterrows():
-    with st.container():
-      c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
-
-      with c1:
-        st.markdown(f"### **#{idx+1} {row['Symbol']}**")
-        st.metric(
-            label="Live LTP",
-            value=f"₹{row['LTP']}",
-            delta=(
-                f"+{row['Change']}% (Alpha Score: {row['Alpha_Score']} | RVOL:"
-                f" {row['RVOL']}x)"
-            ),
-        )
-
-      with c2:
-        st.markdown("**Precision Entry Levels**")
-        st.write(f"🔹 **Limit Buy:** ₹{row['Limit_Buy']}")
-        st.write(f"🛑 **Stop Loss:** ₹{row['Stop_Loss']}")
-
-      with c3:
-        st.markdown("**Profit Targets**")
-        st.write(f"🎯 **Target 1 (+2.5%):** ₹{row['Target_1']}")
-        st.write(f"🚀 **Target 2 (+4.8%):** ₹{row['Target_2']}")
-
-      with c4:
-        st.markdown("**Execution Status**")
-        st.success("✅ **INSTITUTIONAL GRADE — VERIFIED BUY**")
-        if st.button(f"📋 Copy Payload ({row['Symbol']})", key=f"alpha_{row['Symbol']}"):
-          st.toast(
-              f"Copied {row['Symbol']}! Limit: ₹{row['Limit_Buy']} | T1:"
-              f" ₹{row['Target_1']}"
-          )
-
-      with st.expander(
-          f"📈 Expand Chart & VWAP Structure for #{idx+1} {row['Symbol']}"
-      ):
-        fig = render_institutional_chart(
-            row["Symbol"],
-            row["DataFrame"],
-            row["Volume_Colors"],
-            row["Limit_Buy"],
-            row["Stop_Loss"],
-            row["Target_1"],
-            row["Target_2"],
-        )
-        st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
-
-    st.markdown("---")
+      row=1
