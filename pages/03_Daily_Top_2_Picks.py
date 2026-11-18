@@ -255,4 +255,168 @@ def render_institutional_chart(symbol, df, v_col, entry, sl, t1, t2):
           increasing_line_color="#00E676",
           decreasing_line_color="#FF5252",
       ),
-      row=1
+      row=1,
+      col=1,
+  )
+  fig.add_trace(
+      go.Scatter(
+          x=df["Axis_Str"],
+          y=df["VWAP"],
+          mode="lines",
+          name="VWAP",
+          line=dict(color="#FFD700", width=1.5),
+      ),
+      row=1,
+      col=1,
+  )
+  fig.add_trace(
+      go.Scatter(
+          x=df["Axis_Str"],
+          y=df["EMA20"],
+          mode="lines",
+          name="20 EMA",
+          line=dict(color="#29B6F6", width=1.2),
+      ),
+      row=1,
+      col=1,
+  )
+  fig.add_trace(
+      go.Bar(
+          x=df["Axis_Str"],
+          y=df["Volume"],
+          name="Volume",
+          marker_color=v_col,
+      ),
+      row=2,
+      col=1,
+  )
+
+  fig.add_hline(
+      y=entry,
+      line_color="#FFD700",
+      line_width=1.6,
+      annotation_text=f"🟡 BUY: ₹{entry:,.2f}",
+      annotation_position="bottom left",
+      row=1,
+      col=1,
+  )
+  fig.add_hline(
+      y=sl,
+      line_color="#FF5252",
+      line_width=1.6,
+      annotation_text=f"🛑 SL: ₹{sl:,.2f}",
+      annotation_position="bottom right",
+      row=1,
+      col=1,
+  )
+  fig.add_hline(
+      y=t1,
+      line_dash="dash",
+      line_color="#29B6F6",
+      line_width=1.4,
+      annotation_text=f"🎯 T1 (+2.5%): ₹{t1:,.2f}",
+      annotation_position="top left",
+      row=1,
+      col=1,
+  )
+  fig.add_hline(
+      y=t2,
+      line_dash="dash",
+      line_color="#00E676",
+      line_width=1.4,
+      annotation_text=f"🚀 T2 (+4.8%): ₹{t2:,.2f}",
+      annotation_position="top right",
+      row=1,
+      col=1,
+  )
+
+  fig.update_layout(
+      title=f"📊 {symbol} (15m) | Institutional Alpha Execution Blueprint",
+      template="plotly_dark",
+      height=520,
+      dragmode="pan",
+      hovermode="x unified",
+      showlegend=False,
+      margin=dict(l=10, r=65, t=40, b=30),
+      yaxis=dict(side="right", title="Price (₹)", showgrid=True),
+      yaxis2=dict(side="right", title="Volume", showgrid=False),
+      xaxis=dict(type="category", rangeslider_visible=False),
+      xaxis2=dict(
+          type="category", rangeslider_visible=False, tickmode="auto", nticks=12
+      ),
+  )
+  return fig
+
+
+# ---------------------------------------------------------
+# 4. MAIN EXECUTION RENDER BLOCK
+# ---------------------------------------------------------
+with st.spinner(
+    "🔍 Scanning market universe with Fundamental Anti-Trap Filters & Alpha"
+    " Momentum..."
+):
+  df_alpha = fetch_institutional_alpha_picks()
+
+if df_alpha is None or df_alpha.empty:
+  st.warning(
+      "⚠️ No stocks currently match strict fundamental quality & intraday alpha"
+      " criteria (Market may be rangebound/weak). Click 'Force Refresh Alpha"
+      " Scan' above."
+  )
+else:
+  st.subheader(
+      "🔥 Top 2 Verified Fundamental + Technical Institutional Picks (2%–5%"
+      " Target)"
+  )
+
+  for idx, row in df_alpha.head(2).iterrows():
+    with st.container():
+      c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
+
+      with c1:
+        st.markdown(f"### **#{idx+1} {row['Symbol']}**")
+        st.metric(
+            label="Live LTP",
+            value=f"₹{row['LTP']}",
+            delta=(
+                f"+{row['Change']}% (Alpha Score: {row['Alpha_Score']} | RVOL:"
+                f" {row['RVOL']}x)"
+            ),
+        )
+
+      with c2:
+        st.markdown("**Precision Entry Levels**")
+        st.write(f"🔹 **Limit Buy:** ₹{row['Limit_Buy']}")
+        st.write(f"🛑 **Stop Loss:** ₹{row['Stop_Loss']}")
+
+      with c3:
+        st.markdown("**Profit Targets**")
+        st.write(f"🎯 **Target 1 (+2.5%):** ₹{row['Target_1']}")
+        st.write(f"🚀 **Target 2 (+4.8%):** ₹{row['Target_2']}")
+
+      with c4:
+        st.markdown("**Execution Status**")
+        st.success(
+            "✅ **FUNDAMENTAL & TECHNICAL — VERIFIED NON-TRAP BUY**"
+        )
+        if st.button(f"📋 Copy Payload ({row['Symbol']})", key=f"alpha_{row['Symbol']}"):
+          st.toast(
+              f"Copied {row['Symbol']}! Limit: ₹{row['Limit_Buy']} | T1:"
+              f" ₹{row['Target_1']}"
+          )
+
+      with st.expander(
+          f"📈 Expand Chart & VWAP Structure for #{idx+1} {row['Symbol']}"
+      ):
+        fig = render_institutional_chart(
+            row["Symbol"],
+            row["DataFrame"],
+            row["Volume_Colors"],
+            row["Limit_Buy"],
+            row["Stop_Loss"],
+            row["Target_1"],
+            row["Target_2"],
+        )
+        st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
+
+    st.markdown("---")
