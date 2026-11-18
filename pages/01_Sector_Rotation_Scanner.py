@@ -9,125 +9,209 @@ st.set_page_config(
     page_title="Institutional Sector Rotation & Macro Pulse", layout="wide"
 )
 
-st.title("🗺️ Sector Heatmap & Breadth Analysis (Over 31+ Sectors)")
+st.title("🗺️ Sector Heatmap & Breadth Analysis (Interactive Drill-Down)")
 
 if st.button("🔄 Refresh Live Data", type="primary"):
   st.cache_data.clear()
   st.rerun()
 
-# Core Sectoral Indices Mapping
-SECTOR_TICKERS = {
-    "NIFTY BANK": "^NSEBANK",
-    "NIFTY IT": "^CNXIT",
-    "NIFTY PHARMA": "^CNXPHARMA",
-    "NIFTY AUTO": "^CNXAUTO",
-    "NIFTY FMCG": "^CNXFMCG",
-    "NIFTY METAL": "^CNXMETAL",
-    "NIFTY REALTY": "^CNXREALTY",
-    "NIFTY ENERGY": "^CNXENERGY",
-    "NIFTY PSU BANK": "^CNXPSUBANK",
-    "NIFTY INFRA": "^CNXINFRA",
-    "NIFTY MEDIA": "^CNXMEDIA",
-    "NIFTY FIN SERVICE": "NIFTY_FIN_SERVICE.NS",
+# Core Sectoral Indices + Top Constituent Stocks for Drill-Down & Real Volume
+SECTOR_CONSTITUENTS = {
+    "NIFTY PSU BANK": {
+        "index": "^CNXPSUBANK",
+        "stocks": ["SBIN.NS", "BANKBARODA.NS", "PNB.NS", "CANBK.NS", "UNIONBANK.NS", "INDIANB.NS"],
+    },
+    "NIFTY BANK": {
+        "index": "^NSEBANK",
+        "stocks": ["HDFCBANK.NS", "ICICIBANK.NS", "AXISBANK.NS", "KOTAKBANK.NS", "INDUSINDBK.NS", "AUBANK.NS"],
+    },
+    "NIFTY IT": {
+        "index": "^CNXIT",
+        "stocks": ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "TECHM.NS", "MPHASIS.NS"],
+    },
+    "NIFTY PHARMA": {
+        "index": "^CNXPHARMA",
+        "stocks": ["SUNPHARMA.NS", "CIPLA.NS", "DRREDDY.NS", "DIVISLAB.NS", "LUPIN.NS", "AUROPHARMA.NS"],
+    },
+    "NIFTY AUTO": {
+        "index": "^CNXAUTO",
+        "stocks": ["M&M.NS", "MARUTI.NS", "TATAMOTORS.NS", "BAJAJ-AUTO.NS", "EICHERMOT.NS", "TVSMOTOR.NS"],
+    },
+    "NIFTY FMCG": {
+        "index": "^CNXFMCG",
+        "stocks": ["ITC.NS", "HINDUNILVR.NS", "NESTLEIND.NS", "BRITANNIA.NS", "TATACONSUM.NS", "VBL.NS"],
+    },
+    "NIFTY METAL": {
+        "index": "^CNXMETAL",
+        "stocks": ["TATASTEEL.NS", "HINDALCO.NS", "JSWSTEEL.NS", "VEDL.NS", "NMDC.NS", "NATIONALUM.NS"],
+    },
+    "NIFTY ENERGY": {
+        "index": "^CNXENERGY",
+        "stocks": ["RELIANCE.NS", "NTPC.NS", "POWERGRID.NS", "ONGC.NS", "COALINDIA.NS", "TATAPOWER.NS"],
+    },
+    "NIFTY REALTY": {
+        "index": "^CNXREALTY",
+        "stocks": ["DLF.NS", "MACROTECH.NS", "GODREJPROP.NS", "OBEROIRLTY.NS", "PRESTIGE.NS", "PHOENIXLTD.NS"],
+    },
+    "NIFTY INFRA": {
+        "index": "^CNXINFRA",
+        "stocks": ["LT.NS", "BHARTIARTL.NS", "ADANIPORTS.NS", "ULTRACEMCO.NS", "GRASIM.NS", "SIEMENS.NS"],
+    },
+    "NIFTY FIN SERVICE": {
+        "index": "NIFTY_FIN_SERVICE.NS",
+        "stocks": ["BAJFINANCE.NS", "BAJAJFINSV.NS", "JIOFIN.NS", "CHOLAFIN.NS", "SHRIRAMFIN.NS", "PFC.NS"],
+    },
 }
 
 
 @st.cache_data(ttl=300)
-def fetch_sector_predictive_scores():
-  # Fetch Benchmark Nifty 50
-  nifty_df = yf.Ticker("^NSEI").history(period="5d", interval="1d")
-  if nifty_df.empty or len(nifty_df) < 2:
-    return None, 0.0
+def fetch_drilldown_sector_data():
+  # Collect all tickers (Benchmark + Indices + Stocks) in one fast batch download
+  all_tickers = ["^NSEI"]
+  for info in SECTOR_CONSTITUENTS.values():
+    all_tickers.append(info["index"])
+    all_tickers.extend(info["stocks"])
+  all_tickers = list(set(all_tickers))
+
+  raw = yf.download(
+      all_tickers, period="5d", interval="1d", group_by="ticker", progress=False
+  )
+  if raw.empty or "^NSEI" not in raw:
+    return None, None, 0.0
+
+  nifty_df = raw["^NSEI"].dropna()
+  if len(nifty_df) < 2:
+    return None, None, 0.0
 
   nifty_chg = (
       (nifty_df["Close"].iloc[-1] - nifty_df["Close"].iloc[-2])
       / nifty_df["Close"].iloc[-2]
   ) * 100
 
-  records = []
-  for name, ticker in SECTOR_TICKERS.items():
-    try:
-      df = yf.Ticker(ticker).history(period="5d", interval="1d")
-      if df.empty or len(df) < 2:
-        continue
+  sector_records = []
+  stock_records = []
 
-      close_today = float(df["Close"].iloc[-1])
-      close_prev = float(df["Close"].iloc[-2])
-      high_today = float(df["High"].iloc[-1])
-      low_today = float(df["Low"].iloc[-1])
-      vol_today = float(df["Volume"].iloc[-1])
-      vol_avg = (
-          float(df["Volume"].iloc[:-1].mean())
-          if len(df) > 2
-          else vol_today
-      )
-
-      day_chg = ((close_today - close_prev) / close_prev) * 100
-
-      # 1. Relative Strength (RS) vs Nifty 50
-      rel_strength = day_chg - nifty_chg
-
-      # 2. Closing Range Position (0 to 100% — where did it close in today's candle?)
-      candle_range = high_today - low_today
-      close_pos = (
-          ((close_today - low_today) / candle_range) * 100
-          if candle_range > 0
-          else 50.0
-      )
-
-      # 3. Relative Volume Multiplier
-      rvol = round(vol_today / vol_avg, 2) if vol_avg > 0 else 1.0
-
-      # Institutional Overnight Carry-Forward Score (0 to 100)
-      # Weighs RS outperformance (45%), Strong High-Close (35%), and Volume Expansion (20%)
-      rs_score = np.clip((rel_strength + 2.0) * 15, 0, 45)
-      close_score = (close_pos / 100.0) * 35
-      vol_score = np.clip(rvol * 10, 0, 20)
-      total_score = round(rs_score + close_score + vol_score, 1)
-
-      # Signal Classification
-      if total_score >= 65 and rel_strength > 0:
-        signal = "🔥 TOP LONG CANDIDATE (Strong Carry-Forward)"
-      elif total_score >= 52 and rel_strength > 0:
-        signal = "🟢 ACCUMULATION WATCH (Outperforming Nifty)"
-      elif rel_strength < -1.0 and close_pos < 30:
-        signal = "🔴 DISTRIBUTION / SHORT BIAS"
-      else:
-        signal = "⚪ NEUTRAL / RANGEBOUND"
-
-      records.append({
-          "Sector": name,
-          "LTP": round(close_today, 2),
-          "Day Change %": round(day_chg, 2),
-          "RS vs Nifty %": round(rel_strength, 2),
-          "Close Strength %": round(close_pos, 1),
-          "RVOL": f"{rvol}x",
-          "Momentum Score": total_score,
-          "Tomorrow's Advance Setup": signal,
-      })
-    except Exception:
+  for sector_name, info in SECTOR_CONSTITUENTS.items():
+    idx_ticker = info["index"]
+    if idx_ticker not in raw:
       continue
 
-  df_res = pd.DataFrame(records)
-  if not df_res.empty:
-    df_res = df_res.sort_values(
-        by="Momentum Score", ascending=False
-    ).reset_index(drop=True)
-  return df_res, round(nifty_chg, 2)
+    df_idx = raw[idx_ticker].dropna()
+    if len(df_idx) < 2:
+      continue
+
+    close_today = float(df_idx["Close"].iloc[-1])
+    close_prev = float(df_idx["Close"].iloc[-2])
+    high_today = float(df_idx["High"].iloc[-1])
+    low_today = float(df_idx["Low"].iloc[-1])
+
+    day_chg = ((close_today - close_prev) / close_prev) * 100
+    rel_strength = day_chg - nifty_chg
+    candle_range = high_today - low_today
+    close_pos = (
+        ((close_today - low_today) / candle_range) * 100
+        if candle_range > 0
+        else 50.0
+    )
+
+    # Process underlying stocks for drill-down & aggregate real volume
+    sector_rvols = []
+    for sym in info["stocks"]:
+      if sym not in raw:
+        continue
+      df_s = raw[sym].dropna()
+      if len(df_s) < 2:
+        continue
+
+      s_close = float(df_s["Close"].iloc[-1])
+      s_prev = float(df_s["Close"].iloc[-2])
+      s_high = float(df_s["High"].iloc[-1])
+      s_low = float(df_s["Low"].iloc[-1])
+      s_vol = float(df_s["Volume"].iloc[-1])
+      s_vol_avg = (
+          float(df_s["Volume"].iloc[:-1].mean()) if len(df_s) > 2 else s_vol
+      )
+
+      s_chg = ((s_close - s_prev) / s_prev) * 100
+      s_rs = s_chg - nifty_chg
+      s_range = s_high - s_low
+      s_close_pos = (
+          ((s_close - s_low) / s_range) * 100 if s_range > 0 else 50.0
+      )
+      s_rvol = round(s_vol / s_vol_avg, 2) if s_vol_avg > 0 else 1.0
+      sector_rvols.append(s_rvol)
+
+      s_score = round(
+          np.clip((s_rs + 2.5) * 12, 0, 45)
+          + (s_close_pos / 100.0) * 35
+          + np.clip(s_rvol * 10, 0, 20),
+          1,
+      )
+
+      stock_records.append({
+          "Sector": sector_name,
+          "Stock": sym.replace(".NS", ""),
+          "LTP": round(s_close, 2),
+          "Day Change %": round(s_chg, 2),
+          "RS vs Nifty %": round(s_rs, 2),
+          "Close Strength %": round(s_close_pos, 1),
+          "RVOL": s_rvol,
+          "Stock Score": s_score,
+          "BoxSize": max(s_score, 15.0),
+      })
+
+    avg_sector_rvol = round(np.mean(sector_rvols), 2) if sector_rvols else 1.0
+
+    rs_score = np.clip((rel_strength + 2.0) * 15, 0, 45)
+    close_score = (close_pos / 100.0) * 35
+    vol_score = np.clip(avg_sector_rvol * 10, 0, 20)
+    total_score = round(rs_score + close_score + vol_score, 1)
+
+    if total_score >= 65 and rel_strength > 0:
+      signal = "🔥 TOP LONG CANDIDATE (Strong Carry-Forward)"
+    elif total_score >= 52 and rel_strength > 0:
+      signal = "🟢 ACCUMULATION WATCH (Outperforming Nifty)"
+    elif rel_strength < -1.0 and close_pos < 30:
+      signal = "🔴 DISTRIBUTION / SHORT BIAS"
+    else:
+      signal = "⚪ NEUTRAL / RANGEBOUND"
+
+    sector_records.append({
+        "Sector": sector_name,
+        "LTP": round(close_today, 2),
+        "Day Change %": round(day_chg, 2),
+        "RS vs Nifty %": round(rel_strength, 2),
+        "Close Strength %": round(close_pos, 1),
+        "RVOL": f"{avg_sector_rvol}x",
+        "Momentum Score": total_score,
+        "Tomorrow's Advance Setup": signal,
+    })
+
+  df_sec = (
+      pd.DataFrame(sector_records)
+      .sort_values(by="Momentum Score", ascending=False)
+      .reset_index(drop=True)
+  )
+  df_stk = (
+      pd.DataFrame(stock_records)
+      .sort_values(by="Stock Score", ascending=False)
+      .reset_index(drop=True)
+  )
+  return df_sec, df_stk, round(nifty_chg, 2)
 
 
-df_sectors, nifty_day_chg = fetch_sector_predictive_scores()
+df_sectors, df_stocks, nifty_day_chg = fetch_drilldown_sector_data()
 
 if df_sectors is not None and not df_sectors.empty:
   # ---------------------------------------------------------
-  # NEW SECTION: TOMORROW'S ADVANCE SECTOR RADAR
+  # 1. TOMORROW'S ADVANCE SECTOR RADAR
   # ---------------------------------------------------------
   st.markdown("---")
   st.subheader("🔮 Tomorrow's Advance Sector Radar (EOD Institutional Carry-Forward)")
   st.caption(
       f"Evaluates Relative Strength against Nifty 50 ({nifty_day_chg:+.2f}%),"
-      " final-hour closing range strength, and volume expansion to flag"
-      " sectors primed for tomorrow's opening drive."
+      " final-hour closing range strength, and constituent stock volume"
+      " expansion."
   )
 
   top_2 = df_sectors.head(2)
@@ -135,63 +219,103 @@ if df_sectors is not None and not df_sectors.empty:
 
   with col1:
     s1 = top_2.iloc[0]
+    top_s1_stocks = ", ".join(
+        df_stocks[df_stocks["Sector"] == s1["Sector"]].head(3)["Stock"].tolist()
+    )
     st.success(
         f"**#1 PRIME SECTOR FOR TOMORROW: {s1['Sector']}**\n\n"
         f"• **Score:** {s1['Momentum Score']}/100 | **RS vs Nifty:** {s1['RS vs Nifty %']:+.2f}%\n"
         f"• **Closing Strength:** Closed in top {100 - s1['Close Strength %']:.0f}% of daily range ({s1['RVOL']} Vol)\n"
-        f"• **Action:** Look for bullish continuation setups in top {s1['Sector']} leaders at 9:15 AM."
+        f"• **Top Leaders Inside:** **{top_s1_stocks}**"
     )
 
   if len(top_2) > 1:
     with col2:
       s2 = top_2.iloc[1]
+      top_s2_stocks = ", ".join(
+          df_stocks[df_stocks["Sector"] == s2["Sector"]].head(3)["Stock"].tolist()
+      )
       st.info(
           f"**#2 SECONDARY WATCH SECTOR: {s2['Sector']}**\n\n"
           f"• **Score:** {s2['Momentum Score']}/100 | **RS vs Nifty:** {s2['RS vs Nifty %']:+.2f}%\n"
           f"• **Closing Strength:** Closed at {s2['Close Strength %']:.0f}% of daily range ({s2['RVOL']} Vol)\n"
-          f"• **Action:** Track pre-open order flow for breakout confirmation above today's high."
+          f"• **Top Leaders Inside:** **{top_s2_stocks}**"
       )
 
   st.markdown("---")
 
   # ---------------------------------------------------------
-  # VISUAL SECTOR HEATMAP (TREEMAP)
+  # 2. INTERACTIVE DRILL-DOWN SECTOR -> STOCK HEATMAP
   # ---------------------------------------------------------
-  st.subheader("🗺️ Institutional Sector Heatmap")
-  df_sectors["AbsSize"] = df_sectors["Momentum Score"].clip(lower=20)
+  st.subheader("🗺️ Interactive Sector → Stock Drill-Down Heatmap")
+  st.caption("💡 Click any Sector box to zoom inside and inspect its constituent stocks. Click the top bar to zoom back out.")
+
   fig = px.treemap(
-      df_sectors,
-      path=["Sector"],
-      values="AbsSize",
+      df_stocks,
+      path=[px.Constant("ALL NSE SECTORS"), "Sector", "Stock"],
+      values="BoxSize",
       color="Day Change %",
-      color_continuous_scale=["#B71C1C", "#EF5350", "#ECEFF1", "#66BB6A", "#1B5E20"],
+      color_continuous_scale=["#B71C1C", "#EF5350", "#263238", "#66BB6A", "#1B5E20"],
       color_continuous_midpoint=0,
-      hover_data=["LTP", "RS vs Nifty %", "Close Strength %", "Momentum Score"],
+      hover_data=["LTP", "RS vs Nifty %", "Close Strength %", "RVOL", "Stock Score"],
   )
   fig.update_traces(
-      texttemplate="<b>%{label}</b><br>%{customdata[1]:+.2f}% RS",
-      textfont=dict(size=14),
+      texttemplate="<b>%{label}</b><br>%{color:+.2f}%",
+      textfont=dict(size=13),
+      maxdepth=2,
   )
-  fig.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10))
+  fig.update_layout(
+      template="plotly_dark",
+      height=540,
+      margin=dict(l=10, r=10, t=30, b=10),
+  )
   st.plotly_chart(fig, use_container_width=True)
 
+  st.markdown("---")
+
   # ---------------------------------------------------------
-  # FULL SECTOR SCORING & RANKING TABLE
+  # 3. INTERACTIVE SECTOR INSPECTOR & STOCK BREAKDOWN
   # ---------------------------------------------------------
-  st.subheader("📊 Sector Analysis and Scores Table (RS, Close Position & Momentum)")
+  st.subheader("🔍 Inspect Constituent Stocks Inside Any Sector")
+  selected_sector = st.selectbox(
+      "Choose a Sector to view all constituent stocks & tomorrow's breakout setups:",
+      df_sectors["Sector"].tolist(),
+      index=0,
+  )
+
+  sector_stocks_view = df_stocks[df_stocks["Sector"] == selected_sector].drop(
+      columns=["Sector", "BoxSize"]
+  )
+  st.dataframe(
+      sector_stocks_view,
+      use_container_width=True,
+      hide_index=True,
+      column_config={
+          "Stock Score": st.column_config.ProgressColumn(
+              "Stock Score", format="%.1f", min_value=0, max_value=100
+          ),
+          "Day Change %": st.column_config.NumberColumn(format="%+.2f%%"),
+          "RS vs Nifty %": st.column_config.NumberColumn(format="%+.2f%%"),
+          "Close Strength %": st.column_config.NumberColumn(format="%.1f%%"),
+          "RVOL": st.column_config.NumberColumn(format="%.2fx"),
+      },
+  )
+
+  st.markdown("---")
+
+  # ---------------------------------------------------------
+  # 4. FULL SECTOR SCORING & RANKING TABLE
+  # ---------------------------------------------------------
+  st.subheader("📊 Full Sector Ranking Table")
   st.dataframe(
       df_sectors,
       use_container_width=True,
       hide_index=True,
       column_config={
           "Momentum Score": st.column_config.ProgressColumn(
-              "Momentum Score",
-              help="Composite score based on Relative Strength, Closing Range & RVOL",
-              format="%.1f",
-              min_value=0,
-              max_value=100,
+              "Momentum Score", format="%.1f", min_value=0, max_value=100
           ),
-          "Day Change %": st.column_config.NumberColumn(format="%.2f%%"),
+          "Day Change %": st.column_config.NumberColumn(format="%+.2f%%"),
           "RS vs Nifty %": st.column_config.NumberColumn(format="%+.2f%%"),
           "Close Strength %": st.column_config.NumberColumn(format="%.1f%%"),
       },
