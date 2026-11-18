@@ -5,21 +5,6 @@ import streamlit as st
 import yfinance as yf
 
 st.set_page_config(page_title="Live Intraday Super-Signal Terminal", layout="wide")
-
-# --- CLEAN SIDEBAR NAVIGATION ---
-st.sidebar.markdown("### 🧭 Hedge Fund Navigation Workflow")
-st.sidebar.markdown(
-    "- 🗺️ **[Sector Rotation & Macro Pulse](Sector_Rotation_Scanner)**"
-)
-st.sidebar.markdown("- ⚡ **[Smart Money Flow Terminal](Smart_Money_Pulse)**")
-st.sidebar.markdown(
-    "- 🌙 **[Night-Before Prep & Coiling](Night_Before_Prep_Scanner)**"
-)
-st.sidebar.markdown(
-    "- 🎯 **[Live Super-Signal Triggers](Matched_Super_Signal_Page)**"
-)
-st.sidebar.markdown("---")
-
 st.title("🎯 Live Intraday Super-Signal & Night-Before Trigger Engine")
 st.markdown(
     "Cross-checks live NSE breakouts against your **Night Before Prep"
