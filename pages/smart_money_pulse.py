@@ -8,21 +8,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(page_title="Smart Money Pulse & Flow Terminal", layout="wide")
 
-# Custom Dark Theme Styling matching Tredye Pulse aesthetic
-st.markdown("""
-<style>
-    .metric-card {
-        background-color: #111827;
-        border: 1px solid #1f2937;
-        border-radius: 10px;
-        padding: 15px;
-        text-align: center;
-    }
-    .inflow-text { color: #10b981; font-weight: bold; font-size: 24px; }
-    .outflow-text { color: #ef4444; font-weight: bold; font-size: 24px; }
-</style>
-""", unsafe_allow_html=True)
-
 st.title("⚡ Smart Money Pulse & Institutional Flow Terminal")
 st.caption("Real-time Sector-to-Stock Capital Flow, Fastest Inflow/Outflow Bubbles & 10-15% Swing Breakout Screener")
 
@@ -48,7 +33,6 @@ def analyze_stock(symbol, sector):
 
         close = df['Close'].iloc[-1]
         prev_close = df['Close'].iloc[-2]
-        open_p = df['Open'].iloc[-1]
         high = df['High'].iloc[-1]
         low = df['Low'].iloc[-1]
         vol = df['Volume'].iloc[-1]
@@ -57,14 +41,11 @@ def analyze_stock(symbol, sector):
         pct_chg = ((close - prev_close) / prev_close) * 100
         vol_ratio = vol / avg_vol_20 if avg_vol_20 > 0 else 1.0
 
-        # Institutional Money Flow Proxy (in ₹ Crores)
-        # Uses Chaikin-style close location value * turnover to estimate net buying vs selling pressure
         hl_range = (high - low) if (high - low) > 0 else 0.01
-        clv = ((close - low) - (high - close)) / hl_range  # ranges from -1 to +1
-        turnover_cr = (close * vol) / 1e7  # Convert INR to Crores
+        clv = ((close - low) - (high - close)) / hl_range
+        turnover_cr = (close * vol) / 1e7
         net_flow_cr = round(turnover_cr * clv, 2)
 
-        # Swing Breakout Setup Check (Consolidation / Trendline Breakout + Smart Money Vol)
         high_20d = df['High'].iloc[-21:-1].max()
         low_20d = df['Low'].iloc[-21:-1].min()
         range_20d_pct = ((high_20d - low_20d) / low_20d) * 100
@@ -110,7 +91,6 @@ if df_flow.empty:
     st.error("Unable to fetch market data right now. Please try refreshing.")
     st.stop()
 
-# Split Inflows vs Outflows
 inflows_df = df_flow[df_flow["Net Flow (Cr)"] > 0].sort_values(by="Net Flow (Cr)", ascending=False)
 outflows_df = df_flow[df_flow["Net Flow (Cr)"] < 0].sort_values(by="Net Flow (Cr)", ascending=True)
 
@@ -118,7 +98,6 @@ total_inflow = inflows_df["Net Flow (Cr)"].sum()
 total_outflow = abs(outflows_df["Net Flow (Cr)"].sum())
 net_market_flow = total_inflow - total_outflow
 
-# Top Summary Metrics
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("🟢 Total Smart Inflow", f"₹{total_inflow:,.0f} Cr")
 c2.metric("🔴 Total Smart Outflow", f"₹{total_outflow:,.0f} Cr")
@@ -136,7 +115,6 @@ top_in = inflows_df.head(8)
 top_out = outflows_df.head(8).copy()
 top_out["Abs Flow"] = top_out["Net Flow (Cr)"].abs()
 
-# Build Sankey Nodes: Sectors -> [INFLOW HUB, OUTFLOW HUB] -> Top Stocks
 sectors = list(SECTOR_STOCKS.keys())
 in_stocks = [f"{r['Symbol']} (+₹{r['Net Flow (Cr)']:.0f}Cr)" for _, r in top_in.iterrows()]
 out_stocks = [f"{r['Symbol']} (-₹{r['Abs Flow']:.0f}Cr)" for _, r in top_out.iterrows()]
@@ -153,7 +131,6 @@ sources, targets, values, link_colors = [], [], [], []
 inflow_hub_idx = len(sectors)
 outflow_hub_idx = len(sectors) + 1
 
-# Link Sectors -> Hubs
 for i, sec in enumerate(sectors):
     sec_in = inflows_df[inflows_df["Sector"] == sec]["Net Flow (Cr)"].sum()
     sec_out = abs(outflows_df[outflows_df["Sector"] == sec]["Net Flow (Cr)"].sum())
@@ -168,7 +145,6 @@ for i, sec in enumerate(sectors):
         values.append(sec_out)
         link_colors.append("rgba(239, 68, 68, 0.35)")
 
-# Link Hubs -> Top Stocks
 for idx, (_, row) in enumerate(top_in.iterrows()):
     sources.append(inflow_hub_idx)
     targets.append(outflow_hub_idx + 1 + idx)
@@ -182,26 +158,10 @@ for idx, (_, row) in enumerate(top_out.iterrows()):
     link_colors.append("rgba(239, 68, 68, 0.55)")
 
 fig_sankey = go.Figure(data=[go.Sankey(
-    node=dict(
-        pad=18,
-        thickness=18,
-        line=dict(color="#111827", width=0.5),
-        label=labels,
-        color=node_colors
-    ),
-    link=dict(
-        source=sources,
-        target=targets,
-        value=values,
-        color=link_colors
-    )
+    node=dict(pad=18, thickness=18, line=dict(color="#111827", width=0.5), label=labels, color=node_colors),
+    link=dict(source=sources, target=targets, value=values, color=link_colors)
 )])
-fig_sankey.update_layout(
-    height=560,
-    margin=dict(l=10, r=10, t=20, b=20),
-    paper_bgcolor="#0e1117",
-    font=dict(color="white", size=12)
-)
+fig_sankey.update_layout(height=560, margin=dict(l=10, r=10, t=20, b=20), paper_bgcolor="#0e1117", font=dict(color="white", size=12))
 st.plotly_chart(fig_sankey, use_container_width=True)
 
 # ==========================================
@@ -212,15 +172,7 @@ col_left, col_right = st.columns(2)
 with col_left:
     st.subheader("🟢 Fastest Inflows (Volume + Price Expansion)")
     fast_in = inflows_df.sort_values(by="Vol Surge (x)", ascending=False).head(8)
-    fig_in = px.scatter(
-        fast_in,
-        x="Vol Surge (x)",
-        y="Change %",
-        size="Net Flow (Cr)",
-        text="Symbol",
-        color_discrete_sequence=["#10b981"],
-        size_max=55
-    )
+    fig_in = px.scatter(fast_in, x="Vol Surge (x)", y="Change %", size="Net Flow (Cr)", text="Symbol", color_discrete_sequence=["#10b981"], size_max=55)
     fig_in.update_traces(textposition="middle center", textfont=dict(color="white", size=11))
     fig_in.update_layout(height=360, paper_bgcolor="#0e1117", plot_bgcolor="#111827", showlegend=False)
     st.plotly_chart(fig_in, use_container_width=True)
@@ -230,15 +182,7 @@ with col_right:
     fast_out = outflows_df.copy()
     fast_out["Abs Flow"] = fast_out["Net Flow (Cr)"].abs()
     fast_out = fast_out.sort_values(by="Vol Surge (x)", ascending=False).head(8)
-    fig_out = px.scatter(
-        fast_out,
-        x="Vol Surge (x)",
-        y="Change %",
-        size="Abs Flow",
-        text="Symbol",
-        color_discrete_sequence=["#ef4444"],
-        size_max=55
-    )
+    fig_out = px.scatter(fast_out, x="Vol Surge (x)", y="Change %", size="Abs Flow", text="Symbol", color_discrete_sequence=["#ef4444"], size_max=55)
     fig_out.update_traces(textposition="middle center", textfont=dict(color="white", size=11))
     fig_out.update_layout(height=360, paper_bgcolor="#0e1117", plot_bgcolor="#111827", showlegend=False)
     st.plotly_chart(fig_out, use_container_width=True)
@@ -250,12 +194,7 @@ st.divider()
 st.subheader("🎯 Smart Money Swing Trade Screener (10–15% Rally Setups)")
 st.caption("Filters stocks with positive institutional inflow + tight base / 20-day range breakout + volume surge.")
 
-swing_df = df_flow[df_flow["Net Flow (Cr)"] > 0].sort_values(
-    by=["Swing Setup", "Vol Surge (x)"], ascending=[True, False]
-)
-st.dataframe(
-    swing_df.style.background_gradient(subset=["Net Flow (Cr)"], cmap="Greens")
-                  .background_gradient(subset=["Vol Surge (x)"], cmap="Blues"),
-    use_container_width=True,
-    hide_index=True
-)
+swing_df = df_flow[df_flow["Net Flow (Cr)"] > 0].sort_values(by=["Swing Setup", "Vol Surge (x)"], ascending=[True, False])
+
+# Replaced pandas style gradient with direct dataframe rendering to avoid matplotlib dependency error
+st.dataframe(swing_df, use_container_width=True, hide_index=True)
