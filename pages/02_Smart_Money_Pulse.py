@@ -8,32 +8,17 @@ import yfinance as yf
 
 st.set_page_config(page_title="Smart Money Pulse & Flow Terminal", layout="wide")
 
-# --- UNIFIED WORKFLOW SIDEBAR NAVIGATION ---
+# --- CLEAN SIDEBAR NAVIGATION (Fixed to prevent PageNotFound errors) ---
 st.sidebar.markdown("### 🧭 Hedge Fund Navigation Workflow")
-st.sidebar.page_link(
-    "pages/01_Sector_Rotation_Scanner.py",
-    label="1️⃣ Sector Rotation & Macro Pulse",
-    icon="🗺️",
+st.sidebar.markdown(
+    "- 🗺️ **[Sector Rotation & Macro Pulse](Sector_Rotation_Scanner)**"
 )
-st.sidebar.page_link(
-    "pages/02_Smart_Money_Pulse.py",
-    label="2️⃣ Smart Money Flow Terminal",
-    icon="⚡",
+st.sidebar.markdown("- ⚡ **[Smart Money Flow Terminal](Smart_Money_Pulse)**")
+st.sidebar.markdown(
+    "- 🌙 **[Night-Before Prep & Coiling](Night_Before_Prep_Scanner)**"
 )
-st.sidebar.page_link(
-    "pages/02_Night_Before_Prep_Scanner.py",
-    label="3️⃣ Night-Before Prep & Coiling",
-    icon="🌙",
-)
-st.sidebar.page_link(
-    "pages/02_Matched_Super_Signal_Page.py",
-    label="4️⃣ Live Super-Signal Triggers",
-    icon="🎯",
-)
-st.sidebar.page_link(
-    "pages/02_PRIME 2-5 INTRADAY SNIPER.py",
-    label="5️⃣ Intraday Sniper & Top Picks",
-    icon="📈",
+st.sidebar.markdown(
+    "- 📈 **[Intraday Sniper Terminal](PRIME_2-5_INTRADAY_SNIPER)**"
 )
 st.sidebar.markdown("---")
 
@@ -71,7 +56,9 @@ def analyze_stock(symbol, sector):
     pct_chg = ((close - prev) / prev) * 100
     turnover_cr = (close * vol) / 1e7
     net_flow_cr = round(
-        turnover_cr * (pct_chg / 100) * (vol / df["Volume"].rolling(10).mean().iloc[-1]),
+        turnover_cr
+        * (pct_chg / 100)
+        * (vol / df["Volume"].rolling(10).mean().iloc[-1]),
         2,
     )
 
@@ -121,6 +108,6 @@ if not df_flow.empty:
   )
 
   st.success(
-      "💡 **Next Workflow Step:** Proceed to **Night-Before Prep & Coiling** to"
-      " identify stocks forming multi-day accumulation coils."
+      "💡 **Next Workflow Step:** Proceed to the next step in the sidebar to"
+      " inspect accumulation coils."
   )
