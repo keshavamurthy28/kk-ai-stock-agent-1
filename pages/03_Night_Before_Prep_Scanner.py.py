@@ -9,14 +9,22 @@ st.set_page_config(
     page_title="Advance Night-Before Institutional Prep Scanner", layout="wide"
 )
 
+# --- CLEAN SIDEBAR NAVIGATION ---
+st.sidebar.markdown("### 🧭 Hedge Fund Navigation Workflow")
+st.sidebar.markdown("- 🗺️ **[Sector Rotation & Macro Pulse](Sector_Rotation_Scanner)**")
+st.sidebar.markdown("- ⚡ **[Smart Money Flow Terminal](Smart_Money_Pulse)**")
+st.sidebar.markdown("- 🌙 **[Night-Before Prep & Coiling](Night_Before_Prep_Scanner)**")
+st.sidebar.markdown("- 📈 **[Intraday Sniper Terminal](PRIME_2-5_INTRADAY_SNIPER)**")
+st.sidebar.markdown("---")
+
 st.title(
     "🌙 Advance Night-Before Institutional Prep & Smart Money Coiling Watchlist"
 )
 st.markdown(
     "**Expert Advance Engine:** Pre-scans the Indian equity market by"
     " connecting tight multi-day accumulation coils with **Smart Money"
-    " Institutional Flows** *before* the market opens, giving you high-conviction"
-    " entry blueprints for tomorrow's targets."
+    " Institutional Flows** and **Sector Classifications** *before* the market"
+    " opens."
 )
 
 # ---------------------------------------------------------
@@ -31,71 +39,72 @@ with col_c2:
     )
     st.rerun()
 
+# Sector Mapping Dictionary (Consistent with Smart Money Pulse)
+SECTOR_MAPPING = {
+    "Banking & Finance": [
+        "HDFCBANK.NS",
+        "ICICIBANK.NS",
+        "SBIN.NS",
+        "AXISBANK.NS",
+        "KOTAKBANK.NS",
+        "INDUSINDBK.NS",
+        "PNB.NS",
+        "CANBK.NS",
+        "MUTHOOTFIN.NS",
+    ],
+    "IT & Software": ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "TECHM.NS"],
+    "Automobiles": ["MARUTI.NS", "BAJAJFINSV.NS", "M&M.NS"],
+    "Energy & Oil": [
+        "RELIANCE.NS",
+        "ONGC.NS",
+        "NTPC.NS",
+        "POWERGRID.NS",
+        "COALINDIA.NS",
+        "ATGL.NS",
+    ],
+    "Metals & Mining": ["TATASTEEL.NS", "ADANIENT.NS"],
+    "Consumer & Retail": [
+        "ITC.NS",
+        "HINDUNILVR.NS",
+        "TITAN.NS",
+        "ASIANPAINT.NS",
+        "ZOMATO.NS",
+        "HONASA.NS",
+    ],
+    "Infrastructure & Industrials": [
+        "LT.NS",
+        "ADANIPORTS.NS",
+        "GRASIM.NS",
+        "SUPREMEIND.NS",
+    ],
+    "Healthcare & Pharma": ["SUNPHARMA.NS", "MAXHEALTH.NS", "DEEPAKFERT.NS"],
+    "Financial Services": ["BAJFINANCE.NS", "LICI.NS", "ANGELONE.NS"],
+}
+
 
 # ---------------------------------------------------------
-# 2. ADVANCED MARKET-WIDE PRE-BREAKOUT + SMART MONEY SCANNER
+# 2. ADVANCED MARKET-WIDE PRE-BREAKOUT + SECTOR SCANNER
 # ---------------------------------------------------------
-@st.cache_data(ttl=86400)  # Cache daily prep scan
+@st.cache_data(ttl=86400)
 def run_advance_night_prep():
-  # Broad liquid Indian institutional market universe
-  universe = [
-      "RELIANCE.NS",
-      "TCS.NS",
-      "HDFCBANK.NS",
-      "ICICIBANK.NS",
-      "INFY.NS",
-      "SBIN.NS",
-      "BHARTIARTL.NS",
-      "ITC.NS",
-      "LICI.NS",
-      "HINDUNILVR.NS",
-      "LT.NS",
-      "BAJFINANCE.NS",
-      "MARUTI.NS",
-      "SUNPHARMA.NS",
-      "AXISBANK.NS",
-      "TITAN.NS",
-      "ADANIENT.NS",
-      "ADANIPORTS.NS",
-      "TATASTEEL.NS",
-      "NTPC.NS",
-      "POWERGRID.NS",
-      "COALINDIA.NS",
-      "ONGC.NS",
-      "BAJAJFINSV.NS",
-      "WIPRO.NS",
-      "ASIANPAINT.NS",
-      "HCLTECH.NS",
-      "GRASIM.NS",
-      "TECHM.NS",
-      "INDUSINDBK.NS",
-      "DEEPAKFERT.NS",
-      "ANGELONE.NS",
-      "HONASA.NS",
-      "MAXHEALTH.NS",
-      "PNB.NS",
-      "CANBK.NS",
-      "MUTHOOTFIN.NS",
-      "SUPREMEIND.NS",
-      "ATGL.NS",
-      "ZOMATO.NS",
-  ]
-
   watchlist_rows = []
 
-  for symbol in universe:
+  # Flatten universe with associated sector names
+  universe_map = {
+      sym: sector for sector, symbols in SECTOR_MAPPING.items() for sym in symbols
+  }
+
+  for symbol, sector in universe_map.items():
     try:
       ticker = yf.Ticker(symbol)
       df = ticker.history(period="30d", interval="1d", auto_adjust=True)
       if df is None or df.empty or len(df) < 20:
         continue
 
-      # Calculate multi-day coiling and range contraction
       df["Range"] = df["High"] - df["Low"]
       avg_range = df["Range"].rolling(10).mean().iloc[-1]
       recent_range = df["Range"].iloc[-1]
 
-      # Volume accumulation check & Smart Money Turnover proxy
       avg_vol = df["Volume"].rolling(15).mean().iloc[-1]
       recent_vol = df["Volume"].iloc[-1]
 
@@ -109,31 +118,29 @@ def run_advance_night_prep():
       prev_close = float(df["Close"].iloc[-2])
       change_pct = round(((close_price - prev_close) / prev_close) * 100, 2)
 
-      # Approximate institutional net flow based on volume surge and price direction
       turnover_cr = round((close_price * recent_vol) / 10000000, 2)
       net_flow_cr = round(
           turnover_cr * (change_pct / 100) * (recent_vol / avg_vol), 2
       )
 
-      # Tight Coil Criteria & Smart Money Accumulation Filter
-      is_tight_coil = recent_range <= (1.2 * avg_range)
-      is_volume_steady = recent_vol >= (0.7 * avg_vol)
+      is_tight_coil = recent_range <= (1.3 * avg_range)
+      is_volume_steady = recent_vol >= (0.6 * avg_vol)
 
       if is_tight_coil and is_volume_steady:
-        # Smart Money Signal Tagging
-        if net_flow_cr > 0:
-          smart_signal = "🟢 Smart Inflow (Accumulation)"
-        else:
-          smart_signal = "🟡 Coiling / Neutral"
+        smart_signal = (
+            "🟢 Smart Inflow (Accumulation)"
+            if net_flow_cr > 0
+            else "🟡 Coiling / Neutral"
+        )
 
-        # Advance Entry Blueprints for 2%–5% Capture
         advance_buy = round(close_price * 0.995, 2)
-        stop_loss = round(close_price * 0.978, 2)  # Strict 2.2% protection
-        target_1 = round(close_price * 1.025, 2)  # +2.5% Target
-        target_2 = round(close_price * 1.050, 2)  # +5.0% Target
+        stop_loss = round(close_price * 0.978, 2)
+        target_1 = round(close_price * 1.025, 2)
+        target_2 = round(close_price * 1.050, 2)
 
         watchlist_rows.append({
             "Symbol": symbol.replace(".NS", ""),
+            "Sector": sector,
             "LTP": round(ltp, 2),
             "Close": round(close_price, 2),
             "Change_%": change_pct,
@@ -154,6 +161,7 @@ def run_advance_night_prep():
     df_res = df_res[
         [
             "Symbol",
+            "Sector",
             "LTP",
             "Close",
             "Change_%",
@@ -170,7 +178,7 @@ def run_advance_night_prep():
 
 
 # ---------------------------------------------------------
-# 3. RENDER ADVANCE PREP TABLE
+# 3. RENDER ADVANCE PREP TABLE WITH SECTOR FILTER
 # ---------------------------------------------------------
 df_prep = run_advance_night_prep()
 
@@ -178,17 +186,22 @@ if df_prep is None or df_prep.empty:
   st.warning("⚠️ No tight accumulation coils detected. Run advance scan above.")
 else:
   st.subheader(
-      "🎯 Smart Money Pre-Market Setups Ready for Tomorrow's 2%–5% Capture"
-  )
-  st.markdown(
-      "*These stocks combine tight multi-day coiling with positive institutional"
-      " smart money flows. Set your advance limit orders on Zerodha Kite before"
-      " market open.*"
+      "🎯 Smart Money Pre-Market Setups Connected with Sector Flows"
   )
 
-  # Display as a clean, actionable dataframe table
+  # Sector Filter Widget
+  all_sectors = ["All Sectors"] + sorted(df_prep["Sector"].unique().tolist())
+  selected_sector = st.selectbox(
+      "🔍 Filter Watchlist by Sector Connection:", all_sectors
+  )
+
+  if selected_sector != "All Sectors":
+    df_filtered = df_prep[df_prep["Sector"] == selected_sector]
+  else:
+    df_filtered = df_prep
+
   st.dataframe(
-      df_prep.style.format({
+      df_filtered.style.format({
           "LTP": "₹{:,.2f}",
           "Close": "₹{:,.2f}",
           "Change_%": "{:+.2f}%",
@@ -202,14 +215,15 @@ else:
   )
 
   st.markdown("---")
-  st.subheader("📋 Detailed Smart Money Execution Blueprints")
+  st.subheader("📋 Detailed Sector-Connected Execution Blueprints")
 
-  for idx, row in df_prep.head(5).iterrows():
+  for idx, row in df_filtered.head(5).iterrows():
     with st.container():
       c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
 
       with c1:
         st.markdown(f"### **{row['Symbol']}**")
+        st.caption(f"📂 **Sector:** {row['Sector']}")
         st.metric(
             label="Live LTP / Flow",
             value=f"₹{row['LTP']}",
@@ -230,10 +244,10 @@ else:
         st.markdown("**Action Plan**")
         st.success(f"✅ **{row['Smart Signal']}**")
         if st.button(
-            f"📋 Copy Advance Payload ({row['Symbol']})", key=f"adv_{row['Symbol']}"
+            f"📋 Copy Payload ({row['Symbol']})", key=f"adv_{row['Symbol']}"
         ):
           st.toast(
-              f"Copied {row['Symbol']} smart money blueprint! Buy:"
+              f"Copied {row['Symbol']} ({row['Sector']}) blueprint! Buy:"
               f" ₹{row['Advance_Buy']} | T1: ₹{row['Target_1']}"
           )
 
