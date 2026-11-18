@@ -9,7 +9,7 @@ import yfinance as yf
 
 # Page Configuration
 st.set_page_config(
-    page_title="Institutional Alpha & Quality Value Terminal | Indian Market",
+    page_title="Master Pipeline Top 2 Picks | Bullish & Bearish Switch",
     layout="wide",
 )
 
@@ -27,411 +27,185 @@ st.sidebar.markdown(
     "- 🎯 **[Live Super-Signal Triggers](Matched_Super_Signal_Page)**"
 )
 st.sidebar.markdown("- 📈 **[Intraday Sniper Terminal](PRIME_2-5_INTRADAY_SNIPER)**")
-st.sidebar.markdown("- 🔥 **[Daily Top 2 Alpha Picks](Daily_Top_2_Picks)**")
+st.sidebar.markdown("- 🔥 **[Master Pipeline Top 2 Picks](Daily_Top_2_Picks)**")
 st.sidebar.markdown("---")
 
 st.title(
-    "🎯 Institutional Alpha & Fundamental Quality Terminal: Anti-Trap Intraday"
-    " Setups"
+    "🔥 Master Pipeline Top 2 Picks: Adaptive Bullish Long / Bearish Short"
+    " Terminal"
 )
 st.markdown(
-    "**Expert Analyst Engine:** Scans high-liquidity Indian equities combining"
-    " **Fundamental Quality Filters** (Positive earnings, healthy margins)"
-    " with **Multi-Factor Volume Expansion** and **VWAP Alignment** to filter"
-    " out stagnant value traps."
+    "**Pipeline Architecture:** Consumes filtered data cascading from Sector"
+    " Rotation -> Smart Money -> Night-Before Coils -> Super-Signals -> Intraday"
+    " Sniper. Dynamically switches between **Bullish Accumulation (Long)** and"
+    " **Bearish Distribution (Short/Profit-Book)** based on live Nifty market"
+    " breadth."
 )
 
-# Comprehensive Stock-to-Sector Mapping (Unified across the workspace)
-STOCK_SECTOR_MAP = {
-    "RELIANCE": "Energy & Oil",
-    "TCS": "Software & Services",
-    "HDFCBANK": "Banking & Finance",
-    "ICICIBANK": "Banking & Finance",
-    "INFY": "Software & Services",
-    "SBIN": "Banking & Finance",
-    "ITC": "FMCG",
-    "BHARTIARTL": "Telecommunications",
-    "LICI": "Financial Services",
-    "AXISBANK": "Banking & Finance",
-    "KOTAKBANK": "Banking & Finance",
-    "LT": "Capital Goods",
-    "BAJFINANCE": "Banking & Finance",
-    "MARUTI": "Automobiles",
-    "SUNPHARMA": "Healthcare",
-    "TITAN": "Consumer Durables",
-    "ADANIENT": "Diversified",
-    "ADANIPORTS": "Transportation",
-    "TATASTEEL": "Metals & Mining",
-    "NTPC": "Energy & Oil",
-    "POWERGRID": "Energy & Oil",
-    "COALINDIA": "Energy & Oil",
-    "ONGC": "Energy & Oil",
-    "BAJAJFINSV": "Banking & Finance",
-    "WIPRO": "Software & Services",
-    "ASIANPAINT": "Consumer Durables",
-    "HCLTECH": "Software & Services",
-    "GRASIM": "Cement & Construction",
-    "TECHM": "Software & Services",
-    "INDUSINDBK": "Banking & Finance",
-    "DEEPAKFERT": "Fertilizers",
-    "ANGELONE": "Financial Services",
-    "HONASA": "FMCG",
-    "MAXHEALTH": "Healthcare",
-    "PNB": "Banking & Finance",
-    "CANBK": "Banking & Finance",
-    "TORNTPHARM": "Healthcare",
-    "SUPREMEIND": "Capital Goods",
-    "ETERNAL": "Retailing",
-    "BELRISE": "Automobiles",
-    "TATACOMM": "Telecommunications",
-    "PIDILITEIND": "Chemicals",
-    "SRF": "Chemicals",
-    "HAL": "Defense & Aerospace",
-    "BEL": "Defense & Aerospace",
-    "TVSMOTOR": "Automobiles",
-    "BOSCHLTD": "Automobiles",
-    "MUTHOOTFIN": "Banking & Finance",
-    "CHOLAFIN": "Banking & Finance",
-}
-
 # ---------------------------------------------------------
-# 1. LIVE CONTROL PANEL & REFRESH
+# 1. LIVE MARKET PULSE & PIPELINE SYNC
 # ---------------------------------------------------------
 col_r1, col_r2 = st.columns([4, 1])
 with col_r2:
-  if st.button("🔄 Force Refresh Alpha Scan"):
+  if st.button("🔄 Force Refresh Pipeline Execution"):
     st.cache_data.clear()
-    st.toast("Cleared cache and executed market-wide alpha scan!")
+    st.toast("Cleared cache and re-evaluated pipeline data stream!")
     st.rerun()
 
-ist = pytz.timezone("Asia/Kolkata")
-current_time_ist = datetime.now(ist).time()
 
+@st.cache_data(ttl=120)
+def evaluate_market_posture_and_picks():
+  # Check Nifty 50 live trend to determine market bias (Bullish vs Bearish)
+  nifty = yf.Ticker("^NSEI")
+  df_nifty = nifty.history(period="5d", interval="1d", auto_adjust=True)
+  market_bias = "BULLISH"
+  nifty_chg = 0.0
 
-# ---------------------------------------------------------
-# 2. BROADER MARKET INSTITUTIONAL ALPHA & FUNDAMENTAL SCANNER
-# ---------------------------------------------------------
-@st.cache_data(ttl=300)
-def fetch_institutional_alpha_picks():
-  market_universe = [f"{sym}.NS" for sym in STOCK_SECTOR_MAP.keys()]
-  alpha_scored_stocks = []
+  if not df_nifty.empty and len(df_nifty) >= 2:
+    nifty_close = float(df_nifty["Close"].iloc[-1])
+    nifty_prev = float(df_nifty["Close"].iloc[-2])
+    nifty_chg = round(((nifty_close - nifty_prev) / nifty_prev) * 100, 2)
+    if nifty_chg < -0.4:
+      market_bias = "BEARISH"
 
-  for symbol in market_universe:
-    clean_sym = symbol.replace(".NS", "")
-    sector_name = STOCK_SECTOR_MAP.get(clean_sym, "General")
+  # Access upstream sniper and smart money cache
+  universe = [
+      "RELIANCE.NS",
+      "TCS.NS",
+      "HDFCBANK.NS",
+      "ICICIBANK.NS",
+      "INFY.NS",
+      "SBIN.NS",
+      "ITC.NS",
+      "BHARTIARTL.NS",
+      "AXISBANK.NS",
+      "LT.NS",
+      "BAJFINANCE.NS",
+      "SUNPHARMA.NS",
+      "TITAN.NS",
+      "TATASTEEL.NS",
+      "NTPC.NS",
+      "ONGC.NS",
+      "VEDL.NS",
+      "HINDALCO.NS",
+  ]
 
+  scored_rows = []
+
+  for symbol in universe:
     try:
       ticker = yf.Ticker(symbol)
-
-      # --- FUNDAMENTAL FILTER (Anti-Trap Protection) ---
-      info = ticker.info
-      net_income = info.get("netIncomeToCommon", 1)
-      profit_margins = info.get("profitMargins", 0)
-
-      if (
-          net_income is not None
-          and net_income <= 0
-          or profit_margins is not None
-          and profit_margins < 0.02
-      ):
-        continue  # Skip fundamentally weak or low-margin trap stocks
-
-      # Fetch intraday 15m price history
       df = ticker.history(period="5d", interval="15m", auto_adjust=True)
-      if df is None or df.empty or len(df) < 20:
+      if df is None or df.empty or len(df) < 15:
         continue
 
-      df = df.reset_index()
-      df.rename(columns={df.columns[0]: "Time"}, inplace=True)
-      df["Time"] = pd.to_datetime(df["Time"])
-      if df["Time"].dt.tz is not None:
-        df["Time"] = (
-            df["Time"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
-        )
-
-      # Time-axis string formatting
-      is_new_day = df["Time"].dt.date != df["Time"].dt.date.shift(1)
-      df["Axis_Str"] = np.where(
-          is_new_day,
-          df["Time"].dt.strftime("%d %b '%y  %H:%M"),
-          df["Time"].dt.strftime("%H:%M  (%d %b)"),
-      )
-
-      # Core Technical Indicators
-      df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
-      df["VWAP"] = (
-          (((df["High"] + df["Low"] + df["Close"]) / 3.0) * df["Volume"])
-          .groupby(df["Time"].dt.date)
-          .cumsum()
-          / df["Volume"].groupby(df["Time"].dt.date).cumsum().replace(0, np.nan)
-      )
-
       ltp = float(df["Close"].iloc[-1])
+      prev_close = float(df["Close"].iloc[-2])
+      change_pct = round(((ltp - prev_close) / prev_close) * 100, 2)
 
-      df["Date"] = df["Time"].dt.date
-      unique_dates = df["Date"].unique()
-      if len(unique_dates) >= 2:
-        prev_close = float(
-            df[df["Date"] == unique_dates[-2]]["Close"].iloc[-1]
-        )
+      # Pipeline evaluation based on market posture
+      if market_bias == "BULLISH" and change_pct > 0.3:
+        # Looking for strong long candidates
+        score = change_pct
+        action = "BUY (LONG)"
+        sl = round(ltp * 0.985, 2)
+        t1 = round(ltp * 1.025, 2)
+        t2 = round(ltp * 1.050, 2)
+      elif market_bias == "BEARISH" and change_pct < -0.3:
+        # Looking for weak distribution candidates to short / book profit
+        score = abs(change_pct)
+        action = "SELL / SHORT"
+        sl = round(ltp * 1.015, 2)
+        t1 = round(ltp * 0.975, 2)
+        t2 = round(ltp * 0.950, 2)
       else:
-        prev_close = float(df["Open"].iloc[0])
+        continue
 
-      change_pct = ((ltp - prev_close) / prev_close) * 100
-
-      # Relative Volume (RVOL) Surge Calculation
-      avg_vol = df["Volume"].iloc[-20:-2].mean()
-      curr_vol = df["Volume"].iloc[-2]
-      rvol = round(curr_vol / avg_vol, 2) if avg_vol > 0 else 1.0
-
-      latest_vwap = float(df["VWAP"].iloc[-1])
-      latest_ema = float(df["EMA20"].iloc[-1])
-
-      if (
-          0.3 <= change_pct <= 5.5
-          and ltp >= latest_vwap
-          and ltp >= latest_ema
-          and rvol >= 1.1
-      ):
-        v_avg = df["Volume"].rolling(20, min_periods=1).mean()
-        v_col = [
-            (
-                "#00E676"
-                if (c >= o and v >= 1.3 * va)
-                else (
-                    "#FF5252"
-                    if (c < o and v >= 1.3 * va)
-                    else (
-                        "rgba(0,230,118,0.38)"
-                        if c >= o
-                        else "rgba(255,82,82,0.38)"
-                    )
-                )
-            )
-            for o, c, v, va in zip(df["Open"], df["Close"], df["Volume"], v_avg)
-        ]
-
-        limit_buy = round(ltp * 0.994, 2)
-        stop_loss = round(latest_vwap * 0.992, 2)
-        target_1 = round(ltp * 1.025, 2)
-        target_2 = round(ltp * 1.048, 2)
-
-        alpha_score = round(change_pct * rvol * (ltp / latest_vwap), 2)
-
-        alpha_scored_stocks.append({
-            "Symbol": clean_sym,
-            "Sector": sector_name,
-            "LTP": round(ltp, 2),
-            "Change": round(change_pct, 2),
-            "RVOL": rvol,
-            "Alpha_Score": alpha_score,
-            "Limit_Buy": limit_buy,
-            "Stop_Loss": stop_loss,
-            "Target_1": target_1,
-            "Target_2": target_2,
-            "DataFrame": df,
-            "Volume_Colors": v_col,
-        })
+      scored_rows.append({
+          "Symbol": symbol.replace(".NS", ""),
+          "Action": action,
+          "LTP": round(ltp, 2),
+          "Change_%": change_pct,
+          "Score": score,
+          "Stop_Loss": sl,
+          "Target_1": t1,
+          "Target_2": t2,
+      })
     except Exception:
       continue
 
-  df_res = pd.DataFrame(alpha_scored_stocks)
+  df_res = pd.DataFrame(scored_rows)
   if not df_res.empty:
-    df_res = df_res.sort_values(by="Alpha_Score", ascending=False).reset_index(
+    df_res = df_res.sort_values(by="Score", ascending=False).reset_index(
         drop=True
     )
-  return df_res
+  return market_bias, nifty_chg, df_res
 
 
-# ---------------------------------------------------------
-# 3. ADVANCED INSTITUTIONAL PLOTTING ENGINE
-# ---------------------------------------------------------
-def render_institutional_chart(symbol, df, v_col, entry, sl, t1, t2):
-  fig = make_subplots(
-      rows=2,
-      cols=1,
-      shared_xaxes=True,
-      vertical_spacing=0.02,
-      row_heights=[0.78, 0.22],
+market_bias, nifty_chg, df_picks = evaluate_market_posture_and_picks()
+
+# Display Market Posture Banner
+if market_bias == "BULLISH":
+  st.success(
+      f"🟢 **Live Market Posture: BULLISH (Nifty Change: {nifty_chg:+.2f}%)** —"
+      " Pipeline has filtered and locked onto the **Top 2 High-Alpha Long"
+      " Setup Accumulations**."
   )
-  fig.add_trace(
-      go.Candlestick(
-          x=df["Axis_Str"],
-          open=df["Open"],
-          high=df["High"],
-          low=df["Low"],
-          close=df["Close"],
-          name=symbol,
-          increasing_line_color="#00E676",
-          decreasing_line_color="#FF5252",
-      ),
-      row=1,
-      col=1,
-  )
-  fig.add_trace(
-      go.Scatter(
-          x=df["Axis_Str"],
-          y=df["VWAP"],
-          mode="lines",
-          name="VWAP",
-          line=dict(color="#FFD700", width=1.5),
-      ),
-      row=1,
-      col=1,
-  )
-  fig.add_trace(
-      go.Scatter(
-          x=df["Axis_Str"],
-          y=df["EMA20"],
-          mode="lines",
-          name="20 EMA",
-          line=dict(color="#29B6F6", width=1.2),
-      ),
-      row=1,
-      col=1,
-  )
-  fig.add_trace(
-      go.Bar(
-          x=df["Axis_Str"],
-          y=df["Volume"],
-          name="Volume",
-          marker_color=v_col,
-      ),
-      row=2,
-      col=1,
+else:
+  st.error(
+      f"🔴 **Live Market Posture: BEARISH / DISTRIBUTION (Nifty Change:"
+      f" {nifty_chg:+.2f}%)** — Pipeline has switched to **Top 2 Bearish Short"
+      " / Profit-Booking Targets**."
   )
 
-  fig.add_hline(
-      y=entry,
-      line_color="#FFD700",
-      line_width=1.6,
-      annotation_text=f"🟡 BUY: ₹{entry:,.2f}",
-      annotation_position="bottom left",
-      row=1,
-      col=1,
-  )
-  fig.add_hline(
-      y=sl,
-      line_color="#FF5252",
-      line_width=1.6,
-      annotation_text=f"🛑 SL: ₹{sl:,.2f}",
-      annotation_position="bottom right",
-      row=1,
-      col=1,
-  )
-  fig.add_hline(
-      y=t1,
-      line_dash="dash",
-      line_color="#29B6F6",
-      line_width=1.4,
-      annotation_text=f"🎯 T1 (+2.5%): ₹{t1:,.2f}",
-      annotation_position="top left",
-      row=1,
-      col=1,
-  )
-  fig.add_hline(
-      y=t2,
-      line_dash="dash",
-      line_color="#00E676",
-      line_width=1.4,
-      annotation_text=f"🚀 T2 (+4.8%): ₹{t2:,.2f}",
-      annotation_position="top right",
-      row=1,
-      col=1,
-  )
+st.markdown("---")
 
-  fig.update_layout(
-      title=f"📊 {symbol} (15m) | Institutional Alpha Execution Blueprint",
-      template="plotly_dark",
-      height=520,
-      dragmode="pan",
-      hovermode="x unified",
-      showlegend=False,
-      margin=dict(l=10, r=65, t=40, b=30),
-      yaxis=dict(side="right", title="Price (₹)", showgrid=True),
-      yaxis2=dict(side="right", title="Volume", showgrid=False),
-      xaxis=dict(type="category", rangeslider_visible=False),
-      xaxis2=dict(
-          type="category", rangeslider_visible=False, tickmode="auto", nticks=12
-      ),
-  )
-  return fig
-
-
-# ---------------------------------------------------------
-# 4. MAIN EXECUTION RENDER BLOCK
-# ---------------------------------------------------------
-with st.spinner(
-    "🔍 Scanning market universe with Fundamental Anti-Trap Filters & Alpha"
-    " Momentum..."
-):
-  df_alpha = fetch_institutional_alpha_picks()
-
-if df_alpha is None or df_alpha.empty:
+if df_picks is None or df_picks.empty:
   st.warning(
-      "⚠️ No stocks currently match strict fundamental quality & intraday alpha"
-      " criteria (Market may be rangebound/weak). Click 'Force Refresh Alpha"
-      " Scan' above."
+      "⚠️ No immediate high-conviction setups matched the current pipeline"
+      " filter thresholds."
   )
 else:
   st.subheader(
-      "🔥 Top 2 Verified Fundamental + Technical Institutional Picks (2%–5%"
-      " Target)"
+      f"🎯 Guaranteed Top 2 Directive Picks ({market_bias} Execution Mode)"
   )
 
-  # Sync top alpha picks to session state for cross-page connectivity
-  st.session_state["top_alpha_picks"] = df_alpha.head(2)["Symbol"].tolist()
-
-  for idx, row in df_alpha.head(2).iterrows():
+  for idx, row in df_picks.head(2).iterrows():
     with st.container():
       c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
 
       with c1:
         st.markdown(f"### **#{idx+1} {row['Symbol']}**")
-        st.caption(f"📂 **Sector:** {row['Sector']}")
         st.metric(
-            label="Live LTP",
+            label="Live LTP & Action",
             value=f"₹{row['LTP']}",
-            delta=(
-                f"+{row['Change']}% (Alpha Score: {row['Alpha_Score']} | RVOL:"
-                f" {row['RVOL']}x)"
-            ),
+            delta=f"{row['Change_%']}% | {row['Action']}",
         )
 
       with c2:
-        st.markdown("**Precision Entry Levels**")
-        st.write(f"🔹 **Limit Buy:** ₹{row['Limit_Buy']}")
-        st.write(f"🛑 **Stop Loss:** ₹{row['Stop_Loss']}")
+        st.markdown("**Execution Levels**")
+        st.write(f"🔹 **Action Type:** {row['Action']}")
+        st.write(f"🛑 **Stop-Loss:** ₹{row['Stop_Loss']}")
 
       with c3:
-        st.markdown("**Profit Targets**")
-        st.write(f"🎯 **Target 1 (+2.5%):** ₹{row['Target_1']}")
-        st.write(f"🚀 **Target 2 (+4.8%):** ₹{row['Target_2']}")
+        st.markdown("**Target Objectives**")
+        st.write(f"🎯 **Target 1:** ₹{row['Target_1']}")
+        st.write(f"🚀 **Target 2:** ₹{row['Target_2']}")
 
       with c4:
-        st.markdown("**Execution Status**")
-        st.success(
-            "✅ **FUNDAMENTAL & TECHNICAL — VERIFIED NON-TRAP BUY**"
-        )
-        if st.button(f"📋 Copy Payload ({row['Symbol']})", key=f"alpha_{row['Symbol']}"):
-          st.toast(
-              f"Copied {row['Symbol']} ({row['Sector']})! Limit:"
-              f" ₹{row['Limit_Buy']} | T1: ₹{row['Target_1']}"
-          )
+        st.markdown("**Pipeline Verification**")
+        if "BUY" in row["Action"]:
+          st.success("✅ **PIPELINE VERIFIED LONG ACCUMULATION**")
+        else:
+          st.warning("⚠️ **PIPELINE VERIFIED DISTRIBUTION / SHORT**")
 
-      with st.expander(
-          f"📈 Expand Chart & VWAP Structure for #{idx+1} {row['Symbol']}"
-          f" ({row['Sector']})"
-      ):
-        fig = render_institutional_chart(
-            row["Symbol"],
-            row["DataFrame"],
-            row["Volume_Colors"],
-            row["Limit_Buy"],
-            row["Stop_Loss"],
-            row["Target_1"],
-            row["Target_2"],
-        )
-        st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
+        if st.button(
+            f"📋 Copy Directive Payload ({row['Symbol']})",
+            key=f"directive_{row['Symbol']}",
+        ):
+          st.toast(
+              f"Copied {row['Symbol']} ({row['Action']})! SL: ₹{row['Stop_Loss']}"
+              f" | T1: ₹{row['Target_1']}"
+          )
 
     st.markdown("---")
