@@ -1,3 +1,4 @@
+from datetime import datetime, time
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -5,20 +6,19 @@ from plotly.subplots import make_subplots
 import streamlit as st
 import yfinance as yf
 
+# Page Configuration
 st.set_page_config(page_title="MU$₹A Rendezvous Advance Callouts", layout="wide")
 
 st.header("⚙️ Terminal Control Center")
-  if st.button("🔄 Refresh Live Scans", type="primary", use_container_width=True):
-    st.cache_data.clear()
-    st.success("Cache cleared! Fetching fresh data...")
-    st.rerun()
+if st.button("🔄 Refresh Live Scans", type="primary", use_container_width=True):
+  st.cache_data.clear()
+  st.success("Cache cleared! Fetching fresh data...")
+  st.rerun()
 
-  st.markdown("---")
-  st.markdown("### 🤖 AI Agent Status")
-  st.info(
-      "Connected to GitHub: `keshavamurthy28/kk-ai-stock-agent-1`"
-  )
-  st.caption("Active Engine: Python yfinance + Plotly Multi-Timeframe Engine")
+st.markdown("---")
+st.markdown("### 🤖 AI Agent Status")
+st.info("Connected to GitHub: `keshavamurthy28/kk-ai-stock-agent-1`")
+st.caption("Active Engine: Python yfinance + Plotly Multi-Timeframe Engine")
 
 st.title("🎯 MU$₹A Rendezvous: Live Breakout & Advance Callout Terminal")
 st.markdown(
@@ -104,7 +104,6 @@ def scan_live_universe(symbols_dict):
       high_15d = float(df_s["High"].iloc[-16:-1].max())
       low_5d = float(df_s["Low"].iloc[-5:].min())
 
-      # Check if matched with Night Before Watchlist or meeting coil criteria
       is_night_matched = sym in session_nb
 
       if is_night_matched or (ltp >= high_15d * 0.995 and rvol >= 1.2):
@@ -206,7 +205,6 @@ else:
 
 st.markdown("---")
 
-# Controls for projected chart below
 c1, c2 = st.columns([1, 2])
 all_syms = list(UNIVERSE.keys())
 default_idx = (
@@ -313,7 +311,6 @@ else:
       f" **₹{suggested_entry:,.2f}** so the trade becomes 100% risk-free."
   )
 
-  # VWAP & EMA 20
   df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
   df["VWAP"] = (
       (((df["High"] + df["Low"] + df["Close"]) / 3.0) * df["Volume"])
@@ -423,7 +420,7 @@ else:
       line_width=1.4,
       annotation_text=f"🎯 T1: ₹{target_1:,.2f}",
       annotation_position="top left",
-      annotation_font_color="#29B6F6",
+      annotation_font_color="#FFD700",
       row=1,
       col=1,
   )
@@ -434,7 +431,7 @@ else:
       line_width=1.4,
       annotation_text=f"🚀 T2: ₹{target_2:,.2f}",
       annotation_position="top right",
-      annotation_font_color="#00E676",
+      annotation_font_color="#FFD700",
       row=1,
       col=1,
   )
