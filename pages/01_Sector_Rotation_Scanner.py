@@ -9,7 +9,7 @@ st.set_page_config(
     page_title="Institutional Sector Rotation & Macro Pulse", layout="wide"
 )
 
-st.title("🗺️ Sector Heatmap & Breadth Analysis (Interactive Color-Filter & Drill-Down)")
+st.title("🗺️ Sector Heatmap & Breadth Analysis (Interactive Drill-Down)")
 
 if st.button("🔄 Refresh Live Data", type="primary"):
   st.cache_data.clear()
@@ -243,81 +243,82 @@ if df_sectors is not None and not df_sectors.empty:
   st.markdown("---")
 
   # ---------------------------------------------------------
-  # 2. INTERACTIVE COLOR-BAND SLIDER & QUICK COLOR PICKER
+  # 2. HEATMAP WITH RIGHT-SIDE CLICKABLE DAY CHANGE % COLOR SCALE
   # ---------------------------------------------------------
-  st.subheader("🎨 Interactive Color-Band & Momentum Filter")
+  st.subheader("🗺️ Interactive Sector → Stock Drill-Down Heatmap")
   st.caption(
-      "Click a Color Zone button OR drag the scrollable Day Change % range"
-      " slider below to immediately isolate matching sectors & stocks:"
+      "Click any Sector box to zoom into its stocks, or click a Day Change %"
+      " level on the right color bar to filter."
   )
 
-  col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
-  if "chg_range" not in st.session_state:
-    st.session_state.chg_range = (-5.0, 5.0)
+  # Layout: Main Heatmap on Left (88%), Clickable Vertical Day Change % Scale on Right (12%)
+  map_col, scale_col = st.columns([0.88, 0.12])
 
-  with col_btn1:
-    if st.button("🟩 Dark Green (+1% to +5%)", use_container_width=True):
-      st.session_state.chg_range = (1.0, 5.0)
-  with col_btn2:
-    if st.button("🟢 Light Green (0% to +1%)", use_container_width=True):
-      st.session_state.chg_range = (0.0, 1.0)
-  with col_btn3:
-    if st.button("🟥 Deep Red (-5% to -1%)", use_container_width=True):
-      st.session_state.chg_range = (-5.0, -1.0)
-  with col_btn4:
-    if st.button("🔄 Show All Colors (-5% to +5%)", use_container_width=True):
-      st.session_state.chg_range = (-5.0, 5.0)
+  with scale_col:
+    st.markdown("**Day Change %**")
+    color_band = st.radio(
+        "Day Change %",
+        options=[
+            "All",
+            "🟩 +2% to +5%",
+            "🟢 +1% to +2%",
+            "🌿 0% to +1%",
+            "🔻 0% to -1%",
+            "🔴 -1% to -2%",
+            "🟥 -2% to -5%",
+        ],
+        index=0,
+        label_visibility="collapsed",
+    )
 
-  min_c, max_c = st.slider(
-      "🎚️ Scrollable Day Change % Color Spectrum (-5% Red ◀━━━ 0% ━━━▶ +5% Green):",
-      min_value=-5.0,
-      max_value=5.0,
-      value=st.session_state.chg_range,
-      step=0.25,
-      format="%+.2f%%",
-  )
+  band_limits = {
+      "All": (-10.0, 10.0),
+      "🟩 +2% to +5%": (2.0, 10.0),
+      "🟢 +1% to +2%": (1.0, 2.0),
+      "🌿 0% to +1%": (0.0, 1.0),
+      "🔻 0% to -1%": (-1.0, 0.0),
+      "🔴 -1% to -2%": (-2.0, -1.0),
+      "🟥 -2% to -5%": (-10.0, -2.0),
+  }
+  min_c, max_c = band_limits[color_band]
 
-  # Filter stocks matching the chosen color band
   filtered_stocks = df_stocks[
       (df_stocks["Day Change %"] >= min_c) & (df_stocks["Day Change %"] <= max_c)
   ].copy()
 
-  # ---------------------------------------------------------
-  # 3. INTERACTIVE DRILL-DOWN SECTOR -> STOCK HEATMAP
-  # ---------------------------------------------------------
-  st.subheader("🗺️ Interactive Sector → Stock Drill-Down Heatmap")
-  st.caption(
-      "💡 Shows nested stocks inside every sector. Click any Sector box to"
-      " zoom inside; click the top bar to zoom out."
-  )
+  with map_col:
+    if not filtered_stocks.empty:
+      fig = px.treemap(
+          filtered_stocks,
+          path=[px.Constant("ALL NSE SECTORS"), "Sector", "Stock"],
+          values="BoxSize",
+          color="Day Change %",
+          color_continuous_scale=["#B71C1C", "#EF5350", "#263238", "#66BB6A", "#1B5E20"],
+          color_continuous_midpoint=0,
+          range_color=[-3.0, 3.0],
+          hover_data=["LTP", "RS vs Nifty %", "Close Strength %", "RVOL", "Stock Score"],
+      )
+      # Fix +NaN% on parent nodes by using %{color:.2f}% only when defined or clean label+percent
+      fig.update_traces(
+          texttemplate="<b>%{label}</b><br>%{color:.2f}%",
+          textfont=dict(size=13),
+          maxdepth=3,
+      )
+      # Hide the redundant static Plotly colorbar since the clickable one sits right beside it
+      fig.update_coloraxes(showscale=False)
+      fig.update_layout(
+          template="plotly_dark",
+          height=560,
+          margin=dict(l=5, r=5, t=25, b=5),
+      )
+      st.plotly_chart(fig, use_container_width=True)
+    else:
+      st.info(f"No stocks currently in {color_band}. Click another level on the right bar.")
 
+  # Matching Stocks Table for the clicked Day Change % band
   if not filtered_stocks.empty:
-    fig = px.treemap(
-        filtered_stocks,
-        path=[px.Constant("ALL NSE SECTORS"), "Sector", "Stock"],
-        values="BoxSize",
-        color="Day Change %",
-        color_continuous_scale=["#B71C1C", "#EF5350", "#263238", "#66BB6A", "#1B5E20"],
-        color_continuous_midpoint=0,
-        range_color=[-3.0, 3.0],
-        hover_data=["LTP", "RS vs Nifty %", "Close Strength %", "RVOL", "Stock Score"],
-    )
-    fig.update_traces(
-        textinfo="label+value",
-        texttemplate="<b>%{label}</b><br>%{color:+.2f}%",
-        textfont=dict(size=13),
-        maxdepth=3,
-    )
-    fig.update_layout(
-        template="plotly_dark",
-        height=580,
-        margin=dict(l=10, r=10, t=30, b=10),
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Display instant matching stocks table for the selected color band
     st.subheader(
-        f"📋 Matching Sectors & Stocks in Selected Color Range ({min_c:+.2f}% to {max_c:+.2f}%) — {len(filtered_stocks)} Stocks"
+        f"📋 Stocks in Selected Band ({color_band}) — {len(filtered_stocks)} Stocks"
     )
     st.dataframe(
         filtered_stocks.drop(columns=["BoxSize"]),
@@ -333,16 +334,11 @@ if df_sectors is not None and not df_sectors.empty:
             "RVOL": st.column_config.NumberColumn(format="%.2fx"),
         },
     )
-  else:
-    st.info(
-        f"No stocks currently fall between {min_c:+.2f}% and {max_c:+.2f}%."
-        " Widen the slider or click 'Show All Colors'."
-    )
 
   st.markdown("---")
 
   # ---------------------------------------------------------
-  # 4. INTERACTIVE SECTOR INSPECTOR & FULL RANKING
+  # 3. INTERACTIVE SECTOR INSPECTOR & FULL RANKING
   # ---------------------------------------------------------
   st.subheader("🔍 Inspect Constituent Stocks Inside Any Sector")
   selected_sector = st.selectbox(
