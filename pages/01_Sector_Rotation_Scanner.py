@@ -13,15 +13,19 @@ st.set_page_config(
 
 # --- CLEAN SIDEBAR NAVIGATION ---
 st.sidebar.markdown("### 🧭 Hedge Fund Navigation Workflow")
-st.sidebar.markdown("- 🗺️ **[Sector Rotation & Macro Pulse](Sector_Rotation_Scanner)**")
+st.sidebar.markdown(
+    "- 🗺️ **[Sector Rotation & Macro Pulse](Sector_Rotation_Scanner)"
+    f"**[cite: 3]"
+)
 st.sidebar.markdown("- ⚡ **[Smart Money Flow Terminal](Smart_Money_Pulse)**")
-st.sidebar.markdown("- 🌙 **[Night-Before Prep & Coiling](Night_Before_Prep_Scanner)**")
-st.sidebar.markdown("- 📈 **[Intraday Sniper Terminal](PRIME_2-5_INTRADAY_SNIPER)**")
+st.sidebar.markdown(
+    "- 🌙 **[Night-Before Prep & Coiling](Night_Before_Prep_Scanner)**"
+)
+st.sidebar.markdown(
+    "- 🎯 **[Live Super-Signal Triggers](Matched_Super_Signal_Page)**"
+)
 st.sidebar.markdown("---")
 
-# ---------------------------------------------------------
-# NAVIGATION STATE (3-Level Router)
-# ---------------------------------------------------------
 if "nav_sector" not in st.session_state:
   st.session_state.nav_sector = None
 if "nav_stock" not in st.session_state:
@@ -44,7 +48,28 @@ MACRO_INDICES = {
     "NIFTY IT": "^CNXIT",
 }
 
-SECTOR_STOCKS = {
+# Expanded Institutional Sector Taxonomy (Matching Trendlyne granularity)
+EXTENDED_SECTOR_STOCKS = {
+    "Telecommunications": ["BHARTIARTL.NS", "IDEA.NS", "TATACOMM.NS"],
+    "Textiles & Apparel": ["PAGEIND.NS", "KPRMILL.NS", "Trident.NS"],
+    "Consumer Durables": ["TITAN.NS", "ASIANPAINT.NS", "DIXON.NS", "AMBER.NS"],
+    "Hotels Restaurants": ["INDHOTEL.NS", "CHALET.NS", "EIHOTEL.NS"],
+    "Commercial Services": ["CDSL.NS", "MCX.NS", "CAMS.NS"],
+    "Retailing": ["DMART.NS", "TRENT.NS", "V2RETAIL.NS"],
+    "Fertilizers": ["DEEPAKFERT.NS", "CHAMBLFERT.NS", "COROMANDEL.NS"],
+    "Software & Services": ["TCS.NS", "INFY.NS", "HCLTECH.NS", "TECHM.NS"],
+    "Metals & Mining": [
+        "TATASTEEL.NS",
+        "HINDALCO.NS",
+        "JSWSTEEL.NS",
+        "VEDL.NS",
+    ],
+    "Automobiles & Anc": [
+        "MARUTI.NS",
+        "TATAMOTORS.NS",
+        "M&M.NS",
+        "BAJAJ-AUTO.NS",
+    ],
     "Banking & Finance": [
         "HDFCBANK.NS",
         "ICICIBANK.NS",
@@ -52,31 +77,14 @@ SECTOR_STOCKS = {
         "AXISBANK.NS",
         "KOTAKBANK.NS",
     ],
-    "IT & Software": ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "TECHM.NS"],
-    "Automobiles": ["M&M.NS", "MARUTI.NS", "TATAMOTORS.NS", "BAJAJ-AUTO.NS"],
-    "Consumer Durables": [
-        "TITAN.NS",
-        "ASIANPAINT.NS",
-        "HINDUNILVR.NS",
-        "ITC.NS",
-    ],
-    "Metals & Mining": ["TATASTEEL.NS", "HINDALCO.NS", "JSWSTEEL.NS", "VEDL.NS"],
-    "Telecommunications": ["BHARTIARTL.NS", "IDEA.NS", "TATACOMM.NS"],
     "Energy & Oil": ["RELIANCE.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS"],
-    "Healthcare": [
-        "SUNPHARMA.NS",
-        "CIPLA.NS",
-        "DRREDDY.NS",
-        "DIVISLAB.NS",
-        "MAXHEALTH.NS",
-    ],
 }
 
 
 @st.cache_data(ttl=900)
-def fetch_comprehensive_market_data():
+def fetch_extended_market_data():
   all_syms = list(MACRO_INDICES.values()) + [
-      t for stocks in SECTOR_STOCKS.values() for t in stocks
+      t for stocks in EXTENDED_SECTOR_STOCKS.values() for t in stocks
   ]
   raw = yf.download(
       all_syms,
@@ -101,11 +109,11 @@ def fetch_comprehensive_market_data():
   records = []
   ohlcv_store = {}
 
-  for sector, tickers in SECTOR_STOCKS.items():
+  for sector, tickers in EXTENDED_SECTOR_STOCKS.items():
     for ticker in tickers:
       try:
         df = raw[ticker].dropna()
-        if len(df) < 20:
+        if len(df) < 15:
           continue
         sym = ticker.replace(".NS", "")
         ohlcv_store[sym] = df
@@ -139,12 +147,10 @@ def fetch_comprehensive_market_data():
   return index_metrics, pd.DataFrame(records), ohlcv_store
 
 
-with st.spinner("Fetching macro indices & building sector heatmaps..."):
-  index_metrics, df_stocks, ohlcv_store = fetch_comprehensive_market_data()
+with st.spinner("Loading granular institutional sector data..."):
+  index_metrics, df_stocks, ohlcv_store = fetch_extended_market_data()
 
-# ---------------------------------------------------------
-# TOP MACRO DASHBOARD BAR (Like Reference Image)
-# ---------------------------------------------------------
+# Render Top Macro Bar
 macro_cols = st.columns(len(MACRO_INDICES))
 for i, (name, _) in enumerate(MACRO_INDICES.items()):
   with macro_cols[i]:
@@ -157,7 +163,7 @@ for i, (name, _) in enumerate(MACRO_INDICES.items()):
 
 st.markdown("---")
 
-# Aggregate Sector Metrics for Heatmap Grid
+# Aggregate Sector Summary for Treemap Heatmap
 sector_summary = (
     df_stocks.groupby("Sector")
     .agg(
@@ -170,8 +176,8 @@ sector_summary = (
 )
 sector_summary["Day_Chg"] = sector_summary["Day_Chg"].round(2)
 
-# Navigation Breadcrumb Bar
-b1, b2 = st.columns([1.2, 4])
+# Navigation Breadcrumbs
+b1, _ = st.columns([1.2, 4])
 with b1:
   if st.button("🏠 All Sectors", use_container_width=True):
     reset_to_all()
@@ -180,7 +186,7 @@ with b1:
 st.divider()
 
 # =========================================================
-# LEVEL 3 VIEW: STOCK TECHNICAL CHART TERMINAL
+# LEVEL 3: STOCK CHART TERMINAL
 # =========================================================
 if st.session_state.nav_stock:
   sym = st.session_state.nav_stock
@@ -197,7 +203,6 @@ if st.session_state.nav_stock:
   m3.metric("Volume Surge (RVOL)", f"{row['RVOL (x)']}x")
   m4.metric("Sector", row["Sector"])
 
-  # Indicators
   hist["EMA20"] = hist["Close"].ewm(span=20).mean()
   hist["VWAP"] = (
       (((hist["High"] + hist["Low"] + hist["Close"]) / 3.0) * hist["Volume"])
@@ -270,7 +275,7 @@ if st.session_state.nav_stock:
   st.plotly_chart(fig, use_container_width=True)
 
 # =========================================================
-# LEVEL 2 VIEW: SECTOR CONSTITUENTS TABLE
+# LEVEL 2: SECTOR CONSTITUENTS TABLE
 # =========================================================
 elif st.session_state.nav_sector:
   sec = st.session_state.nav_sector
@@ -293,7 +298,7 @@ elif st.session_state.nav_sector:
     st.rerun()
 
 # =========================================================
-# LEVEL 1 VIEW: MASTER SECTOR HEATMAP BOXES
+# LEVEL 1: GRANULAR SECTOR HEATMAP BOXES
 # =========================================================
 else:
   st.subheader("🗺️ Sector Heatmap (Click Box to View Sector Stocks)")
@@ -318,13 +323,13 @@ else:
           " %{customdata[1]}<extra></extra>"
       ),
   )
-  fig_tree.update_layout(height=450, margin=dict(t=10, l=10, r=10, b=10))
+  fig_tree.update_layout(height=480, margin=dict(t=10, l=10, r=10, b=10))
 
   sector_event = st.plotly_chart(
       fig_tree, use_container_width=True, on_select="rerun", key="main_heatmap"
   )
   if sector_event and sector_event.selection and sector_event.selection.points:
     clicked_sec = sector_event.selection.points[0].get("label")
-    if clicked_sec in SECTOR_STOCKS:
+    if clicked_sec in EXTENDED_SECTOR_STOCKS:
       st.session_state.nav_sector = clicked_sec
       st.rerun()
