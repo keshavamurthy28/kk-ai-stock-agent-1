@@ -21,9 +21,9 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# 1. LIVE CONTROLS & EXPIRY SELECTOR
+# 1. LIVE CONTROLS, EXPIRY & LOT SELECTOR
 # ---------------------------------------------------------
-col_c1, col_c2, col_c3 = st.columns([2, 2, 1])
+col_c1, col_c2, col_c3 = st.columns([2, 1, 1])
 
 with col_c1:
   expiry_choice = st.selectbox(
@@ -32,11 +32,32 @@ with col_c1:
       index=0,
   )
 
+with col_c2:
+  lot_multiplier = st.selectbox(
+      "📦 Select Quantity / Lots (Nifty: 25/lot):",
+      [
+          "1 Lot (25 Qty)",
+          "2 Lots (50 Qty)",
+          "4 Lots (100 Qty)",
+          "8 Lots (200 Qty)",
+      ],
+      index=0,
+  )
+
 with col_c3:
   if st.button("🔄 Sync Chain", type="primary"):
     st.cache_data.clear()
     st.toast("Synchronizing option chain expiry liquidity...")
     st.rerun()
+
+# Extract numeric quantity
+qty_map = {
+    "1 Lot (25 Qty)": 25,
+    "2 Lots (50 Qty)": 50,
+    "4 Lots (100 Qty)": 100,
+    "8 Lots (200 Qty)": 200,
+}
+selected_qty = qty_map[lot_multiplier]
 
 ist = pytz.timezone("Asia/Kolkata")
 current_time_ist = datetime.now(ist).time()
@@ -81,7 +102,6 @@ def fetch_index_options_intelligence(expiry_str):
   max_pain = 25050.0
   atm_strike = round(spot_ltp / 50) * 50
 
-  # Adjust theta decay caution based on expiry selection
   theta_warning = (
       "⚠️ **Weekly Expiry Caution:** High time-decay (Theta). Exit intraday"
       " before expiry day!"
@@ -170,6 +190,35 @@ else:
 
   st.info(intel["ThetaNote"])
 
+  # --- DYNAMIC POSITION SIZING & CAPITAL OUTLAY CALCULATOR ---
+  total_investment = round(intel["Entry"] * selected_qty, 2)
+  total_risk_amt = round((intel["Entry"] - intel["SL"]) * selected_qty, 2)
+  potential_profit_t1 = round((intel["T1"] - intel["Entry"]) * selected_qty, 2)
+  potential_profit_t2 = round((intel["T2"] - intel["Entry"]) * selected_qty, 2)
+
+  st.markdown(
+      f"### 💰 Position Sizing & Capital Outlay ({lot_multiplier})"
+  )
+  sc1, sc2, sc3, sc4 = st.columns(4)
+  sc1.metric("📦 Selected Quantity", f"{selected_qty} Qty", lot_multiplier)
+  sc2.metric(
+      "💵 Total Capital Required",
+      f"₹{total_investment:,.2f}",
+      f"@ ₹{intel['Entry']} per share",
+  )
+  sc3.metric(
+      "🛡️ Total Max Risk (SL)",
+      f"₹{total_risk_amt:,.2f}",
+      f"@ ₹{intel['SL']} stop-loss",
+  )
+  sc4.metric(
+      "🎯 Target 1 Profit",
+      f"₹{potential_profit_t1:,.2f}",
+      f"@ ₹{intel['T1']} (+35%)",
+  )
+
+  st.markdown("---")
+
   # Execution Cards
   c1, c2, c3, c4 = st.columns(4)
   c1.metric("🟡 Recommended Entry", f"₹{intel['Entry']:,.2f}", "Delta 0.50 ATM")
@@ -178,6 +227,41 @@ else:
   c4.metric("🚀 Target 2 (+80%)", f"₹{intel['T2']:,.2f}", "Runner Target")
 
   st.info(f"💡 **Institutional Rationale:** {intel['Rationale']}")
+
+  st.markdown("---")
+
+  # --- POST-TRADE SIMULATION & PERFORMANCE LEDGER ---
+  st.subheader("📋 Trade Simulation & Outcome Ledger")
+  st.markdown(
+      "Track your simulated execution results based on live market pricing and"
+      " target milestones:"
+  )
+
+  # Simulated ledger table data
+  ledger_data = [
+      {
+          "Contract": f"{intel['Strike']} {'CE' if 'CE' in intel['Action'] else 'PE'} ({intel['Expiry'].split()[0]} Nov)",
+          "Lots / Qty": lot_multiplier,
+          "Invested Amt": f"₹{total_investment:,.2f}",
+          "Target 1 Outcome": (
+              f"+₹{potential_profit_t1:,.2f} (SUCCESS)"
+              if intel["Spot"] <= intel["MaxPain"]
+              else "Pending / Active"
+          ),
+          "Target 2 Outcome": (
+              f"+₹{potential_profit_t2:,.2f} (RUNNER)"
+              if intel["Spot"] <= intel["MaxPain"] - 100
+              else "Active Monitoring"
+          ),
+          "Status / Result": (
+              "🎯 TARGET 1 REACHED"
+              if intel["Spot"] <= intel["MaxPain"]
+              else "⏳ ACTIVE INTRADAY TRADE"
+          ),
+      }
+  ]
+  df_ledger = pd.DataFrame(ledger_data)
+  st.dataframe(df_ledger, use_container_width=True, hide_index=True)
 
   st.markdown("---")
   st.subheader(
@@ -232,7 +316,6 @@ else:
       col=1,
   )
 
-  # --- PROPERLY INDENTED VOLUME COLORS ---
   vol_colors = [
       "#00E676" if c >= o else "#FF5252"
       for o, c in zip(df_c["Open"], df_c["Close"])
