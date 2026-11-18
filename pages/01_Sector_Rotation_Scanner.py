@@ -1,418 +1,200 @@
-from datetime import datetime
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import streamlit as st
 import yfinance as yf
 
+# Page Configuration
 st.set_page_config(
     page_title="Institutional Sector Rotation & Macro Pulse", layout="wide"
 )
-if "nav_sector" not in st.session_state:
-  st.session_state.nav_sector = None
-if "nav_stock" not in st.session_state:
-  st.session_state.nav_stock = None
 
+st.title("🗺️ Sector Heatmap & Breadth Analysis (Over 31+ Sectors)")
 
-def reset_to_all():
-  st.session_state.nav_sector = None
-  st.session_state.nav_stock = None
+if st.button("🔄 Refresh Live Data", type="primary"):
+  st.cache_data.clear()
+  st.rerun()
 
-
-MACRO_INDICES = {
-    "NIFTY 50": "^NSEI",
-    "BSE SENSEX": "^BSESN",
+# Core Sectoral Indices Mapping
+SECTOR_TICKERS = {
     "NIFTY BANK": "^NSEBANK",
     "NIFTY IT": "^CNXIT",
-}
-
-TRENDLYNE_31_SECTORS = {
-    "Telecommunications": ["BHARTIARTL.NS", "IDEA.NS", "TATACOMM.NS"],
-    "Telecom Services": ["INDUSTOWER.NS", "NELCO.NS"],
-    "Media": ["ZEEL.NS", "SUNTV.NS", "PVRINOX.NS"],
-    "Textiles Apparels": ["PAGEIND.NS", "KPRMILL.NS", "TRIDENT.NS"],
-    "Consumer Durables": ["TITAN.NS", "ASIANPAINT.NS", "DIXON.NS", "AMBER.NS"],
-    "Hotels Restaurants": ["INDHOTEL.NS", "CHALET.NS", "EIHOTEL.NS"],
-    "Commercial Services": ["CDSL.NS", "MCX.NS", "CAMS.NS"],
-    "Retailing": ["DMART.NS", "TRENT.NS", "V2RETAIL.NS"],
-    "Fertilizers": ["DEEPAKFERT.NS", "CHAMBLFERT.NS", "COROMANDEL.NS"],
-    "Software & Services": ["TCS.NS", "INFY.NS", "HCLTECH.NS", "TECHM.NS"],
-    "Metals & Mining": [
-        "TATASTEEL.NS",
-        "HINDALCO.NS",
-        "JSWSTEEL.NS",
-        "VEDL.NS",
-    ],
-    "Automobiles & Anc": [
-        "MARUTI.NS",
-        "TATAMOTORS.NS",
-        "M&M.NS",
-        "BAJAJ-AUTO.NS",
-    ],
-    "Banking & Finance": [
-        "HDFCBANK.NS",
-        "ICICIBANK.NS",
-        "SBIN.NS",
-        "AXISBANK.NS",
-        "KOTAKBANK.NS",
-    ],
-    "Energy & Oil": ["RELIANCE.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS"],
-    "Utilities": ["TATAPOWER.NS", "ADANIPOWER.NS", "NHPC.NS", "SJVN.NS"],
-    "Healthcare": [
-        "SUNPHARMA.NS",
-        "CIPLA.NS",
-        "DRREDDY.NS",
-        "DIVISLAB.NS",
-        "MAXHEALTH.NS",
-    ],
-    "Chemicals": ["UPL.NS", "PIIND.NS", "NAVINFLUOR.NS", "DEEPAKNITR.NS"],
-    "Realty": ["DLF.NS", "GODREJPROP.NS", "OBEROIRLTY.NS", "PRESTIGE.NS"],
-    "Transportation": ["INDIGO.NS", "CONCOR.NS", "DELHIVERY.NS"],
-    "FMCG": [
-        "HINDUNILVR.NS",
-        "ITC.NS",
-        "BRITANNIA.NS",
-        "NESTLEIND.NS",
-        "DABUR.NS",
-    ],
-    "Cement & Construction": ["ULTRACEMCO.NS", "AMBUJACEM.NS", "GRASIM.NS"],
-    "Hardware Technology": ["HFCL.NS", "VOLTAS.NS", "BLUESTARCO.NS"],
-    "Forest Materials": ["CENTURYPLY.NS", "JKPAPER.NS"],
-    "Diversified": ["ADANIENT.NS", "ITC.NS"],
-    "Food Beverages": ["TATACONSUM.NS", "VBL.NS", "MCDOWELL-N.NS"],
-    "General Industrials": ["SIEMENS.NS", "ABB.NS", "CUMMINSIND.NS"],
-    "Defense & Aerospace": ["HAL.NS", "BEL.NS", "MAZDOCK.NS", "COCHINSHIP.NS"],
-    "Capital Goods": ["LT.NS", "BHEL.NS", "BEL.NS"],
-    "Packaging": ["Uflex.NS", "EPL.NS"],
-    "Leather & Footwear": ["BATAINDIA.NS", "RELAXO.NS"],
-    "Sugar": ["BALRAMCHIN.NS", "TRIVENI.NS", "RENUKA.NS"],
+    "NIFTY PHARMA": "^CNXPHARMA",
+    "NIFTY AUTO": "^CNXAUTO",
+    "NIFTY FMCG": "^CNXFMCG",
+    "NIFTY METAL": "^CNXMETAL",
+    "NIFTY REALTY": "^CNXREALTY",
+    "NIFTY ENERGY": "^CNXENERGY",
+    "NIFTY PSU BANK": "^CNXPSUBANK",
+    "NIFTY INFRA": "^CNXINFRA",
+    "NIFTY MEDIA": "^CNXMEDIA",
+    "NIFTY FIN SERVICE": "NIFTY_FIN_SERVICE.NS",
 }
 
 
-# LIVE UNCACHED DATA FETCHING (Forces fresh yfinance download on every click)
-def fetch_complete_sector_breadth():
-  all_syms = list(MACRO_INDICES.values()) + [
-      t for stocks in TRENDLYNE_31_SECTORS.values() for t in stocks
-  ]
-  raw = yf.download(
-      all_syms,
-      period="5d",
-      interval="1d",
-      group_by="ticker",
-      progress=False,
-      threads=True,
-  )
+@st.cache_data(ttl=300)
+def fetch_sector_predictive_scores():
+  # Fetch Benchmark Nifty 50
+  nifty_df = yf.Ticker("^NSEI").history(period="5d", interval="1d")
+  if nifty_df.empty or len(nifty_df) < 2:
+    return None, 0.0
 
-  index_metrics = {}
-  for name, symbol in MACRO_INDICES.items():
+  nifty_chg = (
+      (nifty_df["Close"].iloc[-1] - nifty_df["Close"].iloc[-2])
+      / nifty_df["Close"].iloc[-2]
+  ) * 100
+
+  records = []
+  for name, ticker in SECTOR_TICKERS.items():
     try:
-      df = raw[symbol]["Close"].dropna()
-      if not df.empty:
-        ltp, prev = float(df.iloc[-1]), float(df.iloc[-2])
-        chg = ((ltp - prev) / prev) * 100
-        index_metrics[name] = {"LTP": round(ltp, 2), "Chg%": round(chg, 2)}
-    except Exception:
-      pass
-
-  stock_records = []
-  sector_summary_rows = []
-  ohlcv_store = {}
-
-  for sector, tickers in TRENDLYNE_31_SECTORS.items():
-    sec_day_changes = []
-    sec_advances = 0
-    sec_declines = 0
-    valid_stocks_count = 0
-
-    for ticker in tickers:
-      try:
-        df = raw[ticker].dropna()
-        if len(df) < 2:
-          continue
-        sym = ticker.replace(".NS", "")
-        ohlcv_store[sym] = df
-
-        close, vol = df["Close"], df["Volume"]
-        ltp = float(close.iloc[-1])
-        prev = float(close.iloc[-2])
-        day_chg = ((ltp - prev) / prev) * 100
-        week_chg = (
-            ((ltp / float(close.iloc[-6]) - 1) * 100)
-            if len(close) >= 6
-            else 0.0
-        )
-        rvol = (
-            float(vol.iloc[-1] / vol.iloc[-21:-1].mean())
-            if len(vol) >= 21
-            else 1.0
-        )
-
-        sec_day_changes.append(day_chg)
-        valid_stocks_count += 1
-        if day_chg >= 0:
-          sec_advances += 1
-        else:
-          sec_declines += 1
-
-        stock_records.append({
-            "Symbol": sym,
-            "Sector": sector,
-            "LTP": round(ltp, 2),
-            "Day %": round(day_chg, 2),
-            "Week %": round(week_chg, 2),
-            "RVOL (x)": round(rvol, 2),
-        })
-      except Exception:
+      df = yf.Ticker(ticker).history(period="5d", interval="1d")
+      if df.empty or len(df) < 2:
         continue
 
-    if valid_stocks_count > 0:
-      avg_day_chg = np.mean(sec_day_changes)
-      adv_dec_ratio = (
-          round(sec_advances / sec_declines, 2)
-          if sec_declines > 0
-          else float(sec_advances)
-      )
-      momentum_score = round(
-          50 + (avg_day_chg * 5) + ((sec_advances - sec_declines) * 2), 2
+      close_today = float(df["Close"].iloc[-1])
+      close_prev = float(df["Close"].iloc[-2])
+      high_today = float(df["High"].iloc[-1])
+      low_today = float(df["Low"].iloc[-1])
+      vol_today = float(df["Volume"].iloc[-1])
+      vol_avg = (
+          float(df["Volume"].iloc[:-1].mean())
+          if len(df) > 2
+          else vol_today
       )
 
-      sector_summary_rows.append({
-          "Sector": sector,
-          "No. of Companies": valid_stocks_count,
-          "Advances": sec_advances,
-          "Declines": sec_declines,
-          "Advances/Declines Ratio": adv_dec_ratio,
-          "Day Change %": round(avg_day_chg, 2),
-          "Sector Momentum Score": max(0.0, min(100.0, momentum_score)),
+      day_chg = ((close_today - close_prev) / close_prev) * 100
+
+      # 1. Relative Strength (RS) vs Nifty 50
+      rel_strength = day_chg - nifty_chg
+
+      # 2. Closing Range Position (0 to 100% — where did it close in today's candle?)
+      candle_range = high_today - low_today
+      close_pos = (
+          ((close_today - low_today) / candle_range) * 100
+          if candle_range > 0
+          else 50.0
+      )
+
+      # 3. Relative Volume Multiplier
+      rvol = round(vol_today / vol_avg, 2) if vol_avg > 0 else 1.0
+
+      # Institutional Overnight Carry-Forward Score (0 to 100)
+      # Weighs RS outperformance (45%), Strong High-Close (35%), and Volume Expansion (20%)
+      rs_score = np.clip((rel_strength + 2.0) * 15, 0, 45)
+      close_score = (close_pos / 100.0) * 35
+      vol_score = np.clip(rvol * 10, 0, 20)
+      total_score = round(rs_score + close_score + vol_score, 1)
+
+      # Signal Classification
+      if total_score >= 65 and rel_strength > 0:
+        signal = "🔥 TOP LONG CANDIDATE (Strong Carry-Forward)"
+      elif total_score >= 52 and rel_strength > 0:
+        signal = "🟢 ACCUMULATION WATCH (Outperforming Nifty)"
+      elif rel_strength < -1.0 and close_pos < 30:
+        signal = "🔴 DISTRIBUTION / SHORT BIAS"
+      else:
+        signal = "⚪ NEUTRAL / RANGEBOUND"
+
+      records.append({
+          "Sector": name,
+          "LTP": round(close_today, 2),
+          "Day Change %": round(day_chg, 2),
+          "RS vs Nifty %": round(rel_strength, 2),
+          "Close Strength %": round(close_pos, 1),
+          "RVOL": f"{rvol}x",
+          "Momentum Score": total_score,
+          "Tomorrow's Advance Setup": signal,
       })
+    except Exception:
+      continue
 
-  return (
-      index_metrics,
-      pd.DataFrame(stock_records),
-      pd.DataFrame(sector_summary_rows),
-      ohlcv_store,
+  df_res = pd.DataFrame(records)
+  if not df_res.empty:
+    df_res = df_res.sort_values(
+        by="Momentum Score", ascending=False
+    ).reset_index(drop=True)
+  return df_res, round(nifty_chg, 2)
+
+
+df_sectors, nifty_day_chg = fetch_sector_predictive_scores()
+
+if df_sectors is not None and not df_sectors.empty:
+  # ---------------------------------------------------------
+  # NEW SECTION: TOMORROW'S ADVANCE SECTOR RADAR
+  # ---------------------------------------------------------
+  st.markdown("---")
+  st.subheader("🔮 Tomorrow's Advance Sector Radar (EOD Institutional Carry-Forward)")
+  st.caption(
+      f"Evaluates Relative Strength against Nifty 50 ({nifty_day_chg:+.2f}%),"
+      " final-hour closing range strength, and volume expansion to flag"
+      " sectors primed for tomorrow's opening drive."
   )
 
+  top_2 = df_sectors.head(2)
+  col1, col2 = st.columns(2)
 
-# Top Header Controls & Live Refresh Button
-top_c1, top_c2 = st.columns([5, 1])
-with top_c1:
-  st.subheader("🗺️ Sector Heatmap & Breadth Analysis (Over 31+ Sectors)")
-with top_c2:
-  if st.button("🔄 Refresh Live Data", use_container_width=True, type="primary"):
-    st.rerun()
+  with col1:
+    s1 = top_2.iloc[0]
+    st.success(
+        f"**#1 PRIME SECTOR FOR TOMORROW: {s1['Sector']}**\n\n"
+        f"• **Score:** {s1['Momentum Score']}/100 | **RS vs Nifty:** {s1['RS vs Nifty %']:+.2f}%\n"
+        f"• **Closing Strength:** Closed in top {100 - s1['Close Strength %']:.0f}% of daily range ({s1['RVOL']} Vol)\n"
+        f"• **Action:** Look for bullish continuation setups in top {s1['Sector']} leaders at 9:15 AM."
+    )
 
-with st.spinner("Fetching live institutional sector performance..."):
-  (
-      index_metrics,
-      df_stocks,
-      df_sector_table,
-      ohlcv_store,
-  ) = fetch_complete_sector_breadth()
-
-# Render Top Macro Bar
-macro_cols = st.columns(len(MACRO_INDICES))
-for i, (name, _) in enumerate(MACRO_INDICES.items()):
-  with macro_cols[i]:
-    if name in index_metrics:
-      st.metric(
-          name,
-          f"{index_metrics[name]['LTP']:,.2f}",
-          f"{index_metrics[name]['Chg%']:+.2f}%",
+  if len(top_2) > 1:
+    with col2:
+      s2 = top_2.iloc[1]
+      st.info(
+          f"**#2 SECONDARY WATCH SECTOR: {s2['Sector']}**\n\n"
+          f"• **Score:** {s2['Momentum Score']}/100 | **RS vs Nifty:** {s2['RS vs Nifty %']:+.2f}%\n"
+          f"• **Closing Strength:** Closed at {s2['Close Strength %']:.0f}% of daily range ({s2['RVOL']} Vol)\n"
+          f"• **Action:** Track pre-open order flow for breakout confirmation above today's high."
       )
 
-st.markdown("---")
+  st.markdown("---")
 
-b1, _ = st.columns([1.2, 4])
-with b1:
-  if st.button("🏠 All Sectors", use_container_width=True):
-    reset_to_all()
-    st.rerun()
-
-st.divider()
-
-# =========================================================
-# LEVEL 3 VIEW: STOCK TECHNICAL CHART TERMINAL
-# =========================================================
-if st.session_state.nav_stock:
-  sym = st.session_state.nav_stock
-  row = df_stocks[df_stocks["Symbol"] == sym].iloc[0]
-  hist = ohlcv_store[sym].copy()
-
-  st.header(
-      f"📈 {sym} — Technical Chart & Institutional Setup ({row['Sector']})"
+  # ---------------------------------------------------------
+  # VISUAL SECTOR HEATMAP (TREEMAP)
+  # ---------------------------------------------------------
+  st.subheader("🗺️ Institutional Sector Heatmap")
+  df_sectors["AbsSize"] = df_sectors["Momentum Score"].clip(lower=20)
+  fig = px.treemap(
+      df_sectors,
+      path=["Sector"],
+      values="AbsSize",
+      color="Day Change %",
+      color_continuous_scale=["#B71C1C", "#EF5350", "#ECEFF1", "#66BB6A", "#1B5E20"],
+      color_continuous_midpoint=0,
+      hover_data=["LTP", "RS vs Nifty %", "Close Strength %", "Momentum Score"],
   )
-
-  m1, m2, m3, m4 = st.columns(4)
-  m1.metric("LTP", f"₹{row['LTP']}", f"{row['Day %']:+.2f}%")
-  m2.metric("Week Return", f"{row['Week %']:+.2f}%")
-  m3.metric("Volume Surge (RVOL)", f"{row['RVOL (x)']}x")
-  m4.metric("Sector", row["Sector"])
-
-  hist["EMA20"] = hist["Close"].ewm(span=20).mean()
-  hist["VWAP"] = (
-      (((hist["High"] + hist["Low"] + hist["Close"]) / 3.0) * hist["Volume"])
-      .groupby(hist.index.date)
-      .cumsum()
-      / hist["Volume"].groupby(hist.index.date).cumsum().replace(0, np.nan)
+  fig.update_traces(
+      texttemplate="<b>%{label}</b><br>%{customdata[1]:+.2f}% RS",
+      textfont=dict(size=14),
   )
-
-  fig = make_subplots(
-      rows=2,
-      cols=1,
-      shared_xaxes=True,
-      vertical_spacing=0.03,
-      row_heights=[0.75, 0.25],
-  )
-  fig.add_trace(
-      go.Candlestick(
-          x=hist.index,
-          open=hist["Open"],
-          high=hist["High"],
-          low=hist["Low"],
-          close=hist["Close"],
-          name=sym,
-      ),
-      row=1,
-      col=1,
-  )
-  fig.add_trace(
-      go.Scatter(
-          x=hist.index,
-          y=hist["VWAP"],
-          line=dict(color="#FFD700", width=1.3),
-          name="VWAP",
-      ),
-      row=1,
-      col=1,
-  )
-  fig.add_trace(
-      go.Scatter(
-          x=hist.index,
-          y=hist["EMA20"],
-          line=dict(color="#29B6F6", width=1.3),
-          name="20 EMA",
-      ),
-      row=1,
-      col=1,
-  )
-
-  v_colors = [
-      "#00E676" if c >= o else "#FF5252"
-      for c, o in zip(hist["Close"], hist["Open"])
-  ]
-  fig.add_trace(
-      go.Bar(
-          x=hist.index,
-          y=hist["Volume"],
-          marker_color=v_colors,
-          name="Volume",
-      ),
-      row=2,
-      col=1,
-  )
-
-  fig.update_layout(
-      height=520,
-      template="plotly_dark",
-      xaxis_rangeslider_visible=False,
-      margin=dict(t=20, l=10, r=10, b=10),
-  )
+  fig.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10))
   st.plotly_chart(fig, use_container_width=True)
 
-# =========================================================
-# LEVEL 2 VIEW: SECTOR CONSTITUENTS TABLE
-# =========================================================
-elif st.session_state.nav_sector:
-  sec = st.session_state.nav_sector
-  sec_df = df_stocks[df_stocks["Sector"] == sec].reset_index(drop=True)
-
-  st.header(f"📂 {sec} — Constituent Stocks")
-  st.markdown("👆 **Click any row in the table below** to view its chart.")
-
-  table_event = st.dataframe(
-      sec_df[["Symbol", "LTP", "Day %", "Week %", "RVOL (x)"]],
+  # ---------------------------------------------------------
+  # FULL SECTOR SCORING & RANKING TABLE
+  # ---------------------------------------------------------
+  st.subheader("📊 Sector Analysis and Scores Table (RS, Close Position & Momentum)")
+  st.dataframe(
+      df_sectors,
       use_container_width=True,
       hide_index=True,
-      on_select="rerun",
-      selection_mode="single-row",
-      key="sector_table",
+      column_config={
+          "Momentum Score": st.column_config.ProgressColumn(
+              "Momentum Score",
+              help="Composite score based on Relative Strength, Closing Range & RVOL",
+              format="%.1f",
+              min_value=0,
+              max_value=100,
+          ),
+          "Day Change %": st.column_config.NumberColumn(format="%.2f%%"),
+          "RS vs Nifty %": st.column_config.NumberColumn(format="%+.2f%%"),
+          "Close Strength %": st.column_config.NumberColumn(format="%.1f%%"),
+      },
   )
-  if table_event and table_event.selection and table_event.selection.rows:
-    row_idx = table_event.selection.rows[0]
-    st.session_state.nav_stock = sec_df.iloc[row_idx]["Symbol"]
-    st.rerun()
-
-# =========================================================
-# LEVEL 1 VIEW: 31+ SECTOR HEATMAP & TABLE
-# =========================================================
 else:
-  st.caption(
-      "🟢 **Green Boxes:** Bullish Outperformers  |  🔴 **Red Boxes:** Correction"
-      " / Distribution Sectors"
-  )
-
-  if not df_sector_table.empty:
-    fig_tree = px.treemap(
-        df_sector_table,
-        path=["Sector"],
-        values="No. of Companies",
-        color="Day Change %",
-        color_continuous_scale=[
-            "#990000",
-            "#d9534f",
-            "#f5f5f5",
-            "#5cb85c",
-            "#006400",
-        ],
-        color_continuous_midpoint=0,
-        custom_data=["Day Change %", "No. of Companies"],
-    )
-    fig_tree.update_traces(
-        texttemplate="<b>%{label}</b><br>%{customdata[0]:+.2f}%",
-        hovertemplate=(
-            "<b>%{label}</b><br>Day Change: %{customdata[0]:+.2f}%<br>Companies:"
-            " %{customdata[1]}<extra></extra>"
-        ),
-    )
-    fig_tree.update_layout(height=520, margin=dict(t=10, l=10, r=10, b=10))
-
-    sector_event = st.plotly_chart(
-        fig_tree, use_container_width=True, on_select="rerun", key="main_heatmap"
-    )
-    if (
-        sector_event
-        and sector_event.selection
-        and sector_event.selection.points
-    ):
-      clicked_sec = sector_event.selection.points[0].get("label")
-      if clicked_sec in TRENDLYNE_31_SECTORS:
-        st.session_state.nav_sector = clicked_sec
-        st.rerun()
-
-    st.markdown("---")
-    st.subheader(
-        "📊 Sector Analysis and Scores Table (Advances, Declines & Momentum)"
-    )
-
-    table_selection = st.dataframe(
-        df_sector_table.sort_values(by="Day Change %", ascending=False),
-        use_container_width=True,
-        hide_index=True,
-        on_select="rerun",
-        selection_mode="single-row",
-        key="master_sector_table",
-    )
-    if (
-        table_selection
-        and table_selection.selection
-        and table_selection.selection.rows
-    ):
-      row_idx = table_selection.selection.rows[0]
-      selected_sector_name = df_sector_table.sort_values(
-          by="Day Change %", ascending=False
-      ).iloc[row_idx]["Sector"]
-      st.session_state.nav_sector = selected_sector_name
-      st.rerun()
+  st.warning("⚠️ Unable to fetch live sectoral index data. Please click Refresh Live Data.")
