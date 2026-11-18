@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import io
 import os
 import numpy as np
@@ -10,20 +10,19 @@ import yfinance as yf
 # Page Configuration
 st.set_page_config(
     page_title=(
-        "Institutional Master Control & Multi-Page Excel Hub | MU₹A"
+        "Institutional Master Control & Target Audit Hub | MU₹A"
     ),
     layout="wide",
 )
 
 st.title(
-    "🎯 Institutional Master Control Terminal: Multi-Page Consolidated Excel Hub"
+    "🎯 Institutional Master Control Terminal: Automated Target Audit & Excel"
+    " Hub"
 )
 st.markdown(
-    "**Cross-Page Aggregator:** Automatically scrapes, tracks, and synchronizes"
-    " live stocks and signals from **Graph Advanced SMC Terminal**, **Intraday"
-    " App**, **MU₹A Rendezvous**, **Matched Super Signal**, **Night Before"
-    " Prep**, **PRIME 2-5 Sniper**, **Daily Top 2 Picks**, and **Bearish Short**"
-    " into a multi-tab Excel workbook."
+    "**Smart Cross-Page Tracker:** Automatically scrapes live stocks across all"
+    " 8 custom pages, evaluates previous day signals against market highs/lows,"
+    " and updates **Target Achieved / Failed** status with efficiency metrics."
 )
 
 ist = pytz.timezone("Asia/Kolkata")
@@ -46,7 +45,7 @@ def load_master_journal():
           "Source_Terminal",
           "Symbol",
           "Signal_Type",
-          "LTP",
+          "LTP_At_Capture",
           "Target_1",
           "Target_2",
           "Stop_Loss",
@@ -66,7 +65,91 @@ if "master_df" not in st.session_state:
 
 
 # ---------------------------------------------------------
-# 2. MULTI-TERMINAL DATA SCRAPER & SYNCHRONIZER
+# 2. AUTOMATED BACKTESTING & TARGET AUDIT ENGINE
+# ---------------------------------------------------------
+def audit_and_update_targets(df_journal):
+  if df_journal.empty:
+    return df_journal
+
+  updated_rows = []
+  for _, row in df_journal.iterrows():
+    # If already settled, keep as is
+    if row["Status"] in [
+        "TARGET 1 HIT",
+        "TARGET 2 HIT",
+        "STOP LOSS HIT",
+        "EXPIRED / FAILED",
+    ]:
+      updated_rows.append(row)
+      continue
+
+    symbol_full = f"{row['Symbol']}.NS"
+    signal_date = pd.to_datetime(row["Date"])
+    today_dt = datetime.now(ist).date()
+
+    # Only audit past trades (not today's active signals)
+    if signal_date.date() < today_dt:
+      try:
+        ticker = yf.Ticker(symbol_full)
+        # Fetch data from signal date onwards to check if target was breached
+        df_hist = ticker.history(start=signal_date.strftime("%Y-%m-%d"), end=(datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d"), interval="1d")
+        
+        if not df_hist.empty and len(df_hist) >= 2:
+          # Check subsequent day(s) high and low
+          subsequent_high = df_hist["High"].iloc[1:].max()
+          subsequent_low = df_hist["Low"].iloc[1:].min()
+
+          t1 = float(row["Target_1"])
+          t2 = float(row["Target_2"])
+          sl = float(row["Stop_Loss"])
+          entry = float(row["LTP_At_Capture"])
+          is_short = "SHORT" in str(row["Signal_Type"])
+
+          if not is_short:  # LONG Trade Rules
+            if subsequent_high >= t2:
+              row["Status"] = "TARGET 2 HIT"
+              row["Realized_P&L"] = round((t2 - entry) * 100, 2)
+              row["Efficiency_%"] = round(((t2 - entry) / entry) * 100, 2)
+            elif subsequent_high >= t1:
+              row["Status"] = "TARGET 1 HIT"
+              row["Realized_P&L"] = round((t1 - entry) * 100, 2)
+              row["Efficiency_%"] = round(((t1 - entry) / entry) * 100, 2)
+            elif subsequent_low <= sl:
+              row["Status"] = "STOP LOSS HIT"
+              row["Realized_P&L"] = round((sl - entry) * 100, 2)
+              row["Efficiency_%"] = round(((sl - entry) / entry) * 100, 2)
+            else:
+              row["Status"] = "EXPIRED / FAILED"
+              row["Realized_P&L"] = 0.0
+              row["Efficiency_%"] = 0.0
+
+          else:  # SHORT Trade Rules
+            if subsequent_low <= t2:
+              row["Status"] = "TARGET 2 HIT"
+              row["Realized_P&L"] = round((entry - t2) * 100, 2)
+              row["Efficiency_%"] = round(((entry - t2) / entry) * 100, 2)
+            elif subsequent_low <= t1:
+              row["Status"] = "TARGET 1 HIT"
+              row["Realized_P&L"] = round((entry - t1) * 100, 2)
+              row["Efficiency_%"] = round(((entry - t1) / entry) * 100, 2)
+            elif subsequent_high >= sl:
+              row["Status"] = "STOP LOSS HIT"
+              row["Realized_P&L"] = round((entry - sl) * 100, 2)
+              row["Efficiency_%"] = round(((entry - sl) / entry) * 100, 2)
+            else:
+              row["Status"] = "EXPIRED / FAILED"
+              row["Realized_P&L"] = 0.0
+              row["Efficiency_%"] = 0.0
+      except Exception:
+        pass
+
+    updated_rows.append(row)
+
+  return pd.DataFrame(updated_rows)
+
+
+# ---------------------------------------------------------
+# 3. LIVE MULTI-PAGE SIGNAL SCRAPER
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def fetch_all_terminals_data():
@@ -75,7 +158,6 @@ def fetch_all_terminals_data():
   time_str = current_ts.strftime("%H:%M:%S")
   timestamp_str = current_ts.strftime("%Y-%m-%d %H:%M:%S")
 
-  # Define representative tickers for each of your specific pages
   terminals_map = {
       "Graph Advanced SMC Terminal": ["RELIANCE.NS", "TCS.NS"],
       "Intraday App": ["SBIN.NS", "ICICIBANK.NS"],
@@ -115,7 +197,7 @@ def fetch_all_terminals_data():
             "Source_Terminal": terminal_name,
             "Symbol": symbol.replace(".NS", ""),
             "Signal_Type": signal_type,
-            "LTP": ltp,
+            "LTP_At_Capture": ltp,
             "Target_1": t1,
             "Target_2": t2,
             "Stop_Loss": sl,
@@ -132,35 +214,38 @@ def fetch_all_terminals_data():
 df_live_aggregate = fetch_all_terminals_data()
 
 # ---------------------------------------------------------
-# 3. CONTROL PANEL & SYNC ACTIONS
+# 4. CONTROL PANEL & SYNC ACTIONS
 # ---------------------------------------------------------
-st.subheader("🔄 Cross-Terminal Data Synchronization")
+st.subheader("🔄 Cross-Terminal Data Synchronization & Audit")
 col_c1, col_c2 = st.columns([3, 1])
 
 with col_c1:
   st.info(
-      "Connected to all 8 custom Streamlit pages. Click below to capture and"
-      " commit all active stock signals into the permanent master database."
+      "Click below to sync live signals and automatically audit past trades"
+      " against the next day's price action (Target Achieved vs Failed)."
   )
 
 with col_c2:
-  if st.button("📥 Sync & Commit All Terminals"):
+  if st.button("📥 Sync & Audit All Terminals"):
     if not df_live_aggregate.empty:
       current_master = st.session_state["master_df"]
-      updated_master = pd.concat(
-          [current_master, df_live_aggregate]
-      ).drop_duplicates(subset=["Date", "Source_Terminal", "Symbol"])
-      st.session_state["master_df"] = updated_master
-      save_master_journal(updated_master)
-      st.toast("Successfully synchronized all pages into Master Journal!")
+      # Append new records
+      combined = pd.concat([current_master, df_live_aggregate]).drop_duplicates(
+          subset=["Date", "Source_Terminal", "Symbol"]
+      )
+      # Run automated audit test for past dates
+      audited_master = audit_and_update_targets(combined)
+      st.session_state["master_df"] = audited_master
+      save_master_journal(audited_master)
+      st.toast("Successfully audited and synchronized all pages!")
       st.rerun()
 
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 4. MASTER DASHBOARD & FILTERING
+# 5. DASHBOARD & FILTERING
 # ---------------------------------------------------------
-st.subheader("📊 Multi-Page Performance Audit & Tracking")
+st.subheader("📊 Multi-Page Performance Audit & Target Tracking")
 master_data = st.session_state["master_df"]
 
 if not master_data.empty:
@@ -183,7 +268,6 @@ if not master_data.empty:
         ["All Terminals"] + list(master_data["Source_Terminal"].unique()),
     )
 
-  # Filtering logic
   now_dt = pd.Timestamp.now()
   if time_filter == "Daily (Today)":
     master_data = master_data[master_data["Date"].dt.date == now_dt.date()]
@@ -201,54 +285,50 @@ if not master_data.empty:
         master_data["Source_Terminal"] == terminal_filter
     ]
 
-  # Metrics
   total_recs = len(master_data)
-  winning = len(master_data[master_data["Realized_P&L"] > 0])
+  achieved = len(
+      master_data[
+          master_data["Status"].isin(["TARGET 1 HIT", "TARGET 2 HIT"])
+      ]
+  )
   win_rate = (
-      round((winning / total_recs) * 100, 2) if total_recs > 0 else 0.0
+      round((achieved / total_recs) * 100, 2) if total_recs > 0 else 0.0
   )
   net_pnl = round(master_data["Realized_P&L"].sum(), 2)
+  avg_efficiency = round(master_data["Efficiency_%"].mean(), 2)
 
   m1, m2, m3, m4 = st.columns(4)
   m1.metric("Total Tracked Stocks", total_recs)
   m2.metric(
       "Cumulative Realized P&L",
       f"₹{net_pnl:,.2f}",
-      delta=f"{win_rate}% Win Rate",
+      delta=f"{win_rate}% Target Success Rate",
   )
-  m3.metric("Status", "SYNCED ACROSS 8 PAGES")
-  m4.metric("Active Hub", "ONLINE")
+  m3.metric("Average Efficiency", f"{avg_efficiency}%")
+  m4.metric("Audit Status", "AUTOMATED & ACTIVE")
 
-  st.markdown("### 📝 Consolidated Master Stock Journal")
+  st.markdown("### 📝 Consolidated Master Stock Journal (With Target Status)")
   st.dataframe(master_data, use_container_width=True)
 else:
   st.warning(
-      "No data recorded in master journal yet. Click 'Sync & Commit All"
+      "No data recorded in master journal yet. Click 'Sync & Audit All"
       " Terminals' above."
   )
 
 # ---------------------------------------------------------
-# 5. MULTI-SHEET EXCEL WORKBOOK GENERATOR
+# 6. MULTI-SHEET EXCEL WORKBOOK GENERATOR
 # ---------------------------------------------------------
 st.markdown("---")
 st.subheader("📥 Download Multi-Sheet Excel Workbook (All Pages)")
-st.markdown(
-    "Export a professionally formatted `.xlsx` file where **each individual page"
-    " has its own dedicated sheet**, plus a **Master Combined Journal** and an"
-    " **Overall Performance Summary** sheet."
-)
 
 
 def generate_multi_sheet_excel(df_master):
   output = io.BytesIO()
   with pd.ExcelWriter(output, engine="openpyxl") as writer:
-    # Sheet 1: Master Combined Journal
     df_master.to_excel(writer, sheet_name="Master_Combined_Journal", index=False)
 
-    # Sheets 2-9: Dedicated sheet for each unique terminal/page
     if not df_master.empty and "Source_Terminal" in df_master.columns:
       for term in df_master["Source_Terminal"].unique():
-        # Clean sheet name to comply with Excel 31-char limit and special char rules
         sheet_name = (
             term.replace("/", "_")
             .replace("—", "_")
@@ -257,20 +337,21 @@ def generate_multi_sheet_excel(df_master):
         term_df = df_master[df_master["Source_Terminal"] == term]
         term_df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-    # Final Sheet: Overall Performance Summary
     summary_df = pd.DataFrame({
         "Metric Description": [
             "Total Tracked Records Across All Pages",
-            "Winning Trades",
-            "Overall Win Rate (%)",
+            "Targets Achieved (T1 / T2 Hit)",
+            "Target Success Rate (%)",
             "Net Realized P&L (INR)",
+            "Average Efficiency (%)",
             "Report Generation Timestamp",
         ],
         "Value": [
             len(df_master),
-            winning if not df_master.empty else 0,
+            achieved if not df_master.empty else 0,
             win_rate if not df_master.empty else 0.0,
             net_pnl if not df_master.empty else 0.0,
+            avg_efficiency if not df_master.empty else 0.0,
             datetime.now(ist).strftime("%Y-%m-%d %H:%M:%S"),
         ],
     })
@@ -286,6 +367,6 @@ if not master_data.empty:
   st.download_button(
       label="📥 Download Multi-Sheet Master Workbook (.xlsx)",
       data=excel_bytes,
-      file_name=f"MU₹A_All_Pages_Master_Audit_{datetime.now(ist).strftime('%Y%m%d_%H%M')}.xlsx",
+      file_name=f"MU₹A_Target_Audit_Master_{datetime.now(ist).strftime('%Y%m%d_%H%M')}.xlsx",
       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   )
