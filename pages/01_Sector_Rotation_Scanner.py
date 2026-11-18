@@ -15,7 +15,6 @@ st.set_page_config(
 st.sidebar.markdown("### 🧭 Hedge Fund Navigation Workflow")
 st.sidebar.markdown(
     "- 🗺️ **[Sector Rotation & Macro Pulse](Sector_Rotation_Scanner)**"
-   
 )
 st.sidebar.markdown("- ⚡ **[Smart Money Flow Terminal](Smart_Money_Pulse)**")
 st.sidebar.markdown(
@@ -44,10 +43,10 @@ MACRO_INDICES = {
     "NIFTY IT": "^CNXIT",
 }
 
-# Complete Trendlyne-Aligned Sector Mapping (Over 31+ Sub-Sectors)
-TRENDLYNE_SECTOR_MAP = {
+# Complete 31+ Sector Dictionary aligned with Trendlyne
+TRENDLYNE_31_SECTORS = {
     "Telecommunications": ["BHARTIARTL.NS", "IDEA.NS", "TATACOMM.NS"],
-    "Telecom Services": ["INDUSTOWER.NS"],
+    "Telecom Services": ["INDUSTOWER.NS", "NELCO.NS"],
     "Media": ["ZEEL.NS", "SUNTV.NS", "PVRINOX.NS"],
     "Textiles Apparels": ["PAGEIND.NS", "KPRMILL.NS", "TRIDENT.NS"],
     "Consumer Durables": ["TITAN.NS", "ASIANPAINT.NS", "DIXON.NS", "AMBER.NS"],
@@ -84,7 +83,7 @@ TRENDLYNE_SECTOR_MAP = {
         "DIVISLAB.NS",
         "MAXHEALTH.NS",
     ],
-    "Chemicals": ["UPL.NS", "PIIND.NS", "NAVINFLUOR.NS"],
+    "Chemicals": ["UPL.NS", "PIIND.NS", "NAVINFLUOR.NS", "DEEPAKNITR.NS"],
     "Realty": ["DLF.NS", "GODREJPROP.NS", "OBEROIRLTY.NS", "PRESTIGE.NS"],
     "Transportation": ["INDIGO.NS", "CONCOR.NS", "DELHIVERY.NS"],
     "FMCG": [
@@ -97,13 +96,21 @@ TRENDLYNE_SECTOR_MAP = {
     "Cement & Construction": ["ULTRACEMCO.NS", "AMBUJACEM.NS", "GRASIM.NS"],
     "Hardware Technology": ["HFCL.NS", "VOLTAS.NS", "BLUESTARCO.NS"],
     "Forest Materials": ["CENTURYPLY.NS", "JKPAPER.NS"],
+    "Diversified": ["ADANIENT.NS", "ITC.NS"],
+    "Food Beverages": ["TATACONSUM.NS", "VBL.NS", "MCDOWELL-N.NS"],
+    "General Industrials": ["SIEMENS.NS", "ABB.NS", "CUMMINSIND.NS"],
+    "Defense & Aerospace": ["HAL.NS", "BEL.NS", "MAZDOCK.NS", "COCHINSHIP.NS"],
+    "Capital Goods": ["LT.NS", "BHEL.NS", "BEL.NS"],
+    "Packaging": ["Uflex.NS", "EPL.NS"],
+    "Leather & Footwear": ["BATAINDIA.NS", "RELAXO.NS"],
+    "Sugar": ["BALRAMCHIN.NS", "TRIVENI.NS", "RENUKA.NS"],
 }
 
 
 @st.cache_data(ttl=900)
-def fetch_trendlyne_market_data():
+def fetch_complete_sector_breadth():
   all_syms = list(MACRO_INDICES.values()) + [
-      t for stocks in TRENDLYNE_SECTOR_MAP.values() for t in stocks
+      t for stocks in TRENDLYNE_31_SECTORS.values() for t in stocks
   ]
   raw = yf.download(
       all_syms,
@@ -125,10 +132,16 @@ def fetch_trendlyne_market_data():
     except Exception:
       pass
 
-  records = []
+  stock_records = []
+  sector_summary_rows = []
   ohlcv_store = {}
 
-  for sector, tickers in TRENDLYNE_SECTOR_MAP.items():
+  for sector, tickers in TRENDLYNE_31_SECTORS.items():
+    sec_day_changes = []
+    sec_advances = 0
+    sec_declines = 0
+    valid_stocks_count = 0
+
     for ticker in tickers:
       try:
         df = raw[ticker].dropna()
@@ -137,7 +150,7 @@ def fetch_trendlyne_market_data():
         sym = ticker.replace(".NS", "")
         ohlcv_store[sym] = df
 
-        close, high, low, vol = df["Close"], df["High"], df["Low"], df["Volume"]
+        close, vol = df["Close"], df["Volume"]
         ltp = float(close.iloc[-1])
         prev = float(close.iloc[-2])
         day_chg = ((ltp - prev) / prev) * 100
@@ -152,7 +165,14 @@ def fetch_trendlyne_market_data():
             else 1.0
         )
 
-        records.append({
+        sec_day_changes.append(day_chg)
+        valid_stocks_count += 1
+        if day_chg >= 0:
+          sec_advances += 1
+        else:
+          sec_declines += 1
+
+        stock_records.append({
             "Symbol": sym,
             "Sector": sector,
             "LTP": round(ltp, 2),
@@ -163,11 +183,44 @@ def fetch_trendlyne_market_data():
       except Exception:
         continue
 
-  return index_metrics, pd.DataFrame(records), ohlcv_store
+    if valid_stocks_count > 0:
+      avg_day_chg = np.mean(sec_day_changes)
+      adv_dec_ratio = (
+          round(sec_advances / sec_declines, 2)
+          if sec_declines > 0
+          else float(sec_advances)
+      )
+      momentum_score = round(
+          50 + (avg_day_chg * 5) + ((sec_advances - sec_declines) * 2), 2
+      )
+
+      sector_summary_rows.append({
+          "Sector": sector,
+          "No. of Companies": valid_stocks_count,
+          "Advances": sec_advances,
+          "Declines": sec_declines,
+          "Advances/Declines Ratio": adv_dec_ratio,
+          "Day Change %": round(avg_day_chg, 2),
+          "Sector Momentum Score": max(0.0, min(100.0, momentum_score)),
+      })
+
+  return (
+      index_metrics,
+      pd.DataFrame(stock_records),
+      pd.DataFrame(sector_summary_rows),
+      ohlcv_store,
+  )
 
 
-with st.spinner("Syncing live institutional sector heatmap data..."):
-  index_metrics, df_stocks, ohlcv_store = fetch_trendlyne_market_data()
+with st.spinner(
+    "Syncing live 31+ sector performance metrics & Trendlyne breadth..."
+):
+  (
+      index_metrics,
+      df_stocks,
+      df_sector_table,
+      ohlcv_store,
+  ) = fetch_complete_sector_breadth()
 
 # Render Top Macro Bar
 macro_cols = st.columns(len(MACRO_INDICES))
@@ -181,20 +234,6 @@ for i, (name, _) in enumerate(MACRO_INDICES.items()):
       )
 
 st.markdown("---")
-
-# Aggregate Sector Summary for Heatmap
-sector_summary = (
-    df_stocks.groupby("Sector")
-    .agg(
-        Stocks_Count=("Symbol", "count"),
-        Day_Chg=("Day %", "mean"),
-        Week_Chg=("Week %", "mean"),
-        Avg_RVOL=("RVOL (x)", "mean"),
-    )
-    .reset_index()
-)
-sector_summary["Day_Chg"] = sector_summary["Day_Chg"].round(2)
-sector_summary = sector_summary.sort_values(by="Day_Chg", ascending=False)
 
 # Navigation Breadcrumb Bar
 b1, _ = st.columns([1.2, 4])
@@ -318,40 +357,84 @@ elif st.session_state.nav_sector:
     st.rerun()
 
 # =========================================================
-# LEVEL 1 VIEW: MASTER SECTOR HEATMAP BOXES
+# LEVEL 1 VIEW: 31+ SECTOR HEATMAP & TRENDLYNE DATA TABLE
 # =========================================================
 else:
-  st.subheader(
-      "🗺️ Sector Heatmap (Click Box to View Granular Sector Stocks)"
-  )
+  st.subheader("🗺️ Sector Heatmap & Breadth Analysis (Over 31+ Sectors)")
   st.caption(
-      "🟢 **Green Boxes:** Bullish Sectors (e.g., Telecom, Media)  |  🔴 **Red"
-      " Boxes:** Distribution / Correction Sectors"
+      "🟢 **Green Boxes:** Bullish Outperformers  |  🔴 **Red Boxes:** Correction"
+      " / Distribution Sectors"
   )
 
-  fig_tree = px.treemap(
-      sector_summary,
-      path=["Sector"],
-      values="Stocks_Count",
-      color="Day_Chg",
-      color_continuous_scale=["#990000", "#d9534f", "#f5f5f5", "#5cb85c", "#006400"],
-      color_continuous_midpoint=0,
-      custom_data=["Day_Chg", "Stocks_Count"],
-  )
-  fig_tree.update_traces(
-      texttemplate="<b>%{label}</b><br>%{customdata[0]:+.2f}%",
-      hovertemplate=(
-          "<b>%{label}</b><br>Day Change: %{customdata[0]:+.2f}%<br>Stocks:"
-          " %{customdata[1]}<extra></extra>"
-      ),
-  )
-  fig_tree.update_layout(height=520, margin=dict(t=10, l=10, r=10, b=10))
+  if not df_sector_table.empty:
+    fig_tree = px.treemap(
+        df_sector_table,
+        path=["Sector"],
+        values="No. of Companies",
+        color="Day Change %",
+        color_continuous_scale=[
+            "#990000",
+            "#d9534f",
+            "#f5f5f5",
+            "#5cb85c",
+            "#006400",
+        ],
+        color_continuous_midpoint=0,
+        custom_data=["Day Change %", "No. of Companies"],
+    )
+    fig_tree.update_traces(
+        texttemplate="<b>%{label}</b><br>%{customdata[0]:+.2f}%",
+        hovertemplate=(
+            "<b>%{label}</b><br>Day Change: %{customdata[0]:+.2f}%<br>Companies:"
+            " %{customdata[1]}<extra></extra>"
+        ),
+    )
+    fig_tree.update_layout(height=520, margin=dict(t=10, l=10, r=10, b=10))
 
-  sector_event = st.plotly_chart(
-      fig_tree, use_container_width=True, on_select="rerun", key="main_heatmap"
-  )
-  if sector_event and sector_event.selection and sector_event.selection.points:
-    clicked_sec = sector_event.selection.points[0].get("label")
-    if clicked_sec in TRENDLYNE_SECTOR_MAP:
-      st.session_state.nav_sector = clicked_sec
+    sector_event = st.plotly_chart(
+        fig_tree, use_container_width=True, on_select="rerun", key="main_heatmap"
+    )
+    if (
+        sector_event
+        and sector_event.selection
+        and sector_event.selection.points
+    ):
+      clicked_sec = sector_event.selection.points[0].get("label")
+      if clicked_sec in TRENDLYNE_31_SECTORS:
+        st.session_state.nav_sector = clicked_sec
+        st.rerun()
+
+    st.markdown("---")
+    st.subheader(
+        "📊 Sector Analysis and Scores Table (Advances, Declines & Momentum)"
+    )
+
+    styled_table = (
+        df_sector_table.sort_values(by="Day Change %", ascending=False)
+        .style.format({
+            "Day Change %": "{:+.2f}%",
+            "Sector Momentum Score": "{:.1f}",
+            "Advances/Declines Ratio": "{:.2f}",
+        })
+        .background_gradient(subset=["Day Change %"], cmap="RdYlGn", vmin=-3, vmax=3)
+    )
+
+    table_selection = st.dataframe(
+        styled_table,
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="master_sector_table",
+    )
+    if (
+        table_selection
+        and table_selection.selection
+        and table_selection.selection.rows
+    ):
+      row_idx = table_selection.selection.rows[0]
+      selected_sector_name = df_sector_table.sort_values(
+          by="Day Change %", ascending=False
+      ).iloc[row_idx]["Sector"]
+      st.session_state.nav_sector = selected_sector_name
       st.rerun()
