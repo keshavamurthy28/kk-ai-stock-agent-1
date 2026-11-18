@@ -15,9 +15,9 @@ st.set_page_config(
 st.title("⚡ Index Options Alpha Sniper: Expiry & Institutional Chain Engine")
 st.markdown(
     "**Expert Derivatives AI:** Synchronized with active [Kite Option"
-    " Chain](https://kite.zerodha.com/markets/option-chain/INDICES/NIFTY%2050/256265) data[cite: 5]. Combines live Spot momentum, VWAP"
+    " Chain](https://kite.zerodha.com/markets/option-chain/INDICES/NIFTY%2050/256265) data. Combines live Spot momentum, VWAP"
     " confluence, Put-Call Ratio (PCR: **0.86**), Max Pain (**25050**), and"
-    " exact expiry dates to protect against time-decay traps[cite: 5]."
+    " exact expiry dates to protect against time-decay traps."
 )
 
 # ---------------------------------------------------------
@@ -95,9 +95,9 @@ def fetch_index_options_intelligence(expiry_str):
     rec_strike = atm_strike
     target_strike = atm_strike + 150
     rationale = (
-        f"Nifty spot (₹{spot_ltp:,.2f}) holding above VWAP[cite: 5]. PCR at"
+        f"Nifty spot (₹{spot_ltp:,.2f}) holding above VWAP. PCR at"
         f" {pcr} indicates strong put writing floor near Max Pain ({max_pain})"
-        f"[cite: 5]."
+        f"."
     )
     entry_prem = 125.40
     sl_prem = 94.00
@@ -109,9 +109,9 @@ def fetch_index_options_intelligence(expiry_str):
     rec_strike = atm_strike
     target_strike = atm_strike - 150
     rationale = (
-        f"Nifty spot (₹{spot_ltp:,.2f}) trading below VWAP[cite: 5]. Call"
+        f"Nifty spot (₹{spot_ltp:,.2f}) trading below VWAP. Call"
         f" writing dominating resistance overhead, targeting downward migration"
-        f" toward Max Pain ({max_pain})[cite: 5]."
+        f" toward Max Pain ({max_pain})."
     )
     entry_prem = 142.50
     sl_prem = 106.80
@@ -231,22 +231,23 @@ else:
       row=1,
       col=1,
   )
- # --- ADD DYNAMIC VOLUME COLORS ---
-vol_colors = [
-    "#00E676" if c >= o else "#FF5252"
-    for o, c in zip(df_c["Open"], df_c["Close"])
-]
 
-fig.add_trace(
-    go.Bar(
-        x=df_c.index,
-        y=df_c["Volume"],
-        name="Volume",
-        marker_color=vol_colors,  # <--- This renders Green on up candles and Red on down candles
-    ),
-    row=2,
-    col=1,
-)
+  # --- PROPERLY INDENTED VOLUME COLORS ---
+  vol_colors = [
+      "#00E676" if c >= o else "#FF5252"
+      for o, c in zip(df_c["Open"], df_c["Close"])
+  ]
+
+  fig.add_trace(
+      go.Bar(
+          x=df_c.index,
+          y=df_c["Volume"],
+          name="Volume",
+          marker_color=vol_colors,
+      ),
+      row=2,
+      col=1,
+  )
 
   fig.add_hline(
       y=intel["MaxPain"],
