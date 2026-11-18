@@ -1,9 +1,10 @@
-import datetime
+from datetime import datetime
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 import yfinance as yf
 
+# Page Configuration
 st.set_page_config(
     page_title="Zerodha Portfolio & Technical Analysis Agent", layout="wide"
 )
@@ -14,6 +15,16 @@ st.markdown(
     " asset performance, track P&L, and screen for technical breakout or"
     " dip-buying opportunities."
 )
+
+# ---------------------------------------------------------
+# 1. LIVE REFRESH CONTROL PANEL
+# ---------------------------------------------------------
+col_r1, col_r2 = st.columns([4, 1])
+with col_r2:
+  if st.button("🔄 Refresh Portfolio LTP"):
+    st.cache_data.clear()
+    st.toast("Clearing cache and fetching live market LTP for portfolio...")
+    st.rerun()
 
 # Sidebar Controls & Technical Thresholds
 st.sidebar.header("⚙️ Portfolio & Technical Rules")
