@@ -278,4 +278,115 @@ def render_bearish_chart(symbol, df, v_col, entry, sl, t1, t2):
       row=1,
       col=1,
   )
-  fig.
+  fig.add_hline(
+      y=t1,
+      line_dash="dash",
+      line_color="#29B6F6",
+      line_width=1.4,
+      annotation_text=f"🎯 T1 (-2.5%): ₹{t1:,.2f}",
+      annotation_position="bottom left",
+      row=1,
+      col=1,
+  )
+  fig.add_hline(
+      y=t2,
+      line_dash="dash",
+      line_color="#00E676",
+      line_width=1.4,
+      annotation_text=f"🚀 T2 (-4.8%): ₹{t2:,.2f}",
+      annotation_position="bottom right",
+      row=1,
+      col=1,
+  )
+
+  fig.update_layout(
+      title=f"📊 {symbol} (15m) | Institutional Bearish Breakdown Blueprint",
+      template="plotly_dark",
+      height=520,
+      dragmode="pan",
+      hovermode="x unified",
+      showlegend=False,
+      margin=dict(l=10, r=65, t=40, b=30),
+      yaxis=dict(side="right", title="Price (₹)", showgrid=True),
+      yaxis2=dict(side="right", title="Volume", showgrid=False),
+      xaxis=dict(type="category", rangeslider_visible=False),
+      xaxis2=dict(
+          type="category", rangeslider_visible=False, tickmode="auto", nticks=12
+      ),
+  )
+  return fig
+
+
+# ---------------------------------------------------------
+# 4. MAIN EXECUTION RENDER BLOCK
+# ---------------------------------------------------------
+with st.spinner(
+    "🔍 Scanning market for institutional bearish breakdown setups..."
+):
+  df_bearish = fetch_bearish_institutional_picks()
+
+if df_bearish is None or df_bearish.empty:
+  st.warning(
+      "⚠️ No stocks currently match strict bearish breakdown criteria. Click"
+      " 'Force Refresh Bearish Scan' above."
+  )
+else:
+  st.subheader(
+      "🔥 Top Verified Bearish Institutional Picks (Short 2%–5% Target)"
+  )
+
+  # Render Top 2 Highest Conviction Short Picks Automatically
+  for idx, row in df_bearish.head(2).iterrows():
+    with st.container():
+      c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
+
+      with c1:
+        st.markdown(f"### **#{idx+1} {row['Symbol']}**")
+        st.metric(
+            label="Live LTP",
+            value=f"₹{row['LTP']}",
+            delta=(
+                f"{row['Change']}% (Bearish Alpha: {row['Alpha_Score']} | RVOL:"
+                f" {row['RVOL']}x)"
+            ),
+            delta_color="inverse",
+        )
+
+      with c2:
+        st.markdown("**Precision Short Levels**")
+        st.write(f"🔻 **Short Entry:** ₹{row['Limit_Short']}")
+        st.write(f"🛑 **Stop Loss:** ₹{row['Stop_Loss']}")
+
+      with c3:
+        st.markdown("**Profit Targets (Downside)**")
+        st.write(f"🎯 **Target 1 (-2.5%):** ₹{row['Target_1']}")
+        st.write(f"🚀 **Target 2 (-4.8%):** ₹{row['Target_2']}")
+
+      with c4:
+        st.markdown("**Execution Status**")
+        st.error("🔴 **BEARISH INSTITUTIONAL — VERIFIED SHORT**")
+        if st.button(
+            f"📋 Copy Short Payload ({row['Symbol']})",
+            key=f"bear_{row['Symbol']}",
+        ):
+          st.toast(
+              f"Copied {row['Symbol']}! Short: ₹{row['Limit_Short']} | T1:"
+              f" ₹{row['Target_1']}"
+          )
+
+      with st.expander(
+          f"📈 Expand Chart & VWAP Breakdown Structure for #{idx+1}"
+          f" {row['Symbol']}"
+      ):
+        fig = render_bearish_chart(
+            row["Symbol"],
+            row["DataFrame"],
+            row["Volume_Colors"],
+            row["Limit_Short"],
+            row["Stop_Loss"],
+            row["Target_1"],
+            row["Target_2"],
+        )
+        st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
+
+    st.markdown("---")
