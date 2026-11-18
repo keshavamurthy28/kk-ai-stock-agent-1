@@ -231,16 +231,22 @@ else:
       row=1,
       col=1,
   )
-  fig.add_trace(
-      go.Bar(
-          x=df_c.index,
-          y=df_c["Volume"],
-          name="Volume",
-          marker_color="rgba(41,182,246,0.5)",
-      ),
-      row=2,
-      col=1,
-  )
+ # --- ADD DYNAMIC VOLUME COLORS ---
+vol_colors = [
+    "#00E676" if c >= o else "#FF5252"
+    for o, c in zip(df_c["Open"], df_c["Close"])
+]
+
+fig.add_trace(
+    go.Bar(
+        x=df_c.index,
+        y=df_c["Volume"],
+        name="Volume",
+        marker_color=vol_colors,  # <--- This renders Green on up candles and Red on down candles
+    ),
+    row=2,
+    col=1,
+)
 
   fig.add_hline(
       y=intel["MaxPain"],
