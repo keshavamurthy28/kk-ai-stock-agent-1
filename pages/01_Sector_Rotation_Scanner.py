@@ -20,7 +20,7 @@ st.sidebar.markdown("- 📈 **[Intraday Sniper Terminal](PRIME_2-5_INTRADAY_SNIP
 st.sidebar.markdown("---")
 
 # ---------------------------------------------------------
-# 0. NAVIGATION STATE (3-Level Drill-Down Router)
+# NAVIGATION STATE (3-Level Router)
 # ---------------------------------------------------------
 if "nav_sector" not in st.session_state:
   st.session_state.nav_sector = None
@@ -38,11 +38,10 @@ def reset_to_sector():
 
 
 MACRO_INDICES = {
-    "Nifty 50": "^NSEI",
-    "Nifty Bank": "^NSEBANK",
-    "Nifty IT": "^CNXIT",
-    "Nifty Auto": "^CNXAUTO",
-    "Nifty FMCG": "^CNXFMCG",
+    "NIFTY 50": "^NSEI",
+    "BSE SENSEX": "^BSESN",
+    "NIFTY BANK": "^NSEBANK",
+    "NIFTY IT": "^CNXIT",
 }
 
 SECTOR_STOCKS = {
@@ -55,14 +54,22 @@ SECTOR_STOCKS = {
     ],
     "IT & Software": ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "TECHM.NS"],
     "Automobiles": ["M&M.NS", "MARUTI.NS", "TATAMOTORS.NS", "BAJAJ-AUTO.NS"],
-    "Pharma": [
+    "Consumer Durables": [
+        "TITAN.NS",
+        "ASIANPAINT.NS",
+        "HINDUNILVR.NS",
+        "ITC.NS",
+    ],
+    "Metals & Mining": ["TATASTEEL.NS", "HINDALCO.NS", "JSWSTEEL.NS", "VEDL.NS"],
+    "Telecommunications": ["BHARTIARTL.NS", "IDEA.NS", "TATACOMM.NS"],
+    "Energy & Oil": ["RELIANCE.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS"],
+    "Healthcare": [
         "SUNPHARMA.NS",
         "CIPLA.NS",
         "DRREDDY.NS",
         "DIVISLAB.NS",
         "MAXHEALTH.NS",
     ],
-    "Energy & Oil": ["RELIANCE.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS"],
 }
 
 
@@ -91,13 +98,6 @@ def fetch_comprehensive_market_data():
     except Exception:
       pass
 
-  nifty_close = raw["^NSEI"]["Close"].dropna()
-  nifty_5d = (
-      (nifty_close.iloc[-1] / nifty_close.iloc[-6] - 1) * 100
-      if len(nifty_close) >= 6
-      else 0.0
-  )
-
   records = []
   ohlcv_store = {}
 
@@ -124,7 +124,6 @@ def fetch_comprehensive_market_data():
             if len(vol) >= 21
             else 1.0
         )
-        rs_5d = week_chg - nifty_5d
 
         records.append({
             "Symbol": sym,
@@ -132,30 +131,33 @@ def fetch_comprehensive_market_data():
             "LTP": round(ltp, 2),
             "Day %": round(day_chg, 2),
             "Week %": round(week_chg, 2),
-            "RS vs Nifty (5D)": round(rs_5d, 2),
             "RVOL (x)": round(rvol, 2),
         })
       except Exception:
         continue
 
-  return (
-      index_metrics,
-      pd.DataFrame(records),
-      ohlcv_store,
-      round(nifty_5d, 2),
-  )
+  return index_metrics, pd.DataFrame(records), ohlcv_store
 
 
-with st.spinner("Loading macro indices & sector drill-down engine..."):
-  index_metrics, df_stocks, ohlcv_store, nifty_5d_ret = (
-      fetch_comprehensive_market_data()
-  )
+with st.spinner("Fetching macro indices & building sector heatmaps..."):
+  index_metrics, df_stocks, ohlcv_store = fetch_comprehensive_market_data()
 
-if df_stocks.empty:
-  st.error("Market data unavailable. Please refresh.")
-  st.stop()
+# ---------------------------------------------------------
+# TOP MACRO DASHBOARD BAR (Like Reference Image)
+# ---------------------------------------------------------
+macro_cols = st.columns(len(MACRO_INDICES))
+for i, (name, _) in enumerate(MACRO_INDICES.items()):
+  with macro_cols[i]:
+    if name in index_metrics:
+      st.metric(
+          name,
+          f"{index_metrics[name]['LTP']:,.2f}",
+          f"{index_metrics[name]['Chg%']:+.2f}%",
+      )
 
-# Aggregate Sector Metrics for Heatmap
+st.markdown("---")
+
+# Aggregate Sector Metrics for Heatmap Grid
 sector_summary = (
     df_stocks.groupby("Sector")
     .agg(
@@ -167,22 +169,13 @@ sector_summary = (
     .reset_index()
 )
 sector_summary["Day_Chg"] = sector_summary["Day_Chg"].round(2)
-sector_summary["Week_Chg"] = sector_summary["Week_Chg"].round(2)
 
-# --- BREADCRUMB BAR ---
-st.title("🗺️ Institutional Sector Rotation & Deep-Dive Terminal")
-b1, b2, b3 = st.columns([1.2, 2, 4])
+# Navigation Breadcrumb Bar
+b1, b2 = st.columns([1.2, 4])
 with b1:
   if st.button("🏠 All Sectors", use_container_width=True):
     reset_to_all()
     st.rerun()
-with b2:
-  if st.session_state.nav_sector:
-    if st.button(
-        f"📂 {st.session_state.nav_sector}", use_container_width=True
-    ):
-      reset_to_sector()
-      st.rerun()
 
 st.divider()
 
@@ -194,11 +187,13 @@ if st.session_state.nav_stock:
   row = df_stocks[df_stocks["Symbol"] == sym].iloc[0]
   hist = ohlcv_store[sym].copy()
 
-  st.header(f"📈 {sym} — Technical Chart & Institutional Setup ({row['Sector']})")
+  st.header(
+      f"📈 {sym} — Technical Chart & Institutional Setup ({row['Sector']})"
+  )
 
   m1, m2, m3, m4 = st.columns(4)
   m1.metric("LTP", f"₹{row['LTP']}", f"{row['Day %']:+.2f}%")
-  m2.metric("5D RS vs Nifty", f"{row['RS vs Nifty (5D)']:+.2f}%")
+  m2.metric("Week Return", f"{row['Week %']:+.2f}%")
   m3.metric("Volume Surge (RVOL)", f"{row['RVOL (x)']}x")
   m4.metric("Sector", row["Sector"])
 
@@ -211,7 +206,6 @@ if st.session_state.nav_stock:
       / hist["Volume"].groupby(hist.index.date).cumsum().replace(0, np.nan)
   )
 
-  # Candlestick Chart
   fig = make_subplots(
       rows=2,
       cols=1,
@@ -268,7 +262,7 @@ if st.session_state.nav_stock:
   )
 
   fig.update_layout(
-      height=550,
+      height=520,
       template="plotly_dark",
       xaxis_rangeslider_visible=False,
       margin=dict(t=20, l=10, r=10, b=10),
@@ -282,16 +276,16 @@ elif st.session_state.nav_sector:
   sec = st.session_state.nav_sector
   sec_df = df_stocks[df_stocks["Sector"] == sec].reset_index(drop=True)
 
-  st.header(f"🟢 {sec} — Constituent Stocks")
-  st.markdown("👆 **Click any row in the table below** to open its chart.")
+  st.header(f"📂 {sec} — Constituent Stocks")
+  st.markdown("👆 **Click any row in the table below** to view its chart.")
 
   table_event = st.dataframe(
-      sec_df[["Symbol", "LTP", "Day %", "Week %", "RS vs Nifty (5D)", "RVOL (x)"]],
+      sec_df[["Symbol", "LTP", "Day %", "Week %", "RVOL (x)"]],
       use_container_width=True,
       hide_index=True,
       on_select="rerun",
       selection_mode="single-row",
-      key="sector_stocks_table",
+      key="sector_table",
   )
   if table_event and table_event.selection and table_event.selection.rows:
     row_idx = table_event.selection.rows[0]
@@ -302,24 +296,29 @@ elif st.session_state.nav_sector:
 # LEVEL 1 VIEW: MASTER SECTOR HEATMAP BOXES
 # =========================================================
 else:
-  st.subheader("🗺️ Interactive Sector Heatmap (Click Box to Open Sector)")
+  st.subheader("🗺️ Sector Heatmap (Click Box to View Sector Stocks)")
+  st.caption(
+      "🟢 **Green Boxes:** Bullish Sectors  |  🔴 **Red Boxes:** Bearish /"
+      " Distribution Sectors"
+  )
+
   fig_tree = px.treemap(
       sector_summary,
       path=["Sector"],
-      values="Avg_RVOL",
+      values="Stocks_Count",
       color="Day_Chg",
       color_continuous_scale=["#990000", "#d9534f", "#f5f5f5", "#5cb85c", "#006400"],
       color_continuous_midpoint=0,
-      custom_data=["Day_Chg", "Avg_RVOL"],
+      custom_data=["Day_Chg", "Stocks_Count"],
   )
   fig_tree.update_traces(
-      texttemplate="<b>%{label}</b><br>%{customdata[0]:+.2f}% Day",
+      texttemplate="<b>%{label}</b><br>%{customdata[0]:+.2f}%",
       hovertemplate=(
-          "<b>%{label}</b><br>Day Chg: %{customdata[0]:+.2f}%<br>Volume Surge:"
-          " %{customdata[1]:.2f}x<extra></extra>"
+          "<b>%{label}</b><br>Day Change: %{customdata[0]:+.2f}%<br>Stocks:"
+          " %{customdata[1]}<extra></extra>"
       ),
   )
-  fig_tree.update_layout(height=420, margin=dict(t=10, l=10, r=10, b=10))
+  fig_tree.update_layout(height=450, margin=dict(t=10, l=10, r=10, b=10))
 
   sector_event = st.plotly_chart(
       fig_tree, use_container_width=True, on_select="rerun", key="main_heatmap"
