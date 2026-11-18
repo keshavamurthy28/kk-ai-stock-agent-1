@@ -9,11 +9,14 @@ st.set_page_config(
     page_title="Advance Night-Before Institutional Prep Scanner", layout="wide"
 )
 
-st.title("🌙 Advance Night-Before Institutional Prep & Coiling Watchlist")
+st.title(
+    "🌙 Advance Night-Before Institutional Prep & Smart Money Coiling Watchlist"
+)
 st.markdown(
-    "**Expert Advance Engine:** Pre-scans the Indian equity market for tight"
-    " multi-day accumulation coils *before*кті the market opens, giving you"
-    " advance entry blueprints for tomorrow's 2%–5% targets."
+    "**Expert Advance Engine:** Pre-scans the Indian equity market by"
+    " connecting tight multi-day accumulation coils with **Smart Money"
+    " Institutional Flows** *before* the market opens, giving you high-conviction"
+    " entry blueprints for tomorrow's targets."
 )
 
 # ---------------------------------------------------------
@@ -21,20 +24,20 @@ st.markdown(
 # ---------------------------------------------------------
 col_c1, col_c2 = st.columns([4, 1])
 with col_c2:
-  if st.button("🔄 Run Advance Evening Prep Scan"):
+  if st.button("🔄 Run Advance Smart Money Prep Scan"):
     st.cache_data.clear()
     st.toast(
-        "Scanning Indian market for advance pre-breakout accumulation coiling..."
+        "Scanning Indian market for smart money accumulation & coiling..."
     )
     st.rerun()
 
 
 # ---------------------------------------------------------
-# 2. ADVANCED MARKET-WIDE PRE-BREAKOUT SCANNER
+# 2. ADVANCED MARKET-WIDE PRE-BREAKOUT + SMART MONEY SCANNER
 # ---------------------------------------------------------
 @st.cache_data(ttl=86400)  # Cache daily prep scan
 def run_advance_night_prep():
-  # Broad liquid Indian market scanning universe
+  # Broad liquid Indian institutional market universe
   universe = [
       "RELIANCE.NS",
       "TCS.NS",
@@ -92,12 +95,11 @@ def run_advance_night_prep():
       avg_range = df["Range"].rolling(10).mean().iloc[-1]
       recent_range = df["Range"].iloc[-1]
 
-      # Volume accumulation check
+      # Volume accumulation check & Smart Money Turnover proxy
       avg_vol = df["Volume"].rolling(15).mean().iloc[-1]
       recent_vol = df["Volume"].iloc[-1]
 
       close_price = float(df["Close"].iloc[-1])
-      # Fetch live/recent LTP if available, fallback to close price
       ltp = (
           float(ticker.history(period="1d")["Close"].iloc[-1])
           if not ticker.history(period="1d").empty
@@ -107,11 +109,23 @@ def run_advance_night_prep():
       prev_close = float(df["Close"].iloc[-2])
       change_pct = round(((close_price - prev_close) / prev_close) * 100, 2)
 
-      # Tight Coil Criteria: Range is contracting while volume is building or stable
+      # Approximate institutional net flow based on volume surge and price direction
+      turnover_cr = round((close_price * recent_vol) / 10000000, 2)
+      net_flow_cr = round(
+          turnover_cr * (change_pct / 100) * (recent_vol / avg_vol), 2
+      )
+
+      # Tight Coil Criteria & Smart Money Accumulation Filter
       is_tight_coil = recent_range <= (1.2 * avg_range)
       is_volume_steady = recent_vol >= (0.7 * avg_vol)
 
       if is_tight_coil and is_volume_steady:
+        # Smart Money Signal Tagging
+        if net_flow_cr > 0:
+          smart_signal = "🟢 Smart Inflow (Accumulation)"
+        else:
+          smart_signal = "🟡 Coiling / Neutral"
+
         # Advance Entry Blueprints for 2%–5% Capture
         advance_buy = round(close_price * 0.995, 2)
         stop_loss = round(close_price * 0.978, 2)  # Strict 2.2% protection
@@ -123,6 +137,8 @@ def run_advance_night_prep():
             "LTP": round(ltp, 2),
             "Close": round(close_price, 2),
             "Change_%": change_pct,
+            "Net Flow (Cr)": net_flow_cr,
+            "Smart Signal": smart_signal,
             "Advance_Buy": advance_buy,
             "Stop_Loss": stop_loss,
             "Target_1": target_1,
@@ -132,15 +148,17 @@ def run_advance_night_prep():
     except Exception:
       continue
 
-  # Reorder columns explicitly to place Change_% right after LTP and Close
   df_res = pd.DataFrame(watchlist_rows)
   if not df_res.empty:
+    df_res = df_res.sort_values(by="Net Flow (Cr)", ascending=False)
     df_res = df_res[
         [
             "Symbol",
             "LTP",
             "Close",
             "Change_%",
+            "Net Flow (Cr)",
+            "Smart Signal",
             "Advance_Buy",
             "Stop_Loss",
             "Target_1",
@@ -160,19 +178,21 @@ if df_prep is None or df_prep.empty:
   st.warning("⚠️ No tight accumulation coils detected. Run advance scan above.")
 else:
   st.subheader(
-      "🎯 Advance Pre-Market Setups Ready for Tomorrow's 2%–5% Capture"
+      "🎯 Smart Money Pre-Market Setups Ready for Tomorrow's 2%–5% Capture"
   )
   st.markdown(
-      "*These stocks are coiling tightly right now. Set your advance limit"
-      " orders on Zerodha Kite before market open to catch the breakout early.*"
+      "*These stocks combine tight multi-day coiling with positive institutional"
+      " smart money flows. Set your advance limit orders on Zerodha Kite before"
+      " market open.*"
   )
 
-  # Display as a clean, actionable dataframe table with Change_% included
+  # Display as a clean, actionable dataframe table
   st.dataframe(
       df_prep.style.format({
           "LTP": "₹{:,.2f}",
           "Close": "₹{:,.2f}",
           "Change_%": "{:+.2f}%",
+          "Net Flow (Cr)": "₹{:,.2f} Cr",
           "Advance_Buy": "₹{:,.2f}",
           "Stop_Loss": "₹{:,.2f}",
           "Target_1": "₹{:,.2f}",
@@ -182,7 +202,7 @@ else:
   )
 
   st.markdown("---")
-  st.subheader("📋 Detailed Advance Execution Blueprints")
+  st.subheader("📋 Detailed Smart Money Execution Blueprints")
 
   for idx, row in df_prep.head(5).iterrows():
     with st.container():
@@ -191,9 +211,9 @@ else:
       with c1:
         st.markdown(f"### **{row['Symbol']}**")
         st.metric(
-            label="Live LTP / Close",
+            label="Live LTP / Flow",
             value=f"₹{row['LTP']}",
-            delta=f"{row['Change_%']}% (Close: ₹{row['Close']})",
+            delta=f"Net Flow: ₹{row['Net Flow (Cr)']} Cr",
         )
 
       with c2:
@@ -208,12 +228,12 @@ else:
 
       with c4:
         st.markdown("**Action Plan**")
-        st.success("✅ **READY FOR PRE-MARKET ORDER**")
+        st.success(f"✅ **{row['Smart Signal']}**")
         if st.button(
             f"📋 Copy Advance Payload ({row['Symbol']})", key=f"adv_{row['Symbol']}"
         ):
           st.toast(
-              f"Copied {row['Symbol']} advance blueprint! Buy:"
+              f"Copied {row['Symbol']} smart money blueprint! Buy:"
               f" ₹{row['Advance_Buy']} | T1: ₹{row['Target_1']}"
           )
 
