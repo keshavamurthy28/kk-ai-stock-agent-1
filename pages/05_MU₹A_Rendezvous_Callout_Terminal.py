@@ -6,6 +6,7 @@ import streamlit as st
 import yfinance as yf
 
 st.set_page_config(page_title="MU$₹A Rendezvous Advance Callouts", layout="wide")
+
 st.header("⚙️ Terminal Control Center")
   if st.button("🔄 Refresh Live Scans", type="primary", use_container_width=True):
     st.cache_data.clear()
