@@ -9,7 +9,7 @@ st.set_page_config(
     page_title="Institutional Sector Rotation & Macro Pulse", layout="wide"
 )
 
-st.title("🗺️ Sector Heatmap & Breadth Analysis (Interactive Drill-Down)")
+st.title("🗺️ Sector Heatmap & Breadth Analysis (Interactive Color-Filter & Drill-Down)")
 
 if st.button("🔄 Refresh Live Data", type="primary"):
   st.cache_data.clear()
@@ -66,7 +66,6 @@ SECTOR_CONSTITUENTS = {
 
 @st.cache_data(ttl=300)
 def fetch_drilldown_sector_data():
-  # Collect all tickers (Benchmark + Indices + Stocks) in one fast batch download
   all_tickers = ["^NSEI"]
   for info in SECTOR_CONSTITUENTS.values():
     all_tickers.append(info["index"])
@@ -114,7 +113,6 @@ def fetch_drilldown_sector_data():
         else 50.0
     )
 
-    # Process underlying stocks for drill-down & aggregate real volume
     sector_rvols = []
     for sym in info["stocks"]:
       if sym not in raw:
@@ -245,36 +243,106 @@ if df_sectors is not None and not df_sectors.empty:
   st.markdown("---")
 
   # ---------------------------------------------------------
-  # 2. INTERACTIVE DRILL-DOWN SECTOR -> STOCK HEATMAP
+  # 2. INTERACTIVE COLOR-BAND SLIDER & QUICK COLOR PICKER
+  # ---------------------------------------------------------
+  st.subheader("🎨 Interactive Color-Band & Momentum Filter")
+  st.caption(
+      "Click a Color Zone button OR drag the scrollable Day Change % range"
+      " slider below to immediately isolate matching sectors & stocks:"
+  )
+
+  col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
+  if "chg_range" not in st.session_state:
+    st.session_state.chg_range = (-5.0, 5.0)
+
+  with col_btn1:
+    if st.button("🟩 Dark Green (+1% to +5%)", use_container_width=True):
+      st.session_state.chg_range = (1.0, 5.0)
+  with col_btn2:
+    if st.button("🟢 Light Green (0% to +1%)", use_container_width=True):
+      st.session_state.chg_range = (0.0, 1.0)
+  with col_btn3:
+    if st.button("🟥 Deep Red (-5% to -1%)", use_container_width=True):
+      st.session_state.chg_range = (-5.0, -1.0)
+  with col_btn4:
+    if st.button("🔄 Show All Colors (-5% to +5%)", use_container_width=True):
+      st.session_state.chg_range = (-5.0, 5.0)
+
+  min_c, max_c = st.slider(
+      "🎚️ Scrollable Day Change % Color Spectrum (-5% Red ◀━━━ 0% ━━━▶ +5% Green):",
+      min_value=-5.0,
+      max_value=5.0,
+      value=st.session_state.chg_range,
+      step=0.25,
+      format="%+.2f%%",
+  )
+
+  # Filter stocks matching the chosen color band
+  filtered_stocks = df_stocks[
+      (df_stocks["Day Change %"] >= min_c) & (df_stocks["Day Change %"] <= max_c)
+  ].copy()
+
+  # ---------------------------------------------------------
+  # 3. INTERACTIVE DRILL-DOWN SECTOR -> STOCK HEATMAP
   # ---------------------------------------------------------
   st.subheader("🗺️ Interactive Sector → Stock Drill-Down Heatmap")
-  st.caption("💡 Click any Sector box to zoom inside and inspect its constituent stocks. Click the top bar to zoom back out.")
+  st.caption(
+      "💡 Shows nested stocks inside every sector. Click any Sector box to"
+      " zoom inside; click the top bar to zoom out."
+  )
 
-  fig = px.treemap(
-      df_stocks,
-      path=[px.Constant("ALL NSE SECTORS"), "Sector", "Stock"],
-      values="BoxSize",
-      color="Day Change %",
-      color_continuous_scale=["#B71C1C", "#EF5350", "#263238", "#66BB6A", "#1B5E20"],
-      color_continuous_midpoint=0,
-      hover_data=["LTP", "RS vs Nifty %", "Close Strength %", "RVOL", "Stock Score"],
-  )
-  fig.update_traces(
-      texttemplate="<b>%{label}</b><br>%{color:+.2f}%",
-      textfont=dict(size=13),
-      maxdepth=2,
-  )
-  fig.update_layout(
-      template="plotly_dark",
-      height=540,
-      margin=dict(l=10, r=10, t=30, b=10),
-  )
-  st.plotly_chart(fig, use_container_width=True)
+  if not filtered_stocks.empty:
+    fig = px.treemap(
+        filtered_stocks,
+        path=[px.Constant("ALL NSE SECTORS"), "Sector", "Stock"],
+        values="BoxSize",
+        color="Day Change %",
+        color_continuous_scale=["#B71C1C", "#EF5350", "#263238", "#66BB6A", "#1B5E20"],
+        color_continuous_midpoint=0,
+        range_color=[-3.0, 3.0],
+        hover_data=["LTP", "RS vs Nifty %", "Close Strength %", "RVOL", "Stock Score"],
+    )
+    fig.update_traces(
+        textinfo="label+value",
+        texttemplate="<b>%{label}</b><br>%{color:+.2f}%",
+        textfont=dict(size=13),
+        maxdepth=3,
+    )
+    fig.update_layout(
+        template="plotly_dark",
+        height=580,
+        margin=dict(l=10, r=10, t=30, b=10),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Display instant matching stocks table for the selected color band
+    st.subheader(
+        f"📋 Matching Sectors & Stocks in Selected Color Range ({min_c:+.2f}% to {max_c:+.2f}%) — {len(filtered_stocks)} Stocks"
+    )
+    st.dataframe(
+        filtered_stocks.drop(columns=["BoxSize"]),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Stock Score": st.column_config.ProgressColumn(
+                "Stock Score", format="%.1f", min_value=0, max_value=100
+            ),
+            "Day Change %": st.column_config.NumberColumn(format="%+.2f%%"),
+            "RS vs Nifty %": st.column_config.NumberColumn(format="%+.2f%%"),
+            "Close Strength %": st.column_config.NumberColumn(format="%.1f%%"),
+            "RVOL": st.column_config.NumberColumn(format="%.2fx"),
+        },
+    )
+  else:
+    st.info(
+        f"No stocks currently fall between {min_c:+.2f}% and {max_c:+.2f}%."
+        " Widen the slider or click 'Show All Colors'."
+    )
 
   st.markdown("---")
 
   # ---------------------------------------------------------
-  # 3. INTERACTIVE SECTOR INSPECTOR & STOCK BREAKDOWN
+  # 4. INTERACTIVE SECTOR INSPECTOR & FULL RANKING
   # ---------------------------------------------------------
   st.subheader("🔍 Inspect Constituent Stocks Inside Any Sector")
   selected_sector = st.selectbox(
@@ -302,10 +370,6 @@ if df_sectors is not None and not df_sectors.empty:
   )
 
   st.markdown("---")
-
-  # ---------------------------------------------------------
-  # 4. FULL SECTOR SCORING & RANKING TABLE
-  # ---------------------------------------------------------
   st.subheader("📊 Full Sector Ranking Table")
   st.dataframe(
       df_sectors,
