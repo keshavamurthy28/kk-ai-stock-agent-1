@@ -6,21 +6,7 @@ import streamlit as st
 import yfinance as yf
 
 st.set_page_config(page_title="MU$₹A Rendezvous Advance Callouts", layout="wide")
-
-# --- CLEAN SIDEBAR NAVIGATION & CONTROLS ---
-with st.sidebar:
-  st.markdown("### 🧭 Hedge Fund Navigation Workflow")
-  st.markdown(
-      "- 🗺️ **[Sector Rotation & Macro Pulse](Sector_Rotation_Scanner)**"
-  )
-  st.markdown("- ⚡ **[Smart Money Flow Terminal](Smart_Money_Pulse)**")
-  st.markdown(
-      "- 🌙 **[Night-Before Prep & Coiling](Night_Before_Prep_Scanner)**"
-  )
-  st.markdown("- 🎯 **[Live Super-Signal Triggers](Matched_Super_Signal_Page)**")
-  st.markdown("---")
-
-  st.header("⚙️ Terminal Control Center")
+st.header("⚙️ Terminal Control Center")
   if st.button("🔄 Refresh Live Scans", type="primary", use_container_width=True):
     st.cache_data.clear()
     st.success("Cache cleared! Fetching fresh data...")
