@@ -13,22 +13,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# --- CLEAN SIDEBAR NAVIGATION ---
-st.sidebar.markdown("### 🧭 Hedge Fund Navigation Workflow")
-st.sidebar.markdown(
-    "- 🗺️ **[Sector Rotation & Macro Pulse](Sector_Rotation_Scanner)**"
-    f"[cite: 3]"
-)
-st.sidebar.markdown("- ⚡ **[Smart Money Flow Terminal](Smart_Money_Pulse)**")
-st.sidebar.markdown(
-    "- 🌙 **[Night-Before Prep & Coiling](Night_Before_Prep_Scanner)**"
-)
-st.sidebar.markdown(
-    "- 🎯 **[Live Super-Signal Triggers](Matched_Super_Signal_Page)**"
-)
-st.sidebar.markdown("- 📈 **[Intraday Sniper Terminal](PRIME_2-5_INTRADAY_SNIPER)**")
-st.sidebar.markdown("---")
-
 st.title("🎯 Institutional Alpha Intraday Sniper Terminal (Anti-Trap)")
 st.markdown(
     "**Expert Analyst Engine:** Market-wide scanning combining **Fundamental"
