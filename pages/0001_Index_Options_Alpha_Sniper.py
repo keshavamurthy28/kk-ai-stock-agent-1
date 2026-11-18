@@ -9,27 +9,33 @@ import yfinance as yf
 
 # Page Configuration
 st.set_page_config(
-    page_title="Index Options Alpha Sniper | Institutional SMC Engine",
-    layout="wide",
+    page_title="Index Options Alpha Sniper | Expiry & SMC Engine", layout="wide"
 )
 
-st.title("⚡ Index Options Alpha Sniper: SMC & Institutional Chain Engine")
+st.title("⚡ Index Options Alpha Sniper: Expiry & Institutional Chain Engine")
 st.markdown(
     "**Expert Derivatives AI:** Synchronized with active [Kite Option"
     " Chain](https://kite.zerodha.com/markets/option-chain/INDICES/NIFTY%2050/256265) data[cite: 5]. Combines live Spot momentum, VWAP"
     " confluence, Put-Call Ratio (PCR: **0.86**), Max Pain (**25050**), and"
-    " institutional writing zones for high-conviction **CE / PE** options"
-    " execution[cite: 5]."
+    " exact expiry dates to protect against time-decay traps[cite: 5]."
 )
 
 # ---------------------------------------------------------
-# 1. LIVE CONTROLS & REFRESH
+# 1. LIVE CONTROLS & EXPIRY SELECTOR
 # ---------------------------------------------------------
-col_c1, col_c2 = st.columns([3, 1])
-with col_c2:
-  if st.button("🔄 Sync Live Chain & Greeks", type="primary"):
+col_c1, col_c2, col_c3 = st.columns([2, 2, 1])
+
+with col_c1:
+  expiry_choice = st.selectbox(
+      "📅 Select Active Contract Expiry:",
+      ["23 Nov (5 days) [Weekly]", "1 Dec (13 days)", "29 Dec (Monthly)"],
+      index=0,
+  )
+
+with col_c3:
+  if st.button("🔄 Sync Chain", type="primary"):
     st.cache_data.clear()
-    st.toast("Synchronizing option chain sentiment & institutional liquidity...")
+    st.toast("Synchronizing option chain expiry liquidity...")
     st.rerun()
 
 ist = pytz.timezone("Asia/Kolkata")
@@ -37,10 +43,10 @@ current_time_ist = datetime.now(ist).time()
 
 
 # ---------------------------------------------------------
-# 2. LIVE OPTION CHAIN & SPOT ENGINE (Synced with Kite Context)
+# 2. LIVE OPTION CHAIN & EXPIRY SAFETY ENGINE
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
-def fetch_index_options_intelligence():
+def fetch_index_options_intelligence(expiry_str):
   nifty = yf.Ticker("^NSEI")
   vix = yf.Ticker("^INDIAVIX")
 
@@ -71,12 +77,18 @@ def fetch_index_options_intelligence():
   latest_vwap = float(df_nifty["VWAP"].iloc[-1])
   latest_ema = float(df_nifty["EMA20"].iloc[-1])
 
-  # Synchronized Option Chain Anchors (from active Kite session context)
   pcr = 0.86
   max_pain = 25050.0
   atm_strike = round(spot_ltp / 50) * 50
 
-  # Institutional SMC Bias & Directive Logic
+  # Adjust theta decay caution based on expiry selection
+  theta_warning = (
+      "⚠️ **Weekly Expiry Caution:** High time-decay (Theta). Exit intraday"
+      " before expiry day!"
+      if "Weekly" in expiry_str
+      else "✅ **Positional Expiry:** Lower theta decay risk."
+  )
+
   if spot_ltp >= latest_vwap and spot_chg > -0.4:
     bias = "BULLISH ACCUMULATION"
     action = "BUY CE (CALL OPTION)"
@@ -116,6 +128,8 @@ def fetch_index_options_intelligence():
       "Action": action,
       "Strike": rec_strike,
       "TargetStrike": target_strike,
+      "Expiry": expiry_str,
+      "ThetaNote": theta_warning,
       "Rationale": rationale,
       "Entry": entry_prem,
       "SL": sl_prem,
@@ -125,12 +139,12 @@ def fetch_index_options_intelligence():
   }
 
 
-intel = fetch_index_options_intelligence()
+intel = fetch_index_options_intelligence(expiry_choice)
 
 if not intel:
-  st.error("⚠️ Unable to load option chain index intelligence.")
+  st.error("⚠️ Unable to load option chain intelligence.")
 else:
-  # Institutional Metrics Display
+  # Metrics Display
   m1, m2, m3, m4, m5 = st.columns(5)
   m1.metric(
       "Nifty Spot LTP", f"₹{intel['Spot']:,.2f}", f"{intel['Change']:+.2f}%"
@@ -138,25 +152,27 @@ else:
   m2.metric("India VIX", f"{intel['VIX']}", "IV Regimen: High")
   m3.metric("Put-Call Ratio (PCR)", f"{intel['PCR']}", "Supportive Sentiment")
   m4.metric("Max Pain Pin", f"₹{intel['MaxPain']:,.0f}", "Institutional Magnet")
-  m5.metric("SMC Market Bias", intel["Bias"], "Directional Flow")
+  m5.metric("Active Expiry", intel["Expiry"].split()[0] + " Nov", "Contract Date")
 
   st.markdown("---")
 
   # Directive Banner
   if "CE" in intel["Action"]:
     st.success(
-        f"🟢 **INSTITUTIONAL OPTIONS DIRECTIVE: {intel['Action']}** — Focus"
-        f" Strike: **{intel['Strike']} CE** (Target Strike: **{intel['TargetStrike']}**)"
+        f"🟢 **OPTIONS DIRECTIVE ({intel['Expiry']}): {intel['Action']}** —"
+        f" Focus Strike: **{intel['Strike']} CE**"
     )
   else:
     st.error(
-        f"🔴 **INSTITUTIONAL OPTIONS DIRECTIVE: {intel['Action']}** — Focus"
-        f" Strike: **{intel['Strike']} PE** (Target Strike: **{intel['TargetStrike']}**)"
+        f"🔴 **OPTIONS DIRECTIVE ({intel['Expiry']}): {intel['Action']}** —"
+        f" Focus Strike: **{intel['Strike']} PE**"
     )
 
-  # Premium Execution Blueprint Cards
+  st.info(intel["ThetaNote"])
+
+  # Execution Cards
   c1, c2, c3, c4 = st.columns(4)
-  c1.metric("🟡 Recommended Entry Premium", f"₹{intel['Entry']:,.2f}", "Delta 0.50 ATM")
+  c1.metric("🟡 Recommended Entry", f"₹{intel['Entry']:,.2f}", "Delta 0.50 ATM")
   c2.metric("🛑 Premium Stop-Loss", f"₹{intel['SL']:,.2f}", "25% Risk Cap")
   c3.metric("🎯 Target 1 (+35%)", f"₹{intel['T1']:,.2f}", "Book 50% Profit")
   c4.metric("🚀 Target 2 (+80%)", f"₹{intel['T2']:,.2f}", "Runner Target")
@@ -165,10 +181,10 @@ else:
 
   st.markdown("---")
   st.subheader(
-      f"📊 SMC & VWAP Index Execution Chart (Nifty Spot: ₹{intel['Spot']:,.2f})"
+      f"📊 SMC & VWAP Index Chart for Expiry: {intel['Expiry']}"
   )
 
-  # Render Institutional SMC Chart matching your Advanced Terminal style
+  # Chart Rendering
   df_c = intel["DataFrame"].tail(90)
   fig = make_subplots(
       rows=2,
@@ -226,21 +242,12 @@ else:
       col=1,
   )
 
-  # Institutional Key Levels Overlay
   fig.add_hline(
       y=intel["MaxPain"],
       line_dash="dash",
       line_color="#FFD700",
       annotation_text=f"📌 Max Pain Magnet: ₹{intel['MaxPain']:,.0f}",
       annotation_position="bottom left",
-      row=1,
-      col=1,
-  )
-  fig.add_hline(
-      y=intel["Spot"],
-      line_color="#29B6F6",
-      annotation_text=f"📍 Spot LTP: ₹{intel['Spot']:,.2f}",
-      annotation_position="top right",
       row=1,
       col=1,
   )
