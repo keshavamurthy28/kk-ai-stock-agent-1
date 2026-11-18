@@ -23,6 +23,16 @@ if "nav_sector" not in st.session_state:
 if "nav_stock" not in st.session_state:
   st.session_state.nav_stock = None
 
+
+def reset_to_all():
+  st.session_state.nav_sector = None
+  st.session_state.nav_stock = None
+
+
+def reset_to_sector():
+  st.session_state.nav_stock = None
+
+
 MACRO_INDICES = {
     "Nifty 50": "^NSEI",
     "Nifty Bank": "^NSEBANK",
@@ -53,7 +63,7 @@ SECTOR_STOCKS = {
 
 
 @st.cache_data(ttl=900)
-def fetch_macro_data():
+def fetch_macro_and_sector_data():
   all_syms = list(MACRO_INDICES.values()) + [
       t for stocks in SECTOR_STOCKS.values() for t in stocks
   ]
@@ -76,16 +86,43 @@ def fetch_macro_data():
         index_metrics[name] = {"LTP": round(ltp, 2), "Chg%": round(chg, 2)}
     except Exception:
       pass
-  return index_metrics
+
+  records = []
+  for sector, tickers in SECTOR_STOCKS.items():
+    sec_changes = []
+    sec_vols = []
+    for ticker in tickers:
+      try:
+        df = raw[ticker].dropna()
+        if len(df) < 5:
+          continue
+        close, vol = df["Close"], df["Volume"]
+        ltp = float(close.iloc[-1])
+        prev = float(close.iloc[-2])
+        chg = ((ltp - prev) / prev) * 100
+        rvol = float(vol.iloc[-1] / vol.iloc[-21:-1].mean())
+        sec_changes.append(chg)
+        sec_vols.append(rvol)
+      except Exception:
+        continue
+    if sec_changes:
+      records.append({
+          "Sector": sector,
+          "Day_Chg": round(np.mean(sec_changes), 2),
+          "Avg_RVOL": round(np.mean(sec_vols), 2),
+      })
+
+  return index_metrics, pd.DataFrame(records)
 
 
-st.title("🗺️ Step 1: Institutional Sector Rotation & Macro Pulse")
+st.title("🗺️ Institutional Sector Rotation & Macro Pulse")
 st.markdown(
-    "Analyze headline index performance and sector momentum *before* drilling"
-    " down into individual stock flows."
+    "Analyze headline index performance and interactive sector heatmaps below."
 )
 
-metrics = fetch_macro_data()
+metrics, sector_summary = fetch_macro_and_sector_data()
+
+# Render Macro Index Cards
 cols = st.columns(len(MACRO_INDICES))
 for i, (name, _) in enumerate(MACRO_INDICES.items()):
   with cols[i]:
@@ -97,113 +134,49 @@ for i, (name, _) in enumerate(MACRO_INDICES.items()):
       )
 
 st.markdown("---")
-st.success(
-    "💡 **Next Workflow Step:** Proceed to **Smart Money Flow Terminal** in the"
-    " sidebar to inspect real-time institutional capital inflows/outflows in"
-    " Crores."
-)
-from concurrent.futures import ThreadPoolExecutor
-import numpy as np
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-import streamlit as st
-import yfinance as yf
 
-st.set_page_config(page_title="Smart Money Pulse & Flow Terminal", layout="wide")
+# Navigation Breadcrumbs
+b1, b2 = st.columns([1, 4])
+with b1:
+  if st.button("🏠 All Sectors", use_container_width=True):
+    reset_to_all()
+    st.rerun()
 
-# --- CLEAN SIDEBAR NAVIGATION ---
-st.sidebar.markdown("### 🧭 Hedge Fund Navigation Workflow")
-st.sidebar.markdown("- 🗺️ **[Sector Rotation & Macro Pulse](Sector_Rotation_Scanner)**")
-st.sidebar.markdown("- ⚡ **[Smart Money Flow Terminal](Smart_Money_Pulse)**")
-st.sidebar.markdown("- 🌙 **[Night-Before Prep & Coiling](Night_Before_Prep_Scanner)**")
-st.sidebar.markdown("- 📈 **[Intraday Sniper Terminal](PRIME_2-5_INTRADAY_SNIPER)**")
-st.sidebar.markdown("---")
+st.divider()
 
-st.title("⚡ Step 2: Smart Money Pulse & Institutional Flow Terminal")
-st.caption(
-    "Real-time Sector-to-Stock Capital Flow, Net Inflows in Crores, and Swing"
-    " Breakout Scanners."
-)
-
-SECTOR_STOCKS = {
-    "Bank & PSU": [
-        "HDFCBANK.NS",
-        "ICICIBANK.NS",
-        "SBIN.NS",
-        "AXISBANK.NS",
-        "KOTAKBANK.NS",
-    ],
-    "IT & Tech": ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "TECHM.NS"],
-    "Defence & CapGoods": ["HAL.NS", "BEL.NS", "LT.NS", "SIEMENS.NS"],
-    "Auto": ["M&M.NS", "MARUTI.NS", "TATAMOTORS.NS", "BAJAJ-AUTO.NS"],
-    "Energy": ["RELIANCE.NS", "NTPC.NS", "ONGC.NS", "TATAPOWER.NS"],
-}
-
-
-def analyze_stock(symbol, sector):
-  try:
-    df = yf.download(symbol, period="2mo", interval="1d", progress=False)
-    if df.empty or len(df) < 20:
-      return None
-    if isinstance(df.columns, pd.MultiIndex):
-      df.columns = df.columns.get_level_values(0)
-
-    close, prev = df["Close"].iloc[-1], df["Close"].iloc[-2]
-    high, low, vol = df["High"].iloc[-1], df["Low"].iloc[-1], df["Volume"].iloc[-1]
-    pct_chg = ((close - prev) / prev) * 100
-    turnover_cr = (close * vol) / 1e7
-    net_flow_cr = round(
-        turnover_cr * (pct_chg / 100) * (vol / df["Volume"].rolling(10).mean().iloc[-1]),
-        2,
-    )
-
-    return {
-        "Symbol": symbol.replace(".NS", ""),
-        "Sector": sector,
-        "Price": round(close, 2),
-        "Change %": round(pct_chg, 2),
-        "Net Flow (Cr)": net_flow_cr,
-    }
-  except Exception:
-    return None
-
-
-@st.cache_data(ttl=300)
-def fetch_market_flow():
-  tasks = [(sym, sec) for sec, syms in SECTOR_STOCKS.items() for sym in syms]
-  results = []
-  with ThreadPoolExecutor(max_workers=10) as executor:
-    futures = [executor.submit(analyze_stock, sym, sec) for sym, sec in tasks]
-    for f in futures:
-      if f.result():
-        results.append(f.result())
-  return pd.DataFrame(results)
-
-
-with st.spinner("Calculating institutional capital flows..."):
-  df_flow = fetch_market_flow()
-
-if not df_flow.empty:
-  total_in = df_flow[df_flow["Net Flow (Cr)"] > 0]["Net Flow (Cr)"].sum()
-  total_out = abs(df_flow[df_flow["Net Flow (Cr)"] < 0]["Net Flow (Cr)"].sum())
-
-  c1, c2, c3 = st.columns(3)
-  c1.metric("🟢 Total Institutional Inflow", f"₹{total_in:,.0f} Cr")
-  c2.metric("🔴 Total Institutional Outflow", f"₹{total_out:,.0f} Cr")
-  c3.metric(
-      "⚖️ Net Market Bias", f"₹{total_in - total_out:,.0f} Cr", delta="Bullish"
+# ==========================================
+# RENDER RESTORED HEATMAP BOXES GRID
+# ==========================================
+if not sector_summary.empty:
+  st.subheader("🗺️ Interactive Sector Heatmap (Click Box to Inspect)")
+  st.caption(
+      "🟢 **Dark Green to Light Green:** Bullish Momentum  |  🔴 **Light Red to"
+      " Dark Red:** Distribution Pressure"
   )
 
-  st.markdown("---")
-  st.subheader("📋 Institutional Capital Flow Table")
-  st.dataframe(
-      df_flow.sort_values(by="Net Flow (Cr)", ascending=False),
-      use_container_width=True,
-      hide_index=True,
+  fig_tree = px.treemap(
+      sector_summary,
+      path=["Sector"],
+      values="Avg_RVOL",
+      color="Day_Chg",
+      color_continuous_scale=["#990000", "#d9534f", "#f5f5f5", "#5cb85c", "#006400"],
+      color_continuous_midpoint=0,
+      custom_data=["Day_Chg", "Avg_RVOL"],
   )
+  fig_tree.update_traces(
+      texttemplate="<b>%{label}</b><br>%{customdata[0]:+.2f}% Day",
+      hovertemplate=(
+          "<b>%{label}</b><br>Day Change: %{customdata[0]:+.2f}%<br>Volume"
+          " Surge: %{customdata[1]:.2f}x<extra></extra>"
+      ),
+  )
+  fig_tree.update_layout(height=420, margin=dict(t=10, l=10, r=10, b=10))
 
-  st.success(
-      "💡 **Next Workflow Step:** Proceed to **Night-Before Prep & Coiling** to"
-      " identify stocks forming multi-day accumulation coils."
+  sector_event = st.plotly_chart(
+      fig_tree, use_container_width=True, on_select="rerun", key="sector_heatmap"
   )
+  if sector_event and sector_event.selection and sector_event.selection.points:
+    clicked_sec = sector_event.selection.points[0].get("label")
+    if clicked_sec in SECTOR_STOCKS:
+      st.session_state.nav_sector = clicked_sec
+      st.rerun()
