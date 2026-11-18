@@ -85,7 +85,7 @@ if not df_flow.empty:
   total_in = df_flow[df_flow["Net Flow (Cr)"] > 0]["Net Flow (Cr)"].sum()
   total_out = abs(df_flow[df_flow["Net Flow (Cr)"] < 0]["Net Flow (Cr)"].sum())
 
-  # Top Institutional Metrics Bar (Matching professional terminal design)
+  # Top Institutional Metrics Bar (Fixed invalid delta_value parameter)
   c1, c2, c3 = st.columns(3)
   c1.metric(
       "🟢 Total Institutional Inflow",
@@ -93,10 +93,7 @@ if not df_flow.empty:
       delta="Accumulation",
   )
   c2.metric(
-      "🔴 Total Institutional Outflow",
-      f"₹{total_out:,.0f} Cr",
-      delta="Distribution",
-      delta_value="inverse",
+      "🔴 Total Institutional Outflow", f"₹{total_out:,.0f} Cr", delta="Distribution"
   )
   c3.metric(
       "⚖️ Net Market Institutional Bias",
@@ -122,7 +119,7 @@ if not df_flow.empty:
   for _, row in df_flow.iterrows():
     sec_idx = node_indices[row["Sector"]]
     stock_idx = node_indices[row["Symbol"]]
-    flow_val = abs(row["Net Flow (Cr)"]) + 10  # Base weight for visualization
+    flow_val = abs(row["Net Flow (Cr)"]) + 10
 
     sources.append(sec_idx)
     targets.append(stock_idx)
