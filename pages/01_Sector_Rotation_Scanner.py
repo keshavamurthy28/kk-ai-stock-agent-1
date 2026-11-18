@@ -14,8 +14,8 @@ st.set_page_config(
 # --- CLEAN SIDEBAR NAVIGATION ---
 st.sidebar.markdown("### 🧭 Hedge Fund Navigation Workflow")
 st.sidebar.markdown(
-    "- 🗺️ **[Sector Rotation & Macro Pulse](Sector_Rotation_Scanner)"
-    f"**[cite: 3]"
+    "- 🗺️ **[Sector Rotation & Macro Pulse](Sector_Rotation_Scanner)**"
+   
 )
 st.sidebar.markdown("- ⚡ **[Smart Money Flow Terminal](Smart_Money_Pulse)**")
 st.sidebar.markdown(
@@ -37,10 +37,6 @@ def reset_to_all():
   st.session_state.nav_stock = None
 
 
-def reset_to_sector():
-  st.session_state.nav_stock = None
-
-
 MACRO_INDICES = {
     "NIFTY 50": "^NSEI",
     "BSE SENSEX": "^BSESN",
@@ -48,10 +44,12 @@ MACRO_INDICES = {
     "NIFTY IT": "^CNXIT",
 }
 
-# Expanded Institutional Sector Taxonomy (Matching Trendlyne granularity)
-EXTENDED_SECTOR_STOCKS = {
+# Complete Trendlyne-Aligned Sector Mapping (Over 31+ Sub-Sectors)
+TRENDLYNE_SECTOR_MAP = {
     "Telecommunications": ["BHARTIARTL.NS", "IDEA.NS", "TATACOMM.NS"],
-    "Textiles & Apparel": ["PAGEIND.NS", "KPRMILL.NS", "Trident.NS"],
+    "Telecom Services": ["INDUSTOWER.NS"],
+    "Media": ["ZEEL.NS", "SUNTV.NS", "PVRINOX.NS"],
+    "Textiles Apparels": ["PAGEIND.NS", "KPRMILL.NS", "TRIDENT.NS"],
     "Consumer Durables": ["TITAN.NS", "ASIANPAINT.NS", "DIXON.NS", "AMBER.NS"],
     "Hotels Restaurants": ["INDHOTEL.NS", "CHALET.NS", "EIHOTEL.NS"],
     "Commercial Services": ["CDSL.NS", "MCX.NS", "CAMS.NS"],
@@ -78,13 +76,34 @@ EXTENDED_SECTOR_STOCKS = {
         "KOTAKBANK.NS",
     ],
     "Energy & Oil": ["RELIANCE.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS"],
+    "Utilities": ["TATAPOWER.NS", "ADANIPOWER.NS", "NHPC.NS", "SJVN.NS"],
+    "Healthcare": [
+        "SUNPHARMA.NS",
+        "CIPLA.NS",
+        "DRREDDY.NS",
+        "DIVISLAB.NS",
+        "MAXHEALTH.NS",
+    ],
+    "Chemicals": ["UPL.NS", "PIIND.NS", "NAVINFLUOR.NS"],
+    "Realty": ["DLF.NS", "GODREJPROP.NS", "OBEROIRLTY.NS", "PRESTIGE.NS"],
+    "Transportation": ["INDIGO.NS", "CONCOR.NS", "DELHIVERY.NS"],
+    "FMCG": [
+        "HINDUNILVR.NS",
+        "ITC.NS",
+        "BRITANNIA.NS",
+        "NESTLEIND.NS",
+        "DABUR.NS",
+    ],
+    "Cement & Construction": ["ULTRACEMCO.NS", "AMBUJACEM.NS", "GRASIM.NS"],
+    "Hardware Technology": ["HFCL.NS", "VOLTAS.NS", "BLUESTARCO.NS"],
+    "Forest Materials": ["CENTURYPLY.NS", "JKPAPER.NS"],
 }
 
 
 @st.cache_data(ttl=900)
-def fetch_extended_market_data():
+def fetch_trendlyne_market_data():
   all_syms = list(MACRO_INDICES.values()) + [
-      t for stocks in EXTENDED_SECTOR_STOCKS.values() for t in stocks
+      t for stocks in TRENDLYNE_SECTOR_MAP.values() for t in stocks
   ]
   raw = yf.download(
       all_syms,
@@ -109,7 +128,7 @@ def fetch_extended_market_data():
   records = []
   ohlcv_store = {}
 
-  for sector, tickers in EXTENDED_SECTOR_STOCKS.items():
+  for sector, tickers in TRENDLYNE_SECTOR_MAP.items():
     for ticker in tickers:
       try:
         df = raw[ticker].dropna()
@@ -147,8 +166,8 @@ def fetch_extended_market_data():
   return index_metrics, pd.DataFrame(records), ohlcv_store
 
 
-with st.spinner("Loading granular institutional sector data..."):
-  index_metrics, df_stocks, ohlcv_store = fetch_extended_market_data()
+with st.spinner("Syncing live institutional sector heatmap data..."):
+  index_metrics, df_stocks, ohlcv_store = fetch_trendlyne_market_data()
 
 # Render Top Macro Bar
 macro_cols = st.columns(len(MACRO_INDICES))
@@ -163,7 +182,7 @@ for i, (name, _) in enumerate(MACRO_INDICES.items()):
 
 st.markdown("---")
 
-# Aggregate Sector Summary for Treemap Heatmap
+# Aggregate Sector Summary for Heatmap
 sector_summary = (
     df_stocks.groupby("Sector")
     .agg(
@@ -175,8 +194,9 @@ sector_summary = (
     .reset_index()
 )
 sector_summary["Day_Chg"] = sector_summary["Day_Chg"].round(2)
+sector_summary = sector_summary.sort_values(by="Day_Chg", ascending=False)
 
-# Navigation Breadcrumbs
+# Navigation Breadcrumb Bar
 b1, _ = st.columns([1.2, 4])
 with b1:
   if st.button("🏠 All Sectors", use_container_width=True):
@@ -186,7 +206,7 @@ with b1:
 st.divider()
 
 # =========================================================
-# LEVEL 3: STOCK CHART TERMINAL
+# LEVEL 3 VIEW: STOCK TECHNICAL CHART TERMINAL
 # =========================================================
 if st.session_state.nav_stock:
   sym = st.session_state.nav_stock
@@ -275,7 +295,7 @@ if st.session_state.nav_stock:
   st.plotly_chart(fig, use_container_width=True)
 
 # =========================================================
-# LEVEL 2: SECTOR CONSTITUENTS TABLE
+# LEVEL 2 VIEW: SECTOR CONSTITUENTS TABLE
 # =========================================================
 elif st.session_state.nav_sector:
   sec = st.session_state.nav_sector
@@ -298,13 +318,15 @@ elif st.session_state.nav_sector:
     st.rerun()
 
 # =========================================================
-# LEVEL 1: GRANULAR SECTOR HEATMAP BOXES
+# LEVEL 1 VIEW: MASTER SECTOR HEATMAP BOXES
 # =========================================================
 else:
-  st.subheader("🗺️ Sector Heatmap (Click Box to View Sector Stocks)")
+  st.subheader(
+      "🗺️ Sector Heatmap (Click Box to View Granular Sector Stocks)"
+  )
   st.caption(
-      "🟢 **Green Boxes:** Bullish Sectors  |  🔴 **Red Boxes:** Bearish /"
-      " Distribution Sectors"
+      "🟢 **Green Boxes:** Bullish Sectors (e.g., Telecom, Media)  |  🔴 **Red"
+      " Boxes:** Distribution / Correction Sectors"
   )
 
   fig_tree = px.treemap(
@@ -323,13 +345,13 @@ else:
           " %{customdata[1]}<extra></extra>"
       ),
   )
-  fig_tree.update_layout(height=480, margin=dict(t=10, l=10, r=10, b=10))
+  fig_tree.update_layout(height=520, margin=dict(t=10, l=10, r=10, b=10))
 
   sector_event = st.plotly_chart(
       fig_tree, use_container_width=True, on_select="rerun", key="main_heatmap"
   )
   if sector_event and sector_event.selection and sector_event.selection.points:
     clicked_sec = sector_event.selection.points[0].get("label")
-    if clicked_sec in EXTENDED_SECTOR_STOCKS:
+    if clicked_sec in TRENDLYNE_SECTOR_MAP:
       st.session_state.nav_sector = clicked_sec
       st.rerun()
