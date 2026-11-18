@@ -13,6 +13,22 @@ st.set_page_config(
     layout="wide",
 )
 
+# --- CLEAN SIDEBAR NAVIGATION ---
+st.sidebar.markdown("### 🧭 Hedge Fund Navigation Workflow")
+st.sidebar.markdown(
+    "- 🗺️ **[Sector Rotation & Macro Pulse](Sector_Rotation_Scanner)**"
+    f"[cite: 3]"
+)
+st.sidebar.markdown("- ⚡ **[Smart Money Flow Terminal](Smart_Money_Pulse)**")
+st.sidebar.markdown(
+    "- 🌙 **[Night-Before Prep & Coiling](Night_Before_Prep_Scanner)**"
+)
+st.sidebar.markdown(
+    "- 🎯 **[Live Super-Signal Triggers](Matched_Super_Signal_Page)**"
+)
+st.sidebar.markdown("- 📈 **[Intraday Sniper Terminal](PRIME_2-5_INTRADAY_SNIPER)**")
+st.sidebar.markdown("---")
+
 st.title("🎯 Institutional Alpha Intraday Sniper Terminal (Anti-Trap)")
 st.markdown(
     "**Expert Analyst Engine:** Market-wide scanning combining **Fundamental"
@@ -20,6 +36,55 @@ st.markdown(
     " volume expansion, and ATR-managed risk boundaries for reliable 2%–5%"
     " intraday gains."
 )
+
+# Comprehensive Stock-to-Sector Mapping (Unified with Sector Rotation & Smart Money Pulse)
+STOCK_SECTOR_MAP = {
+    "RELIANCE": "Energy & Oil",
+    "TCS": "Software & Services",
+    "HDFCBANK": "Banking & Finance",
+    "ICICIBANK": "Banking & Finance",
+    "INFY": "Software & Services",
+    "SBIN": "Banking & Finance",
+    "ITC": "FMCG",
+    "BHARTIARTL": "Telecommunications",
+    "LICI": "Financial Services",
+    "AXISBANK": "Banking & Finance",
+    "KOTAKBANK": "Banking & Finance",
+    "LT": "Capital Goods",
+    "BAJFINANCE": "Banking & Finance",
+    "MARUTI": "Automobiles",
+    "SUNPHARMA": "Healthcare",
+    "TITAN": "Consumer Durables",
+    "ADANIENT": "Diversified",
+    "ADANIPORTS": "Transportation",
+    "TATASTEEL": "Metals & Mining",
+    "NTPC": "Energy & Oil",
+    "POWERGRID": "Energy & Oil",
+    "COALINDIA": "Energy & Oil",
+    "ONGC": "Energy & Oil",
+    "BAJAJFINSV": "Banking & Finance",
+    "WIPRO": "Software & Services",
+    "ASIANPAINT": "Consumer Durables",
+    "HCLTECH": "Software & Services",
+    "GRASIM": "Cement & Construction",
+    "TECHM": "Software & Services",
+    "INDUSINDBK": "Banking & Finance",
+    "DEEPAKFERT": "Fertilizers",
+    "ANGELONE": "Financial Services",
+    "HONASA": "FMCG",
+    "MAXHEALTH": "Healthcare",
+    "PNB": "Banking & Finance",
+    "CANBK": "Banking & Finance",
+    "TORNTPHARM": "Healthcare",
+    "SUPREMEIND": "Capital Goods",
+    "ETERNAL": "Retailing",
+    "BELRISE": "Automobiles",
+    "TATACOMM.NS": "Telecommunications",
+    "PIDILITEIND": "Chemicals",
+    "SRF": "Chemicals",
+    "HAL": "Defense & Aerospace",
+    "BEL": "Defense & Aerospace",
+}
 
 # ---------------------------------------------------------
 # 1. TOP CONTROLS & LIVE REFRESH
@@ -40,57 +105,14 @@ current_time_ist = datetime.now(ist).time()
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def fetch_institutional_sniper_picks():
-  market_universe = [
-      "RELIANCE.NS",
-      "TCS.NS",
-      "HDFCBANK.NS",
-      "ICICIBANK.NS",
-      "INFY.NS",
-      "SBIN.NS",
-      "ITC.NS",
-      "BHARTIARTL.NS",
-      "LICI.NS",
-      "AXISBANK.NS",
-      "KOTAKBANK.NS",
-      "LT.NS",
-      "BAJFINANCE.NS",
-      "MARUTI.NS",
-      "SUNPHARMA.NS",
-      "TITAN.NS",
-      "ADANIENT.NS",
-      "ADANIPORTS.NS",
-      "TATASTEEL.NS",
-      "NTPC.NS",
-      "POWERGRID.NS",
-      "COALINDIA.NS",
-      "ONGC.NS",
-      "BAJAJFINSV.NS",
-      "WIPRO.NS",
-      "ASIANPAINT.NS",
-      "HCLTECH.NS",
-      "GRASIM.NS",
-      "TECHM.NS",
-      "INDUSINDBK.NS",
-      "DEEPAKFERT.NS",
-      "ANGELONE.NS",
-      "HONASA.NS",
-      "MAXHEALTH.NS",
-      "PNB.NS",
-      "CANBK.NS",
-      "TORNTPHARM.NS",
-      "SUPREMEIND.NS",
-      "ETERNAL.NS",  # Updated from ZOMATO
-      "BELRISE.NS",
-      "TATACOMM.NS",
-      "PIDILITEIND.NS",
-      "SRF.NS",
-      "HAL.NS",
-      "BEL.NS",
-  ]
-
+  market_universe = list(STOCK_SECTOR_MAP.keys())
   sniper_rows = []
 
-  for symbol in market_universe:
+  for sym_base in market_universe:
+    symbol = f"{sym_base}.NS" if not sym_base.endswith(".NS") else sym_base
+    clean_sym = symbol.replace(".NS", "")
+    sector_name = STOCK_SECTOR_MAP.get(clean_sym, "General")
+
     try:
       ticker = yf.Ticker(symbol)
 
@@ -138,7 +160,6 @@ def fetch_institutional_sniper_picks():
 
       ltp = float(df["Close"].iloc[-1])
 
-      # Clean previous close extraction from DataFrame dates (Avoids extra API requests)
       df["Date"] = df["Time"].dt.date
       unique_dates = df["Date"].unique()
       if len(unique_dates) >= 2:
@@ -158,7 +179,7 @@ def fetch_institutional_sniper_picks():
       latest_vwap = float(df["VWAP"].iloc[-1])
       latest_ema = float(df["EMA20"].iloc[-1])
 
-      # 14-Day ATR Calculation (from daily summary)
+      # 14-Day ATR Calculation
       df_daily = ticker.history(period="14d", interval="1d")
       if not df_daily.empty and len(df_daily) >= 5:
         tr = np.maximum(
@@ -205,7 +226,8 @@ def fetch_institutional_sniper_picks():
         alpha_score = round(change_pct * rvol * (ltp / latest_vwap), 2)
 
         sniper_rows.append({
-            "Symbol": symbol.replace(".NS", ""),
+            "Symbol": clean_sym,
+            "Sector": sector_name,
             "LTP": round(ltp, 2),
             "Change": round(change_pct, 2),
             "RVOL": rvol,
@@ -368,6 +390,7 @@ else:
 
       with c1:
         st.markdown(f"### **#{idx+1} {row['Symbol']}**")
+        st.caption(f"📂 **Sector:** {row['Sector']}")
         st.metric(
             label="Live LTP",
             value=f"₹{row['LTP']}",
@@ -394,13 +417,13 @@ else:
             f"📋 Copy Sniper Payload ({row['Symbol']})", key=f"snip_{row['Symbol']}"
         ):
           st.toast(
-              f"Copied {row['Symbol']}! VWAP Buy: ₹{row['VWAP_Buy']} | T1:"
-              f" ₹{row['Target_1']}"
+              f"Copied {row['Symbol']} ({row['Sector']})! VWAP Buy:"
+              f" ₹{row['VWAP_Buy']} | T1: ₹{row['Target_1']}"
           )
 
       with st.expander(
           f"📈 Expand 5m Intraday Sniper Chart & Levels for #{idx+1}"
-          f" {row['Symbol']}"
+          f" {row['Symbol']} ({row['Sector']})"
       ):
         fig = render_sniper_chart(
             row["Symbol"],
