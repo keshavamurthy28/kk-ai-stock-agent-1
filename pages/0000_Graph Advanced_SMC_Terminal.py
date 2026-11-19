@@ -56,6 +56,8 @@ if "show_spikes" not in st.session_state:
     st.session_state.show_spikes = True
 if "show_trade_lines" not in st.session_state:
     st.session_state.show_trade_lines = True
+if "fit_far_smc_yaxis" not in st.session_state:
+    st.session_state.fit_far_smc_yaxis = False
 if "jump_date" not in st.session_state:
     st.session_state.jump_date = None
 
@@ -355,6 +357,9 @@ else:
             st.session_state.show_trade_lines = st.checkbox(
                 "BUY / SL / T1 / T2 Lines", value=st.session_state.show_trade_lines
             )
+            st.session_state.fit_far_smc_yaxis = st.checkbox(
+                "Fit Far SMC Zones on Y-Axis", value=st.session_state.fit_far_smc_yaxis
+            )
     with tc5:
         if st.button("🔄 Refresh", use_container_width=True):
             st.cache_data.clear()
@@ -365,6 +370,7 @@ else:
     show_volume = st.session_state.show_volume
     show_spikes = st.session_state.show_spikes
     show_trade_lines = st.session_state.show_trade_lines
+    fit_far_smc_yaxis = st.session_state.fit_far_smc_yaxis
 
     show_rsi = "RSI (14)" in selected_indicators
     panels = ["price"] + (["volume"] if show_volume else []) + (["rsi"] if show_rsi else [])
@@ -729,6 +735,32 @@ else:
     else:
         start_idx = 0
 
+    # Focused Y-Axis Range so Far SMC Zones Don't Squash Recent Candles
+    vis_df = df.iloc[start_idx:] if not df.iloc[start_idx:].empty else df
+    y_vals = [
+        float(vis_df["Low"].min()),
+        float(vis_df["High"].max()),
+        ltp,
+    ]
+    if "VWAP" in selected_indicators and not vis_df["VWAP"].isna().all():
+        y_vals.extend([float(vis_df["VWAP"].min()), float(vis_df["VWAP"].max())])
+    if "20 EMA" in selected_indicators and not vis_df["EMA20"].isna().all():
+        y_vals.extend([float(vis_df["EMA20"].min()), float(vis_df["EMA20"].max())])
+    if show_trade_lines:
+        y_vals.extend([entry_p, sl_p, t1_p])
+    if fit_far_smc_yaxis:
+        if bull_fvg:
+            y_vals.extend([bull_fvg[1], bull_fvg[2]])
+        if bear_fvg:
+            y_vals.extend([bear_fvg[1], bear_fvg[2]])
+        if bull_ob:
+            y_vals.extend([bull_ob[1], bull_ob[2]])
+
+    y_min_raw = min(y_vals)
+    y_max_raw = max(y_vals)
+    y_pad = max((y_max_raw - y_min_raw) * 0.08, y_max_raw * 0.005)
+    y_range_bounds = [y_min_raw - y_pad, y_max_raw + y_pad]
+
     active_ind_text = ", ".join(selected_indicators) if selected_indicators else "None"
     ist_now_str = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%H:%M:%S IST")
 
@@ -743,6 +775,7 @@ else:
         yaxis=dict(
             side="right",
             title="Price (₹)",
+            range=y_range_bounds,
             showgrid=True,
             gridcolor="rgba(255,255,255,0.06)",
             showspikes=show_spikes,
