@@ -1,4 +1,7 @@
 from datetime import datetime, time as dt_time
+import hashlib
+from pathlib import Path
+import sys
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -16,6 +19,83 @@ is_market_open = (
     now_ist.weekday() < 5
     and dt_time(9, 15) <= now_ist.time() <= dt_time(15, 30)
 )
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from utils.pick_ledger import record_picks as _ledger_record_picks
+except Exception:
+    _ledger_record_picks = None
+
+
+def _save_mudra_picks_to_ledger(picks: list[dict], module_label: str = "MUDRA Top 5") -> int:
+    if not picks:
+        return 0
+    if callable(_ledger_record_picks):
+        try:
+            return int(_ledger_record_picks(module_label, picks))
+        except Exception:
+            pass
+
+    ledger_dir = REPO_ROOT / "data_ledger"
+    ledger_dir.mkdir(parents=True, exist_ok=True)
+    ledger_file = ledger_dir / "pick_click_ledger.csv"
+    cols = [
+        "pick_id",
+        "logged_at_ist",
+        "session_date",
+        "iso_week",
+        "module",
+        "symbol",
+        "side",
+        "entry_price",
+        "stop_loss",
+        "target_1",
+        "target_2",
+        "notes",
+    ]
+    ts_str = now_ist.strftime("%Y-%m-%d %H:%M:%S IST")
+    s_date = now_ist.strftime("%Y-%m-%d")
+    i_week = f"{now_ist.isocalendar().year}-W{now_ist.isocalendar().week:02d}"
+    bucket = now_ist.strftime("%Y-%m-%d %H:%M")
+
+    existing = pd.read_csv(ledger_file) if ledger_file.exists() else pd.DataFrame(columns=cols)
+    seen = set(existing["pick_id"].dropna().astype(str)) if not existing.empty else set()
+    new_rows = []
+    for p in picks:
+        sym = str(p["symbol"]).strip().upper()
+        if not sym.endswith(".NS"):
+            sym = f"{sym}.NS"
+        side = str(p.get("side", "BUY")).upper()
+        entry = float(p["entry"])
+        pid = hashlib.sha1(f"{bucket}|{module_label}|{sym}|{side}|{entry:.4f}".encode("utf-8")).hexdigest()[:12]
+        if pid in seen:
+            continue
+        seen.add(pid)
+        new_rows.append({
+            "pick_id": pid,
+            "logged_at_ist": ts_str,
+            "session_date": s_date,
+            "iso_week": i_week,
+            "module": module_label,
+            "symbol": sym,
+            "side": side,
+            "entry_price": round(entry, 2),
+            "stop_loss": round(float(p["sl"]), 2),
+            "target_1": round(float(p["t1"]), 2),
+            "target_2": round(float(p["t2"]), 2),
+            "notes": str(p.get("notes", "")),
+        })
+    if not new_rows:
+        return 0
+    out = pd.concat([existing, pd.DataFrame(new_rows)], ignore_index=True).drop_duplicates(
+        subset=["pick_id"], keep="first"
+    )
+    out.to_csv(ledger_file, index=False)
+    return len(new_rows)
+
 
 st.header("⚙️ Terminal Control Center")
 if st.button("🔄 Refresh Live Scans", type="primary"):
@@ -45,8 +125,8 @@ with st.expander("📘 Beginner Guide: How to Read Entries, Stop-Loss & Profit T
     st.markdown(
         "- **Table vs. Chart Price:** The top ranking table scans daily (`1d`) momentum/volume; the chart below shows your selected candle interval (`5m` to `1D`).\n"
         "- **When to Buy:** Wait for active market hours (**9:15 AM IST**) and check that price holds constructively rather than chasing a sudden spike without a stop-loss.\n"
-        "- **When to Book Profit:** Consider booking partial or full profit near **Target 1 (1.5R)** first, and only trail a smaller portion toward **Target 2 (2.5R)** if momentum continues[cite: 1].\n"
-        "- **Risk Reality:** No scanner guarantees profit. Always size small while learning and honor your **Stop-Loss**[cite: 1]. Not financial advice."
+        "- **When to Book Profit:** Consider booking partial or full profit near **Target 1 (1.5R)** first, and only trail a smaller portion toward **Target 2 (2.5R)** if momentum continues.\n"
+        "- **Risk Reality:** No scanner guarantees profit. Always size small while learning and honor your **Stop-Loss**. Not financial advice."
     )
 
 # High-liquidity universe with Sector Classifications
@@ -95,7 +175,7 @@ def _extract_ticker_df(raw_df, t_key, total_tickers):
 
 
 @st.cache_data(ttl=30)
-def scan_live_universe(symbols_dict):
+def scan_live_universe(symbols_dict, strict_mode=True):
     tickers = [f"{s}.NS" for s in symbols_dict.keys()]
     try:
         raw = yf.download(
@@ -135,6 +215,9 @@ def scan_live_universe(symbols_dict):
             )
             rvol = round(cur_vol / avg_vol, 2) if avg_vol > 0 and cur_vol > 0 else 1.0
 
+            if strict_mode and (chg_pct < 0.0 or rvol < 1.05):
+                continue
+
             high_15d = float(df_s["High"].iloc[-16:-1].max()) if len(df_s) >= 16 else float(df_s["High"].iloc[:-1].max())
             low_5d = float(df_s["Low"].iloc[-5:].min())
 
@@ -146,7 +229,8 @@ def scan_live_universe(symbols_dict):
                 sig_source = "🔵 FRESH INTRADAY BREAKOUT"
                 reason = f"Momentum Drive ({chg_pct:+.2f}%) + {rvol:.2f}x RVOL"
 
-            sl = round(max(low_5d * 0.992, ltp * 0.955), 2)
+            sl = round(max(low_5d * 0.994, ltp * 0.962), 2)
+            sl = min(sl, round(ltp * 0.985, 2))
             risk = max(ltp - sl, ltp * 0.015)
             t1 = round(ltp + (risk * 1.5), 2)
             t2 = round(ltp + (risk * 2.5), 2)
@@ -188,16 +272,49 @@ def scan_live_universe(symbols_dict):
     return res_df.drop(columns=["Score"])
 
 
+mudra_mode = st.selectbox(
+    "🛡️ MUDRA Quality Mode:",
+    ["Strict (+Chg & RVOL ≥ 1.05x)", "Standard (All Universe)"],
+    index=0,
+)
+
 with st.spinner("Scanning NSE breakouts & sector flows..."):
-    rank_df = scan_live_universe(UNIVERSE)
+    rank_df = scan_live_universe(UNIVERSE, strict_mode=mudra_mode.startswith("Strict"))
 
 selected_sym = "MCX"
 
 if not rank_df.empty:
+    # Dedicated MUDRA Top 5 Strip
+    st.subheader("⭐ MUDRA Top 5 Picks (Highlighted Separately)")
+    mudra_top5 = rank_df.head(5)
+    m5_cols = st.columns(len(mudra_top5))
+    mudra_payload = []
+    for idx_m5, r5 in mudra_top5.iterrows():
+        with m5_cols[idx_m5]:
+            st.metric(
+                label=f"#{r5['Rank']} {r5['Stock']}",
+                value=f"₹{r5['LTP']:,.2f}",
+                delta=f"{r5['Change_%']:+.2f}% | T1 ₹{r5['Target_1']:,.2f}",
+            )
+            st.caption(f"SL ₹{r5['Stop_Loss']:,.2f} • Vol {r5['Volume_Surge']:.2f}x")
+        mudra_payload.append({
+            "symbol": r5["Stock"],
+            "side": "BUY",
+            "entry": float(r5["LTP"]),
+            "sl": float(r5["Stop_Loss"]),
+            "t1": float(r5["Target_1"]),
+            "t2": float(r5["Target_2"]),
+            "notes": f"MUDRA #{r5['Rank']} | {r5['Catalyst_Reason']}",
+        })
+
+    if st.button("📌 Log MUDRA Top 5 Picks to History Ledger", type="primary"):
+        saved_5 = _save_mudra_picks_to_ledger(mudra_payload, "MUDRA Top 5")
+        st.success(f"Recorded {saved_5} MUDRA Top 5 pick(s) to history ledger.")
+
     st.subheader("🏆 Live Intraday & Advance Execution Ranking Table")
     st.caption(
         "👇 **Click any row in the table below** to project its interactive chart, "
-        "Reference Buy zone, Stop-Loss, and Targets[cite: 1]."
+        "Reference Buy zone, Stop-Loss, and Targets."
     )
 
     def highlight_signal_rows(row):
@@ -232,7 +349,7 @@ if not rank_df.empty:
     else:
         selected_sym = rank_df.iloc[0]["Stock"]
 else:
-    st.warning("Scanner data temporarily unavailable. Defaulting to MCX.")
+    st.warning("No stocks matched the current filter. Try **Standard (All Universe)** or click **Refresh Live Scans**.")
 
 st.markdown("---")
 
