@@ -1,7 +1,10 @@
+from datetime import datetime, time as dt_time
+import time
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import pytz
 import streamlit as st
 import yfinance as yf
 
@@ -9,21 +12,34 @@ st.set_page_config(
     page_title="Institutional Smart Money Flow & Pulse Terminal", layout="wide"
 )
 
+ist = pytz.timezone("Asia/Kolkata")
+now_ist = datetime.now(ist)
+is_market_open = (
+    now_ist.weekday() < 5
+    and dt_time(9, 15) <= now_ist.time() <= dt_time(15, 30)
+)
+
 st.title("⚡ Institutional Smart Money Flow & Pulse Terminal")
 st.caption(
     "Volume-Weighted Money Flow Estimates, Carry-Forward Watchlist Radar & Interactive 15m Charting."
 )
 
-if st.button("🔄 Refresh Smart Money Flows", type="primary"):
-    st.cache_data.clear()
-    st.rerun()
+c_ref1, c_ref2, c_ref3 = st.columns([1.4, 1.2, 3.4])
+with c_ref1:
+    if st.button("🔄 Refresh Smart Money Flows", type="primary", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+with c_ref2:
+    live_stream = st.toggle("🌊 Auto-Stream (30s)", value=False)
+with c_ref3:
+    status_txt = "🟢 Live NSE Session" if is_market_open else "🟡 Pre-Market / Market Closed"
+    st.caption(f"{status_txt} • Synced: **{now_ist.strftime('%I:%M:%S %p IST')}**")
 
-with st.expander("📘 Beginner Guide: How to Read This Page Safely", expanded=False):
+with st.expander("📘 Beginner Guide: How to Read Flow & Where Big Volume Goes", expanded=False):
     st.markdown(
-        "- **Est. Flow (Cr):** An **estimate** based on price direction and unusual volume—not an official exchange institutional report.\n"
-        "- **RVOL (Relative Volume):** Around **1.0x** is average activity; **1.5x+** shows stronger-than-usual participation.\n"
-        "- **Close Strength %:** Near **100%** means price closed near the day's high; near **0%** means near the day's low.\n"
-        "- **Carry-Forward Radar:** Helps shortlist strong/weak stocks for your watchlist—always confirm live price action after **9:15 AM IST** and use a stop-loss. Not financial advice."
+        "- **Where Big Money/Volume Clusters:** Thicker green streams/bars show stocks with strong upward moves + high volume (**Est. Flow**); thicker red shows heavy selling/downward volume pressure.\n"
+        "- **Not Official FII/DII Data:** This estimates heavy market participation from price and volume (`RVOL`)—not a real-time institutional trade book.\n"
+        "- **How to Use Safely:** Shortlist top flow stocks on your watchlist, wait for live confirmation after **9:15 AM IST**, and always use a stop-loss. Not financial advice."
     )
 
 SECTOR_STOCKS = {
@@ -45,7 +61,7 @@ def _extract_ticker_df(raw_df, ticker):
     return raw_df.dropna(how="all")
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def fetch_smart_money_pulse():
     all_syms = [s for stocks in SECTOR_STOCKS.values() for s in stocks]
     raw = yf.download(
@@ -76,7 +92,6 @@ def fetch_smart_money_pulse():
             rng = high_now - low_now
             close_pos = ((close_now - low_now) / rng) * 100 if rng > 0 else 50.0
 
-            # Estimated Flow (Cr) based on abnormal volume surge & price direction
             turnover_cr = (close_now * vol_now) / 1e7
             abnormal_ratio = max(rvol - 0.85, 0.1) if rvol > 1.0 else 0.15
             direction = 1 if chg_pct >= 0 else -1
@@ -112,12 +127,11 @@ def fetch_smart_money_pulse():
     if not rows:
         return pd.DataFrame()
 
-    df_out = (
+    return (
         pd.DataFrame(rows)
         .sort_values(by="Est. Flow (Cr)", ascending=False)
         .reset_index(drop=True)
     )
-    return df_out
 
 
 def render_inline_smc_chart(symbol_clean):
@@ -222,9 +236,12 @@ if not df_pulse.empty:
     outflow = abs(df_pulse[df_pulse["Est. Flow (Cr)"] < 0]["Est. Flow (Cr)"].sum())
     net_bias = inflow - outflow
 
+    top_in_row = df_pulse.iloc[0]
+    top_out_row = df_pulse.sort_values(by="Est. Flow (Cr)", ascending=True).iloc[0]
+
     m1, m2, m3 = st.columns(3)
-    m1.metric("🟢 Total Est. Inflow", f"₹{inflow:,.0f} Cr", "Positive Volume Bias")
-    m2.metric("🔴 Total Est. Outflow", f"₹{outflow:,.0f} Cr", "Negative Volume Bias")
+    m1.metric("🟢 Total Est. Inflow", f"₹{inflow:,.0f} Cr", f"Top: {top_in_row['Symbol']} (₹{top_in_row['Est. Flow (Cr)']:+.0f} Cr)")
+    m2.metric("🔴 Total Est. Outflow", f"₹{outflow:,.0f} Cr", f"Heaviest: {top_out_row['Symbol']} (₹{top_out_row['Est. Flow (Cr)']:+.0f} Cr)")
     m3.metric(
         "⚖️ Net Est. Bias",
         f"₹{net_bias:+,.0f} Cr",
@@ -255,45 +272,77 @@ if not df_pulse.empty:
 
     st.markdown("---")
 
-    # 2. INTERACTIVE SANKEY FLOW STREAM
-    st.subheader("🌊 Sector-to-Stock Estimated Flow Stream (Sankey)")
-    sectors = list(df_pulse["Sector"].unique())
-    symbols = list(df_pulse["Symbol"].unique())
-    nodes = sectors + symbols
-    node_idx = {name: i for i, name in enumerate(nodes)}
+    # 2. WHERE BIG VOLUME / FLOW IS PILING UP (TOP MOVERS BAR + SANKEY STREAM)
+    st.subheader("🌊 Where Heavy Volume & Flow Are Clustering")
+    st.caption(
+        f"Biggest estimated inflow is currently in **{top_in_row['Symbol']}** (₹{top_in_row['Est. Flow (Cr)']:+.1f} Cr), "
+        f"while heaviest outflow pressure is in **{top_out_row['Symbol']}** (₹{top_out_row['Est. Flow (Cr)']:+.1f} Cr)."
+    )
 
-    sources = [node_idx[s] for s in df_pulse["Sector"]]
-    targets = [node_idx[sym] for sym in df_pulse["Symbol"]]
-    values = [max(abs(v), 0.5) for v in df_pulse["Est. Flow (Cr)"]]
-    link_colors = [
-        "rgba(0, 230, 118, 0.45)" if v >= 0 else "rgba(255, 82, 82, 0.45)"
-        for v in df_pulse["Est. Flow (Cr)"]
-    ]
+    top_movers = pd.concat([
+        df_pulse.head(5),
+        df_pulse.sort_values(by="Est. Flow (Cr)", ascending=True).head(5),
+    ]).drop_duplicates(subset=["Symbol"]).sort_values(by="Est. Flow (Cr)", ascending=True)
 
-    fig_sankey = go.Figure(
-        data=[
-            go.Sankey(
-                node=dict(
-                    pad=15,
-                    thickness=18,
-                    line=dict(color="black", width=0.5),
-                    label=nodes,
-                    color=["#29B6F6"] * len(sectors)
-                    + [
-                        "#00E676" if v >= 0 else "#FF5252"
-                        for v in df_pulse["Est. Flow (Cr)"]
-                    ],
-                ),
-                link=dict(
-                    source=sources, target=targets, value=values, color=link_colors
-                ),
-            )
+    fig_bar = go.Figure(
+        go.Bar(
+            x=top_movers["Est. Flow (Cr)"],
+            y=top_movers["Symbol"],
+            orientation="h",
+            marker_color=[
+                "#00E676" if v >= 0 else "#FF5252" for v in top_movers["Est. Flow (Cr)"]
+            ],
+            text=[f"₹{v:+.1f} Cr" for v in top_movers["Est. Flow (Cr)"]],
+            textposition="outside",
+        )
+    )
+    fig_bar.update_layout(
+        title="Top Inflow vs. Outflow Concentration (Est. ₹ Cr)",
+        template="plotly_dark",
+        height=320,
+        margin=dict(l=10, r=60, t=40, b=20),
+        xaxis_title="Estimated Flow (₹ Cr)",
+    )
+    st.plotly_chart(fig_bar, use_container_width=True)
+
+    with st.expander("View Full Sector-to-Stock Sankey Stream", expanded=True):
+        sectors = list(df_pulse["Sector"].unique())
+        symbols = list(df_pulse["Symbol"].unique())
+        nodes = sectors + symbols
+        node_idx = {name: i for i, name in enumerate(nodes)}
+
+        sources = [node_idx[s] for s in df_pulse["Sector"]]
+        targets = [node_idx[sym] for sym in df_pulse["Symbol"]]
+        values = [max(abs(v), 0.5) for v in df_pulse["Est. Flow (Cr)"]]
+        link_colors = [
+            "rgba(0, 230, 118, 0.45)" if v >= 0 else "rgba(255, 82, 82, 0.45)"
+            for v in df_pulse["Est. Flow (Cr)"]
         ]
-    )
-    fig_sankey.update_layout(
-        template="plotly_dark", height=430, margin=dict(l=10, r=10, t=15, b=15)
-    )
-    st.plotly_chart(fig_sankey, use_container_width=True)
+
+        fig_sankey = go.Figure(
+            data=[
+                go.Sankey(
+                    node=dict(
+                        pad=15,
+                        thickness=18,
+                        line=dict(color="black", width=0.5),
+                        label=nodes,
+                        color=["#29B6F6"] * len(sectors)
+                        + [
+                            "#00E676" if v >= 0 else "#FF5252"
+                            for v in df_pulse["Est. Flow (Cr)"]
+                        ],
+                    ),
+                    link=dict(
+                        source=sources, target=targets, value=values, color=link_colors
+                    ),
+                )
+            ]
+        )
+        fig_sankey.update_layout(
+            template="plotly_dark", height=430, margin=dict(l=10, r=10, t=15, b=15)
+        )
+        st.plotly_chart(fig_sankey, use_container_width=True)
 
     st.markdown("---")
 
@@ -337,3 +386,8 @@ if not df_pulse.empty:
     render_inline_smc_chart(active_symbol)
 else:
     st.warning("⚠️ Unable to load flow data right now. Click **Refresh Smart Money Flows** to retry.")
+
+if live_stream:
+    time.sleep(30)
+    st.cache_data.clear()
+    st.rerun()
