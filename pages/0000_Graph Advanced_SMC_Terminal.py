@@ -1,18 +1,20 @@
+from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import pytz
 import streamlit as st
 import yfinance as yf
 
 st.set_page_config(page_title="Advanced SMC & FVG Terminal", layout="wide")
 st.title("📊 Advanced Smart Money Concepts (SMC) & Institutional FVG Terminal")
 
-with st.expander("📘 Beginner Guide: Intervals, Indicators & Zoom Controls", expanded=False):
+with st.expander("📘 Beginner Guide: Interval Buttons, Top Controls & Bottom Range Bar", expanded=False):
     st.markdown(
-        "- **Candle Intervals:** Use short intervals (`1m`, `5m`, `15m`) for intraday timing and longer intervals (`1D`, `1W`, `1M`) for broader trend context.\n"
-        "- **Select Extra Indicators:** Choose only the indicators you need (`VWAP`, `20/50/200 EMA`, `Bollinger Bands`, `RSI 14`) so your chart stays clear and adaptable.\n"
-        "- **Zoom Intraday to Long-Term:** Pick **Full History / Long-Term** or **All Loaded Candles** to see the full loaded range, or scroll/drag directly on the chart. Always verify live prices on your broker and use a stop-loss. Not financial advice."
+        "- **Candle Interval Buttons:** Click any timeframe button (`1m` to `1M`) to switch candle resolution instantly without opening a dropdown.\n"
+        "- **Top Chart Controls:** Use the **Indicators**, **SMC Layers**, and **Chart Settings** popovers above the graph to customize overlays cleanly.\n"
+        "- **Bottom Range Bar (`1d` – `All` + Jump to Date):** Click range buttons below the chart to zoom from intraday to multi-year history, or scroll/drag directly on the chart. Always verify live prices on your broker and use a stop-loss. Not financial advice."
     )
 
 INTERVAL_OPTIONS = [
@@ -26,35 +28,63 @@ INDICATOR_OPTIONS = [
     "Bollinger Bands",
     "RSI (14)",
 ]
+SMC_LAYER_OPTIONS = [
+    "4H FVG",
+    "Order Blocks",
+    "BOS / CHoCH",
+    "Liquidity (BSL/SSL)",
+    "Discount/Premium 50%",
+]
+RANGE_BUTTONS = ["1d", "5d", "1m", "3m", "6m", "YTD", "1Y", "5Y", "All"]
 
-# Top Control Bar (Symbol, Candle Interval, Technical Indicators, SMC Layers)
-c1, c2 = st.columns([1.2, 2.8])
-raw_sym = c1.text_input("Enter NSE Stock Symbol", value="LICHSGFIN").strip().upper()
-ticker = raw_sym if raw_sym.endswith(".NS") else f"{raw_sym}.NS"
-
-tf_choice = c2.selectbox(
-    "Candle Interval (TradingView Style)",
-    INTERVAL_OPTIONS,
-    index=0,
-)
-
-ind_col, smc_col = st.columns([1.6, 1.6])
-selected_indicators = ind_col.multiselect(
-    "📈 Technical Indicators (Add / Remove Dynamically)",
-    INDICATOR_OPTIONS,
-    default=["VWAP", "20 EMA"],
-)
-show_layers = smc_col.multiselect(
-    "🧱 Active SMC Layers",
-    [
+if "tf_choice" not in st.session_state:
+    st.session_state.tf_choice = "1m"
+if "range_choice" not in st.session_state:
+    st.session_state.range_choice = "1d"
+if "selected_indicators" not in st.session_state:
+    st.session_state.selected_indicators = ["VWAP", "20 EMA"]
+if "show_layers" not in st.session_state:
+    st.session_state.show_layers = [
         "4H FVG",
         "Order Blocks",
         "BOS / CHoCH",
         "Liquidity (BSL/SSL)",
-        "Discount/Premium 50%",
-    ],
-    default=["4H FVG", "Order Blocks", "BOS / CHoCH", "Liquidity (BSL/SSL)"],
-)
+    ]
+if "show_volume" not in st.session_state:
+    st.session_state.show_volume = True
+if "show_spikes" not in st.session_state:
+    st.session_state.show_spikes = True
+if "show_trade_lines" not in st.session_state:
+    st.session_state.show_trade_lines = True
+if "jump_date" not in st.session_state:
+    st.session_state.jump_date = None
+
+# Symbol Input + Clickable Candle Interval Buttons Row
+sym_col, tf_bar_col = st.columns([1.3, 4.7])
+with sym_col:
+    raw_sym = st.text_input("NSE Stock Symbol", value="LICHSGFIN").strip().upper()
+ticker = raw_sym if raw_sym.endswith(".NS") else f"{raw_sym}.NS"
+
+with tf_bar_col:
+    st.caption("Candle Interval (Click to Switch)")
+    tf_cols = st.columns(len(INTERVAL_OPTIONS))
+    for idx_tf, tf_label in enumerate(INTERVAL_OPTIONS):
+        is_active = st.session_state.tf_choice == tf_label
+        if tf_cols[idx_tf].button(
+            tf_label,
+            key=f"btn_tf_{tf_label}",
+            type="primary" if is_active else "secondary",
+            use_container_width=True,
+        ):
+            st.session_state.tf_choice = tf_label
+            st.session_state.jump_date = None
+            if tf_label in ["1D", "1W", "1M"] and st.session_state.range_choice in ["1d", "5d"]:
+                st.session_state.range_choice = "1Y"
+            elif tf_label not in ["1D", "1W", "1M"] and st.session_state.range_choice in ["1Y", "5Y", "All"]:
+                st.session_state.range_choice = "1d"
+            st.rerun()
+
+tf_choice = st.session_state.tf_choice
 
 
 @st.cache_data(ttl=15)
@@ -69,7 +99,7 @@ def fetch_clean_smc(sym, tf):
         "30m": "30d",
         "1h": "60d",
         "4h": "60d",
-        "1D": "2y",
+        "1D": "5y",
         "1W": "5y",
         "1M": "5y",
     }
@@ -157,7 +187,7 @@ else:
             df["Time"].dt.strftime("%H:%M  (%d %b)"),
         )
 
-    # Calculate Optional Technical Indicators
+    # Calculate Technical Indicators
     df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
     df["EMA50"] = df["Close"].ewm(span=50, adjust=False).mean()
     df["EMA200"] = df["Close"].ewm(span=200, adjust=False).mean()
@@ -294,26 +324,60 @@ else:
     m4.metric("🎯 Target 1 (1.5R)", f"₹{t1_p:,.2f}", "Book Profit First")
     m5.metric("🚀 Target 2 (BSL / 2.5R)", f"₹{t2_p:,.2f}", "Stretch Target")
 
-    # Quick Zoom Range Selector (Intraday -> Full Long-Term Range)
-    z_col1, z_col2 = st.columns([2.6, 2.4])
-    zoom_preset = z_col1.radio(
-        "Timeline Zoom (Intraday to Full Loaded History)",
-        [
-            "Last 1 Day (Intraday)",
-            "Last 5 Days",
-            "Full History / Long-Term",
-        ],
-        index=0 if is_intraday_tf else 2,
-        horizontal=True,
-    )
-    z_col2.caption(
-        "💡 Scroll wheel or drag on the chart to zoom in/out across minutes, days, or full loaded history."
-    )
+    # Top Chart Corner Action Bar (TradingView Style Popovers & Controls)
+    tc1, tc2, tc3, tc4, tc5 = st.columns([2.2, 1.3, 1.3, 1.3, 1.0])
+    with tc1:
+        st.caption(
+            f"**{raw_sym}** · **{tf_choice}** · Range: **{st.session_state.range_choice}**"
+        )
+    with tc2:
+        with st.popover("📈 Indicators", use_container_width=True):
+            st.session_state.selected_indicators = st.multiselect(
+                "Select Indicators",
+                INDICATOR_OPTIONS,
+                default=st.session_state.selected_indicators,
+            )
+    with tc3:
+        with st.popover("🧱 SMC Layers", use_container_width=True):
+            st.session_state.show_layers = st.multiselect(
+                "Select SMC Overlays",
+                SMC_LAYER_OPTIONS,
+                default=st.session_state.show_layers,
+            )
+    with tc4:
+        with st.popover("⚙️ Settings", use_container_width=True):
+            st.session_state.show_volume = st.checkbox(
+                "Show Volume Panel", value=st.session_state.show_volume
+            )
+            st.session_state.show_spikes = st.checkbox(
+                "Crosshair / Spikes", value=st.session_state.show_spikes
+            )
+            st.session_state.show_trade_lines = st.checkbox(
+                "BUY / SL / T1 / T2 Lines", value=st.session_state.show_trade_lines
+            )
+    with tc5:
+        if st.button("🔄 Refresh", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+
+    selected_indicators = st.session_state.selected_indicators
+    show_layers = st.session_state.show_layers
+    show_volume = st.session_state.show_volume
+    show_spikes = st.session_state.show_spikes
+    show_trade_lines = st.session_state.show_trade_lines
 
     show_rsi = "RSI (14)" in selected_indicators
-    n_rows = 3 if show_rsi else 2
-    row_heights = [0.64, 0.18, 0.18] if show_rsi else [0.78, 0.22]
-    vertical_spacing = 0.025 if show_rsi else 0.02
+    panels = ["price"] + (["volume"] if show_volume else []) + (["rsi"] if show_rsi else [])
+    n_rows = len(panels)
+    vol_row = panels.index("volume") + 1 if "volume" in panels else None
+    rsi_row = panels.index("rsi") + 1 if "rsi" in panels else None
+
+    if n_rows == 3:
+        row_heights = [0.64, 0.18, 0.18]
+    elif n_rows == 2:
+        row_heights = [0.78, 0.22]
+    else:
+        row_heights = [1.0]
 
     end_str = df["Axis_Str"].iloc[-1]
 
@@ -321,7 +385,7 @@ else:
         rows=n_rows,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=vertical_spacing,
+        vertical_spacing=0.025 if n_rows > 1 else 0.01,
         row_heights=row_heights,
     )
 
@@ -412,13 +476,14 @@ else:
             col=1,
         )
 
-    fig.add_trace(
-        go.Bar(x=df["Axis_Str"], y=df["Volume"], name="Volume", marker_color=v_col),
-        row=2,
-        col=1,
-    )
+    if vol_row is not None:
+        fig.add_trace(
+            go.Bar(x=df["Axis_Str"], y=df["Volume"], name="Volume", marker_color=v_col),
+            row=vol_row,
+            col=1,
+        )
 
-    if show_rsi:
+    if rsi_row is not None:
         fig.add_trace(
             go.Scatter(
                 x=df["Axis_Str"],
@@ -427,11 +492,11 @@ else:
                 name="RSI (14)",
                 line=dict(color="#CE93D8", width=1.4),
             ),
-            row=3,
+            row=rsi_row,
             col=1,
         )
-        fig.add_hline(y=70, line_dash="dot", line_color="#FF5252", line_width=1, row=3, col=1)
-        fig.add_hline(y=30, line_dash="dot", line_color="#00E676", line_width=1, row=3, col=1)
+        fig.add_hline(y=70, line_dash="dot", line_color="#FF5252", line_width=1, row=rsi_row, col=1)
+        fig.add_hline(y=30, line_dash="dot", line_color="#00E676", line_width=1, row=rsi_row, col=1)
 
     if "4H FVG" in show_layers:
         if bull_fvg:
@@ -571,88 +636,128 @@ else:
             col=1,
         )
 
-    fig.add_hline(
-        y=entry_p,
-        line_dash="solid",
-        line_color="#FFD700",
-        line_width=1.6,
-        annotation_text=f"🟡 BUY: ₹{entry_p:,.2f}",
-        annotation_position="bottom left",
-        annotation_font_color="#FFD700",
-        row=1,
-        col=1,
-    )
-    fig.add_hline(
-        y=sl_p,
-        line_dash="solid",
-        line_color="#FF5252",
-        line_width=1.6,
-        annotation_text=f"🛑 SL: ₹{sl_p:,.2f}",
-        annotation_position="bottom right",
-        annotation_font_color="#FF5252",
-        row=1,
-        col=1,
-    )
-    fig.add_hline(
-        y=t1_p,
-        line_dash="dash",
-        line_color="#29B6F6",
-        line_width=1.4,
-        annotation_text=f"🎯 T1: ₹{t1_p:,.2f}",
-        annotation_position="top left",
-        annotation_font_color="#29B6F6",
-        row=1,
-        col=1,
-    )
-    fig.add_hline(
-        y=t2_p,
-        line_dash="dash",
-        line_color="#00E676",
-        line_width=1.4,
-        annotation_text=f"🚀 T2: ₹{t2_p:,.2f}",
-        annotation_position="top right",
-        annotation_font_color="#00E676",
-        row=1,
-        col=1,
-    )
+    if show_trade_lines:
+        fig.add_hline(
+            y=entry_p,
+            line_dash="solid",
+            line_color="#FFD700",
+            line_width=1.6,
+            annotation_text=f"🟡 BUY: ₹{entry_p:,.2f}",
+            annotation_position="bottom left",
+            annotation_font_color="#FFD700",
+            row=1,
+            col=1,
+        )
+        fig.add_hline(
+            y=sl_p,
+            line_dash="solid",
+            line_color="#FF5252",
+            line_width=1.6,
+            annotation_text=f"🛑 SL: ₹{sl_p:,.2f}",
+            annotation_position="bottom right",
+            annotation_font_color="#FF5252",
+            row=1,
+            col=1,
+        )
+        fig.add_hline(
+            y=t1_p,
+            line_dash="dash",
+            line_color="#29B6F6",
+            line_width=1.4,
+            annotation_text=f"🎯 T1: ₹{t1_p:,.2f}",
+            annotation_position="top left",
+            annotation_font_color="#29B6F6",
+            row=1,
+            col=1,
+        )
+        fig.add_hline(
+            y=t2_p,
+            line_dash="dash",
+            line_color="#00E676",
+            line_width=1.4,
+            annotation_text=f"🚀 T2: ₹{t2_p:,.2f}",
+            annotation_position="top right",
+            annotation_font_color="#00E676",
+            row=1,
+            col=1,
+        )
 
-    if zoom_preset == "Last 1 Day (Intraday)" and is_intraday_tf:
-        last_date = df["Time"].dt.date.iloc[-1]
-        start_idx = max(0, int(df[df["Time"].dt.date == last_date].index[0]) - 5)
-    elif zoom_preset == "Last 5 Days" and is_intraday_tf:
-        unique_dates = sorted(df["Time"].dt.date.unique())
-        target_d = unique_dates[-5] if len(unique_dates) >= 5 else unique_dates[0]
-        start_idx = max(0, int(df[df["Time"].dt.date >= target_d].index[0]))
+    # Compute Start Index from Bottom Range Button or Jump Date
+    last_ts = df["Time"].iloc[-1]
+    r_sel = st.session_state.range_choice
+
+    if st.session_state.jump_date is not None:
+        target_dt = pd.Timestamp(st.session_state.jump_date)
+        start_idx = max(0, int((df["Time"] - target_dt).abs().idxmin()))
+    elif r_sel == "1d":
+        if is_intraday_tf:
+            last_date = df["Time"].dt.date.iloc[-1]
+            start_idx = max(0, int(df[df["Time"].dt.date == last_date].index[0]) - 3)
+        else:
+            start_idx = max(0, len(df) - 2)
+    elif r_sel == "5d":
+        if is_intraday_tf:
+            cutoff = last_ts - timedelta(days=5)
+            matches = df[df["Time"] >= cutoff]
+            start_idx = int(matches.index[0]) if not matches.empty else 0
+        else:
+            start_idx = max(0, len(df) - 5)
+    elif r_sel == "1m":
+        cutoff = last_ts - timedelta(days=30)
+        matches = df[df["Time"] >= cutoff]
+        start_idx = int(matches.index[0]) if not matches.empty else 0
+    elif r_sel == "3m":
+        cutoff = last_ts - timedelta(days=90)
+        matches = df[df["Time"] >= cutoff]
+        start_idx = int(matches.index[0]) if not matches.empty else 0
+    elif r_sel == "6m":
+        cutoff = last_ts - timedelta(days=180)
+        matches = df[df["Time"] >= cutoff]
+        start_idx = int(matches.index[0]) if not matches.empty else 0
+    elif r_sel == "YTD":
+        ytd_start = datetime(last_ts.year, 1, 1)
+        matches = df[df["Time"] >= ytd_start]
+        start_idx = int(matches.index[0]) if not matches.empty else 0
+    elif r_sel == "1Y":
+        cutoff = last_ts - timedelta(days=365)
+        matches = df[df["Time"] >= cutoff]
+        start_idx = int(matches.index[0]) if not matches.empty else 0
+    elif r_sel == "5Y":
+        cutoff = last_ts - timedelta(days=365 * 5)
+        matches = df[df["Time"] >= cutoff]
+        start_idx = int(matches.index[0]) if not matches.empty else 0
     else:
         start_idx = 0
 
     active_ind_text = ", ".join(selected_indicators) if selected_indicators else "None"
+    ist_now_str = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%H:%M:%S IST")
 
     fig.update_layout(
-        title=f"{raw_sym} ({tf_choice}) | Price: ₹{ltp:,.2f} | Indicators: {active_ind_text}",
+        title=f"{raw_sym} ({tf_choice}) | LTP: ₹{ltp:,.2f} | Ind: {active_ind_text}",
         template="plotly_dark",
-        height=740 if show_rsi else 680,
+        height=720 if show_rsi else 650,
         dragmode="pan",
         hovermode="x unified",
         showlegend=False,
-        margin=dict(l=10, r=65, t=45, b=40),
+        margin=dict(l=10, r=65, t=42, b=36),
         yaxis=dict(
             side="right",
             title="Price (₹)",
             showgrid=True,
             gridcolor="rgba(255,255,255,0.06)",
-            showspikes=True,
+            showspikes=show_spikes,
             spikemode="across",
             spikesnap="cursor",
             spikecolor="#78909C",
             spikethickness=1,
             spikedash="dash",
         ),
-        yaxis2=dict(side="right", title="Volume", showgrid=False),
     )
 
-    if show_rsi:
-        fig.update_yaxes(side="right", title="RSI", range=[0, 100], row=3, col=1)
+    if vol_row is not None:
+        fig.update_yaxes(side="right", title="Volume", showgrid=False, row=vol_row, col=1)
+    if rsi_row is not None:
+        fig.update_yaxes(side="right", title="RSI", range=[0, 100], row=rsi_row, col=1)
 
     bottom_axis_row = n_rows
     for r_idx in range(1, n_rows + 1):
@@ -660,7 +765,7 @@ else:
             type="category",
             rangeslider_visible=False,
             range=[start_idx, len(df) + 3],
-            showspikes=True,
+            showspikes=show_spikes,
             spikemode="across",
             spikesnap="cursor",
             spikecolor="#78909C",
@@ -679,3 +784,35 @@ else:
         fig.update_xaxes(axis_kwargs, row=r_idx, col=1)
 
     st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
+
+    # Bottom Range Selector Bar (1d | 5d | 1m | 3m | 6m | YTD | 1Y | 5Y | All + Jump Date + IST Clock)
+    rb_cols = st.columns([0.7] * len(RANGE_BUTTONS) + [1.2, 1.5])
+    for idx_r, r_label in enumerate(RANGE_BUTTONS):
+        is_r_active = st.session_state.range_choice == r_label and st.session_state.jump_date is None
+        if rb_cols[idx_r].button(
+            r_label,
+            key=f"btn_range_{r_label}",
+            type="primary" if is_r_active else "secondary",
+            use_container_width=True,
+        ):
+            st.session_state.range_choice = r_label
+            st.session_state.jump_date = None
+            st.rerun()
+
+    with rb_cols[len(RANGE_BUTTONS)]:
+        with st.popover("📅 Jump Date", use_container_width=True):
+            picked = st.date_input(
+                "Go to date",
+                value=st.session_state.jump_date or df["Time"].dt.date.iloc[-1],
+                min_value=df["Time"].dt.date.iloc[0],
+                max_value=df["Time"].dt.date.iloc[-1],
+            )
+            if st.button("Apply Date", use_container_width=True):
+                st.session_state.jump_date = picked
+                st.rerun()
+            if st.session_state.jump_date is not None and st.button("Clear Jump", use_container_width=True):
+                st.session_state.jump_date = None
+                st.rerun()
+
+    with rb_cols[len(RANGE_BUTTONS) + 1]:
+        st.caption(f"🕒 {ist_now_str} · Scroll/Drag to zoom")
