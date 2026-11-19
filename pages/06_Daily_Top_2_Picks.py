@@ -7,7 +7,7 @@ import yfinance as yf
 
 # Page Configuration
 st.set_page_config(
-    page_title="Master Pipeline Top 2 Picks | Adaptive Market Posture",
+    page_title="Same-Day Intraday & Long-Term Watchlist",
     layout="wide",
 )
 
@@ -18,13 +18,11 @@ is_market_open = (
     and dt_time(9, 15) <= now_ist.time() <= dt_time(15, 30)
 )
 
-st.title(
-    "🔥 Master Pipeline Top 2 Picks: Adaptive Bullish Long / Bearish Short Terminal"
-)
+st.title("⚡ Pure Same-Day Intraday Setups + Separate Long-Term Table")
 st.markdown(
-    "**Beginner-Friendly Pipeline View:** Checks Nifty 50 posture and scans large-cap stocks "
-    "for momentum setups—helping you focus on **at most 2 setups at a time** rather than "
-    "chasing dozens of tickers."
+    "**Same-Day Intraday Focus:** Designed for **buy today & exit today (before 3:30 PM IST)** "
+    "with disciplined profit-booking targets and hard stop-losses—paired with a **separate table** "
+    "for longer-term stocks so you don't mix timeframes."
 )
 
 session_txt = (
@@ -34,21 +32,45 @@ session_txt = (
 )
 st.caption(f"{session_txt} • Synced: **{now_ist.strftime('%d %b %Y, %I:%M:%S %p IST')}**")
 
-with st.expander("📘 Beginner Guide: How to Read Top 2 Setups & Book Profit Safely", expanded=False):
+with st.expander("📘 Beginner Rulebook: Same-Day Profit Booking & Risk Guardrails", expanded=True):
     st.markdown(
-        "- **Market Posture:** **BULLISH** when Nifty is up (`>+0.4%`), **BEARISH** when Nifty is down (`<-0.4%`), and **NEUTRAL / MIXED** in between so red Nifty days aren't mislabeled bullish.\n"
-        "- **When to Buy / Act:** Only during live market hours (**9:15 AM IST**) after checking price action and volume—never treat a scanner card as a guaranteed profit.\n"
-        "- **When to Book Profit:** Consider booking partial or full profit around **Target 1** first rather than waiting blindly for **Target 2**, and honor your **Stop-Loss** if price moves against you. Not financial advice."
+        "- **No 'Pakka' Guarantee:** Even strong setups can reverse in live trading—never treat any scanner signal as guaranteed profit.\n"
+        "- **Same-Day Exit Rule:** For **Intraday (Buy Today / Sell Today)**, look to book profit around **Target 1** first, honor your **Stop-Loss**, and exit before **3:30 PM IST**.\n"
+        "- **Separate Long-Term Table:** Use the **Long-Term Watchlist** table below only for multi-day/positional study—not for same-day scalping. Not financial advice."
     )
 
-# ---------------------------------------------------------
-# 1. LIVE MARKET PULSE & PIPELINE SYNC
-# ---------------------------------------------------------
-col_r1, col_r2 = st.columns([4, 1])
-with col_r2:
-    if st.button("🔄 Force Refresh Pipeline Execution", type="primary", use_container_width=True):
+UNIVERSE = [
+    "RELIANCE.NS",
+    "TCS.NS",
+    "HDFCBANK.NS",
+    "ICICIBANK.NS",
+    "INFY.NS",
+    "SBIN.NS",
+    "ITC.NS",
+    "BHARTIARTL.NS",
+    "AXISBANK.NS",
+    "LT.NS",
+    "BAJFINANCE.NS",
+    "SUNPHARMA.NS",
+    "TITAN.NS",
+    "TATASTEEL.NS",
+    "NTPC.NS",
+    "ONGC.NS",
+    "VEDL.NS",
+    "HINDALCO.NS",
+]
+
+col_f1, col_r1 = st.columns([3.5, 1.5])
+with col_f1:
+    intraday_bias = st.selectbox(
+        "🎯 Same-Day Intraday Direction:",
+        ["Bullish Intraday (Buy Today / Sell Today)", "Bearish Intraday (Weakness / Breakdown Watch)"],
+        index=0,
+    )
+with col_r1:
+    if st.button("🔄 Refresh Intraday & Long-Term", type="primary", use_container_width=True):
         st.cache_data.clear()
-        st.toast("Cleared cache and re-evaluated pipeline data stream!", icon="⚡")
+        st.toast("Refreshing live 5m intraday & daily long-term tables...", icon="⚡")
         st.rerun()
 
 
@@ -62,34 +84,25 @@ def _extract_ticker_df(raw_df, sym):
     return raw_df.dropna(how="all")
 
 
-@st.cache_data(ttl=120)
-def evaluate_market_posture_and_picks():
-    universe = [
-        "RELIANCE.NS",
-        "TCS.NS",
-        "HDFCBANK.NS",
-        "ICICIBANK.NS",
-        "INFY.NS",
-        "SBIN.NS",
-        "ITC.NS",
-        "BHARTIARTL.NS",
-        "AXISBANK.NS",
-        "LT.NS",
-        "BAJFINANCE.NS",
-        "SUNPHARMA.NS",
-        "TITAN.NS",
-        "TATASTEEL.NS",
-        "NTPC.NS",
-        "ONGC.NS",
-        "VEDL.NS",
-        "HINDALCO.NS",
-    ]
-    all_symbols = ["^NSEI"] + universe
+@st.cache_data(ttl=60)
+def fetch_intraday_and_longterm_tables(direction_choice):
+    bullish_mode = "Bullish Intraday" in direction_choice
+    intraday_rows = []
+    longterm_rows = []
 
     try:
-        raw = yf.download(
-            all_symbols,
+        raw_5m = yf.download(
+            UNIVERSE,
             period="5d",
+            interval="5m",
+            group_by="ticker",
+            progress=False,
+            threads=True,
+            auto_adjust=True,
+        )
+        raw_1d = yf.download(
+            UNIVERSE,
+            period="3mo",
             interval="1d",
             group_by="ticker",
             progress=False,
@@ -97,150 +110,190 @@ def evaluate_market_posture_and_picks():
             auto_adjust=True,
         )
     except Exception:
-        return "NEUTRAL", 0.0, pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
 
-    df_nifty = _extract_ticker_df(raw, "^NSEI").dropna(subset=["Close"])
-    market_bias = "NEUTRAL"
-    nifty_chg = 0.0
+    for symbol in UNIVERSE:
+        clean_sym = symbol.replace(".NS", "")
 
-    if not df_nifty.empty and len(df_nifty) >= 2:
-        nifty_close = float(df_nifty["Close"].iloc[-1])
-        nifty_prev = float(df_nifty["Close"].iloc[-2])
-        if nifty_prev > 0 and not np.isnan(nifty_close) and not np.isnan(nifty_prev):
-            nifty_chg = round(((nifty_close - nifty_prev) / nifty_prev) * 100, 2)
-            if nifty_chg > 0.4:
-                market_bias = "BULLISH"
-            elif nifty_chg < -0.4:
-                market_bias = "BEARISH"
-            else:
-                market_bias = "NEUTRAL"
-
-    scored_rows = []
-
-    for symbol in universe:
+        # --- 1. PURE SAME-DAY INTRADAY (5m + VWAP) ---
         try:
-            df = _extract_ticker_df(raw, symbol).dropna(subset=["Close"])
-            if df is None or df.empty or len(df) < 2:
-                continue
+            df_5m = _extract_ticker_df(raw_5m, symbol).dropna(subset=["Open", "High", "Low", "Close"])
+            if df_5m is not None and len(df_5m) >= 20:
+                df_5m = df_5m.copy()
+                df_5m.index = pd.to_datetime(df_5m.index)
+                if df_5m.index.tz is not None:
+                    df_5m.index = df_5m.index.tz_convert("Asia/Kolkata").tz_localize(None)
 
-            ltp = float(df["Close"].iloc[-1])
-            prev_close = float(df["Close"].iloc[-2])
-            if prev_close <= 0 or np.isnan(ltp) or np.isnan(prev_close):
-                continue
+                today_dates = df_5m.index.date
+                latest_date = today_dates[-1]
+                df_today = df_5m[df_5m.index.date == latest_date]
+                prev_days = df_5m[df_5m.index.date < latest_date]
 
-            change_pct = round(((ltp - prev_close) / prev_close) * 100, 2)
+                ltp_5m = float(df_5m["Close"].iloc[-1])
+                prev_close_ref = (
+                    float(prev_days["Close"].iloc[-1])
+                    if not prev_days.empty
+                    else float(df_today["Open"].iloc[0])
+                )
 
-            if market_bias == "BULLISH" and change_pct > 0.3:
-                score = change_pct
-                action = "BUY (LONG)"
-                sl = round(ltp * 0.985, 2)
-                t1 = round(ltp * 1.025, 2)
-                t2 = round(ltp * 1.050, 2)
-            elif market_bias == "BEARISH" and change_pct < -0.3:
-                score = abs(change_pct)
-                action = "SELL / SHORT WATCH"
-                sl = round(ltp * 1.015, 2)
-                t1 = round(ltp * 0.975, 2)
-                t2 = round(ltp * 0.950, 2)
-            elif market_bias == "NEUTRAL" and abs(change_pct) >= 0.8:
-                score = abs(change_pct)
-                if change_pct > 0:
-                    action = "BUY (LONG WATCH)"
-                    sl = round(ltp * 0.985, 2)
-                    t1 = round(ltp * 1.025, 2)
-                    t2 = round(ltp * 1.050, 2)
+                vol_s = df_today["Volume"] if "Volume" in df_today and df_today["Volume"].sum() > 0 else None
+                if vol_s is not None:
+                    tp = (df_today["High"] + df_today["Low"] + df_today["Close"]) / 3.0
+                    vwap_val = float((tp * vol_s).cumsum().iloc[-1] / vol_s.cumsum().iloc[-1])
+                    avg_bar_vol = float(df_5m["Volume"].tail(40).mean())
+                    last_bar_vol = float(df_5m["Volume"].iloc[-1])
+                    vol_ratio = round(last_bar_vol / avg_bar_vol, 2) if avg_bar_vol > 0 else 1.0
                 else:
-                    action = "WEAK / SHORT WATCH"
-                    sl = round(ltp * 1.015, 2)
-                    t1 = round(ltp * 0.975, 2)
-                    t2 = round(ltp * 0.950, 2)
-            else:
-                continue
+                    vwap_val = float(df_today["Close"].mean())
+                    vol_ratio = 1.0
 
-            scored_rows.append({
-                "Symbol": symbol.replace(".NS", ""),
-                "Action": action,
-                "LTP": round(ltp, 2),
-                "Change_%": change_pct,
-                "Score": score,
-                "Stop_Loss": sl,
-                "Target_1": t1,
-                "Target_2": t2,
-            })
+                if prev_close_ref > 0 and not np.isnan(ltp_5m):
+                    intra_chg = round(((ltp_5m - prev_close_ref) / prev_close_ref) * 100, 2)
+
+                    if bullish_mode and intra_chg > 0.25 and ltp_5m >= vwap_val * 0.998:
+                        sl_intra = round(min(vwap_val * 0.994, ltp_5m * 0.990), 2)
+                        t1_intra = round(ltp_5m * 1.012, 2)  # Quick same-day profit booking (+1.2%)
+                        t2_intra = round(ltp_5m * 1.022, 2)  # Stretch intraday target (+2.2%)
+                        score_intra = round(intra_chg * max(vol_ratio, 0.8), 2)
+                        intraday_rows.append({
+                            "Stock": clean_sym,
+                            "Plan": "BUY & EXIT TODAY",
+                            "LTP": round(ltp_5m, 2),
+                            "Chg_%": intra_chg,
+                            "VWAP": round(vwap_val, 2),
+                            "Vol_Pace": f"{vol_ratio:.2f}x",
+                            "Stop_Loss": sl_intra,
+                            "Target_1_Book": t1_intra,
+                            "Target_2_Stretch": t2_intra,
+                            "Exit_Rule": "Sell before 3:30 PM IST",
+                            "Score": score_intra,
+                        })
+                    elif (not bullish_mode) and intra_chg < -0.25 and ltp_5m <= vwap_val * 1.002:
+                        sl_intra = round(max(vwap_val * 1.006, ltp_5m * 1.010), 2)
+                        t1_intra = round(ltp_5m * 0.988, 2)
+                        t2_intra = round(ltp_5m * 0.978, 2)
+                        score_intra = round(abs(intra_chg) * max(vol_ratio, 0.8), 2)
+                        intraday_rows.append({
+                            "Stock": clean_sym,
+                            "Plan": "SHORT / EXIT TODAY",
+                            "LTP": round(ltp_5m, 2),
+                            "Chg_%": intra_chg,
+                            "VWAP": round(vwap_val, 2),
+                            "Vol_Pace": f"{vol_ratio:.2f}x",
+                            "Stop_Loss": sl_intra,
+                            "Target_1_Book": t1_intra,
+                            "Target_2_Stretch": t2_intra,
+                            "Exit_Rule": "Cover before 3:30 PM IST",
+                            "Score": score_intra,
+                        })
         except Exception:
-            continue
+            pass
 
-    df_res = pd.DataFrame(scored_rows)
-    if not df_res.empty:
-        df_res = df_res.sort_values(by="Score", ascending=False).reset_index(drop=True)
-    return market_bias, nifty_chg, df_res
+        # --- 2. SEPARATE LONG-TERM TREND TABLE (1d EMA20 & EMA50) ---
+        try:
+            df_1d = _extract_ticker_df(raw_1d, symbol).dropna(subset=["Close"])
+            if df_1d is not None and len(df_1d) >= 50:
+                close_1d = float(df_1d["Close"].iloc[-1])
+                prev_1d = float(df_1d["Close"].iloc[-2])
+                ema20_1d = float(df_1d["Close"].ewm(span=20, adjust=False).mean().iloc[-1])
+                ema50_1d = float(df_1d["Close"].ewm(span=50, adjust=False).mean().iloc[-1])
 
+                if prev_1d > 0 and not np.isnan(close_1d):
+                    day_chg_1d = round(((close_1d - prev_1d) / prev_1d) * 100, 2)
+                    trend_tag = (
+                        "🟢 Uptrend (Above 20 & 50 EMA)"
+                        if close_1d > ema20_1d > ema50_1d
+                        else ("🟡 Pullback / Mixed Trend" if close_1d >= ema50_1d else "🔴 Below 50 EMA")
+                    )
+                    lt_score = round(
+                        ((close_1d - ema50_1d) / max(ema50_1d, 0.01)) * 100 + day_chg_1d,
+                        2,
+                    )
+                    longterm_rows.append({
+                        "Stock": clean_sym,
+                        "Horizon": "Multi-Week / Long-Term",
+                        "Close": round(close_1d, 2),
+                        "Day_%": day_chg_1d,
+                        "EMA_20": round(ema20_1d, 2),
+                        "EMA_50": round(ema50_1d, 2),
+                        "Long_Term_SL_Zone": round(ema50_1d * 0.97, 2),
+                        "Trend_Status": trend_tag,
+                        "Score": lt_score,
+                    })
+        except Exception:
+            pass
 
-market_bias, nifty_chg, df_picks = evaluate_market_posture_and_picks()
-
-# Display Market Posture Banner based on Nifty Change
-if market_bias == "BULLISH":
-    st.success(
-        f"🟢 **Market Posture: BULLISH (Nifty Change: {nifty_chg:+.2f}%)** — "
-        "Highlighting top positive large-cap setups for watchlist review."
+    df_intra = (
+        pd.DataFrame(intraday_rows)
+        .sort_values(by="Score", ascending=False)
+        .drop(columns=["Score"])
+        .reset_index(drop=True)
+        if intraday_rows
+        else pd.DataFrame()
     )
-elif market_bias == "BEARISH":
-    st.error(
-        f"🔴 **Market Posture: BEARISH / DISTRIBUTION (Nifty Change: {nifty_chg:+.2f}%)** — "
-        "Highlighting top weak large-cap setups for watchlist / profit-booking review."
+    df_lt = (
+        pd.DataFrame(longterm_rows)
+        .sort_values(by="Score", ascending=False)
+        .drop(columns=["Score"])
+        .reset_index(drop=True)
+        if longterm_rows
+        else pd.DataFrame()
+    )
+    return df_intra, df_lt
+
+
+with st.spinner("Scanning live 5m intraday setups & daily long-term trends..."):
+    df_intraday, df_longterm = fetch_intraday_and_longterm_tables(intraday_bias)
+
+# ---------------------------------------------------------
+# TABLE 1: PURE SAME-DAY INTRADAY WATCHLIST
+# ---------------------------------------------------------
+st.subheader("🎯 Table 1: Same-Day Intraday Setups (Buy & Exit Today)")
+if df_intraday.empty:
+    st.info(
+        "ℹ️ No stocks matched the same-day intraday filter right now. Click **Refresh Intraday & Long-Term** "
+        "or switch direction above."
     )
 else:
-    st.warning(
-        f"🟡 **Market Posture: NEUTRAL / MIXED (Nifty Change: {nifty_chg:+.2f}%)** — "
-        "Nifty is flat/range-bound; showing notable movers (`±0.8%+`) with extra caution."
+    st.dataframe(
+        df_intraday.style.format({
+            "LTP": "₹{:,.2f}",
+            "Chg_%": "{:+.2f}%",
+            "VWAP": "₹{:,.2f}",
+            "Stop_Loss": "₹{:,.2f}",
+            "Target_1_Book": "₹{:,.2f}",
+            "Target_2_Stretch": "₹{:,.2f}",
+        }),
+        use_container_width=True,
+        hide_index=True,
     )
+
+    st.markdown("#### Quick Same-Day Execution Cards (Top 2)")
+    for idx, row in df_intraday.head(2).iterrows():
+        c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
+        c1.metric(f"#{idx+1} {row['Stock']}", f"₹{row['LTP']:,.2f}", f"{row['Chg_%']:+.2f}% | VWAP ₹{row['VWAP']:,.2f}")
+        c2.metric("🛑 Same-Day Stop-Loss", f"₹{row['Stop_Loss']:,.2f}", "Strict Intraday Exit")
+        c3.metric("🎯 Target 1 (Book Profit)", f"₹{row['Target_1_Book']:,.2f}", "Lock Gains First")
+        c4.metric("🚀 Target 2 (Stretch)", f"₹{row['Target_2_Stretch']:,.2f}", row["Exit_Rule"])
 
 st.markdown("---")
 
-if df_picks is None or df_picks.empty:
-    st.info(
-        "ℹ️ No immediate setups matched the current threshold. Click **Force Refresh Pipeline Execution** "
-        "or check back once live market movement picks up after **9:15 AM IST**."
-    )
+# ---------------------------------------------------------
+# TABLE 2: SEPARATE LONG-TERM WATCHLIST
+# ---------------------------------------------------------
+st.subheader("🏦 Table 2: Separate Long-Term Watchlist (Multi-Week / Positional Study)")
+st.caption("Kept separate from same-day intraday trades so longer-term trend stocks aren't confused with intraday entries.")
+if df_longterm.empty:
+    st.info("ℹ️ Long-term daily trend data is currently unavailable.")
 else:
-    st.subheader(f"🎯 Top 2 Watchlist Setups ({market_bias} Mode)")
-
-    for idx, row in df_picks.head(2).iterrows():
-        with st.container():
-            c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
-
-            with c1:
-                st.markdown(f"### **#{idx+1} {row['Symbol']}**")
-                st.metric(
-                    label="Last Price & Stance",
-                    value=f"₹{row['LTP']:,.2f}",
-                    delta=f"{row['Change_%']:+.2f}% | {row['Action']}",
-                )
-
-            with c2:
-                st.markdown("**Reference Levels**")
-                st.write(f"🔹 **Stance:** {row['Action']}")
-                st.write(f"🛑 **Stop-Loss:** ₹{row['Stop_Loss']:,.2f}")
-
-            with c3:
-                st.markdown("**Target Objectives**")
-                st.write(f"🎯 **Target 1:** ₹{row['Target_1']:,.2f}")
-                st.write(f"🚀 **Target 2:** ₹{row['Target_2']:,.2f}")
-
-            with c4:
-                st.markdown("**Beginner Check**")
-                if "BUY" in row["Action"]:
-                    st.success("✅ **POSITIVE MOMENTUM WATCH**")
-                else:
-                    st.warning("⚠️ **WEAKNESS / CAUTION WATCH**")
-
-                if st.button(
-                    f"📋 Copy Directive Payload ({row['Symbol']})",
-                    key=f"directive_{row['Symbol']}",
-                ):
-                    st.toast(
-                        f"Copied {row['Symbol']} ({row['Action']})! SL: ₹{row['Stop_Loss']:,.2f}"
-                        f" | T1: ₹{row['Target_1']:,.2f}"
-                    )
-
-        st.markdown("---")
+    st.dataframe(
+        df_longterm.style.format({
+            "Close": "₹{:,.2f}",
+            "Day_%": "{:+.2f}%",
+            "EMA_20": "₹{:,.2f}",
+            "EMA_50": "₹{:,.2f}",
+            "Long_Term_SL_Zone": "₹{:,.2f}",
+        }),
+        use_container_width=True,
+        hide_index=True,
+    )
