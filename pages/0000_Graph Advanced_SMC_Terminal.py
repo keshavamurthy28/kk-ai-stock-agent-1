@@ -10,58 +10,86 @@ import yfinance as yf
 st.set_page_config(page_title="Advanced SMC & FVG Terminal", layout="wide")
 st.title("📊 Advanced Smart Money Concepts (SMC) & Institutional FVG Terminal")
 
-with st.expander("📘 Beginner Guide: Stock Suggestions, Intervals & Range Controls", expanded=False):
+with st.expander("📘 Beginner Guide: Key-Factor Stock Search, Intervals & Range Controls", expanded=False):
     st.markdown(
-        "- **Type-to-Suggest NSE Picker:** Type part of a stock symbol or company name (like `Inf`, `Tata`, or `Bank`) to filter matching NSE stocks below without typing the full ticker.\n"
-        "- **Candle Interval Buttons:** Click any timeframe button (`1m` to `1M`) to switch candle resolution instantly.\n"
-        "- **Top & Bottom Controls:** Use the top popovers for **Indicators**, **SMC Layers**, and **Settings**, and use the bottom bar (`1d` – `All` + **Jump Date**) to zoom from intraday to longer history. Always verify live quotes on your broker and use a stop-loss—no setup guarantees profit. Not financial advice."
+        "- **Key-Factor Stock Search:** Filter NSE stocks by **Sector**, **Price Band**, or **Name/Symbol** (for example, typing `data` or selecting `Defence & Aerospace` brings up `DATAPATTNS — Data Patterns (India) Ltd`).\n"
+        "- **Any NSE Symbol Support:** Even if a stock isn't in the built-in list, you can type its exact NSE ticker (like `DATAPATTNS`) and load its chart.\n"
+        "- **Risk & Profit Reminder:** Always verify live prices on your broker before trading and use a stop-loss—no setup guarantees profit. Not financial advice."
     )
 
+# Expanded NSE Catalog with Sector & Approx Price Tier for Key-Factor Filtering
 NSE_STOCK_CATALOG = [
-    ("RELIANCE", "Reliance Industries Ltd"),
-    ("TCS", "Tata Consultancy Services Ltd"),
-    ("HDFCBANK", "HDFC Bank Ltd"),
-    ("ICICIBANK", "ICICI Bank Ltd"),
-    ("INFY", "Infosys Ltd"),
-    ("INFOBEAN", "InfoBeans Technologies Ltd"),
-    ("SBIN", "State Bank of India"),
-    ("ITC", "ITC Ltd"),
-    ("BHARTIARTL", "Bharti Airtel Ltd"),
-    ("AXISBANK", "Axis Bank Ltd"),
-    ("KOTAKBANK", "Kotak Mahindra Bank Ltd"),
-    ("LT", "Larsen & Toubro Ltd"),
-    ("BAJFINANCE", "Bajaj Finance Ltd"),
-    ("BAJAJFINSV", "Bajaj Finserv Ltd"),
-    ("MARUTI", "Maruti Suzuki India Ltd"),
-    ("SUNPHARMA", "Sun Pharmaceutical Industries Ltd"),
-    ("TITAN", "Titan Company Ltd"),
-    ("ADANIENT", "Adani Enterprises Ltd"),
-    ("ADANIPORTS", "Adani Ports & Special Economic Zone Ltd"),
-    ("TATASTEEL", "Tata Steel Ltd"),
-    ("NTPC", "NTPC Ltd"),
-    ("POWERGRID", "Power Grid Corporation of India Ltd"),
-    ("COALINDIA", "Coal India Ltd"),
-    ("ONGC", "Oil & Natural Gas Corporation Ltd"),
-    ("WIPRO", "Wipro Ltd"),
-    ("ASIANPAINT", "Asian Paints Ltd"),
-    ("HCLTECH", "HCL Technologies Ltd"),
-    ("TECHM", "Tech Mahindra Ltd"),
-    ("INDUSINDBK", "IndusInd Bank Ltd"),
-    ("LICHSGFIN", "LIC Housing Finance Ltd"),
-    ("HAL", "Hindustan Aeronautics Ltd"),
-    ("BEL", "Bharat Electronics Ltd"),
-    ("TDPOWERSYS", "TD Power Systems Ltd"),
-    ("APOLLOHOSP", "Apollo Hospitals Enterprise Ltd"),
-    ("CIPLA", "Cipla Ltd"),
-    ("DRREDDY", "Dr. Reddy's Laboratories Ltd"),
-    ("GAIL", "GAIL (India) Ltd"),
-    ("JINDALSTEL", "Jindal Steel & Power Ltd"),
-    ("HINDALCO", "Hindalco Industries Ltd"),
-    ("VEDL", "Vedanta Ltd"),
-    ("TRENT", "Trent Ltd"),
-    ("ZOMATO", "Eternal / Zomato Ltd"),
-    ("IRCTC", "Indian Railway Catering & Tourism Corp Ltd"),
-    ("TATAPOWER", "Tata Power Company Ltd"),
+    ("DATAPATTNS", "Data Patterns (India) Ltd", "Defence & Aerospace", 2500.0),
+    ("HAL", "Hindustan Aeronautics Ltd", "Defence & Aerospace", 4200.0),
+    ("BEL", "Bharat Electronics Ltd", "Defence & Aerospace", 310.0),
+    ("MAZDOCK", "Mazagon Dock Shipbuilders Ltd", "Defence & Aerospace", 2400.0),
+    ("BDL", "Bharat Dynamics Ltd", "Defence & Aerospace", 1250.0),
+    ("COCHINSHIP", "Cochin Shipyard Ltd", "Defence & Aerospace", 1500.0),
+    ("INFY", "Infosys Ltd", "IT & Tech", 1850.0),
+    ("TCS", "Tata Consultancy Services Ltd", "IT & Tech", 4100.0),
+    ("WIPRO", "Wipro Ltd", "IT & Tech", 560.0),
+    ("HCLTECH", "HCL Technologies Ltd", "IT & Tech", 1800.0),
+    ("TECHM", "Tech Mahindra Ltd", "IT & Tech", 1650.0),
+    ("INFOBEAN", "InfoBeans Technologies Ltd", "IT & Tech", 620.0),
+    ("PERSISTENT", "Persistent Systems Ltd", "IT & Tech", 5400.0),
+    ("LTIM", "LTIMindtree Ltd", "IT & Tech", 5900.0),
+    ("HDFCBANK", "HDFC Bank Ltd", "Banking & Finance", 1720.0),
+    ("ICICIBANK", "ICICI Bank Ltd", "Banking & Finance", 1280.0),
+    ("SBIN", "State Bank of India", "Banking & Finance", 840.0),
+    ("AXISBANK", "Axis Bank Ltd", "Banking & Finance", 1160.0),
+    ("KOTAKBANK", "Kotak Mahindra Bank Ltd", "Banking & Finance", 1780.0),
+    ("INDUSINDBK", "IndusInd Bank Ltd", "Banking & Finance", 1050.0),
+    ("LICHSGFIN", "LIC Housing Finance Ltd", "Banking & Finance", 610.0),
+    ("BAJFINANCE", "Bajaj Finance Ltd", "Banking & Finance", 6900.0),
+    ("BAJAJFINSV", "Bajaj Finserv Ltd", "Banking & Finance", 1650.0),
+    ("SUNPHARMA", "Sun Pharmaceutical Industries Ltd", "Pharma & Healthcare", 1820.0),
+    ("CIPLA", "Cipla Ltd", "Pharma & Healthcare", 1520.0),
+    ("DRREDDY", "Dr. Reddy's Laboratories Ltd", "Pharma & Healthcare", 1260.0),
+    ("APOLLOHOSP", "Apollo Hospitals Enterprise Ltd", "Pharma & Healthcare", 6850.0),
+    ("MAXHEALTH", "Max Healthcare Institute Ltd", "Pharma & Healthcare", 1020.0),
+    ("RELIANCE", "Reliance Industries Ltd", "Energy & Power", 1320.0),
+    ("NTPC", "NTPC Ltd", "Energy & Power", 390.0),
+    ("POWERGRID", "Power Grid Corporation of India Ltd", "Energy & Power", 325.0),
+    ("ONGC", "Oil & Natural Gas Corporation Ltd", "Energy & Power", 265.0),
+    ("COALINDIA", "Coal India Ltd", "Energy & Power", 440.0),
+    ("TATAPOWER", "Tata Power Company Ltd", "Energy & Power", 445.0),
+    ("GAIL", "GAIL (India) Ltd", "Energy & Power", 205.0),
+    ("TATASTEEL", "Tata Steel Ltd", "Metals & Mining", 150.0),
+    ("HINDALCO", "Hindalco Industries Ltd", "Metals & Mining", 670.0),
+    ("VEDL", "Vedanta Ltd", "Metals & Mining", 460.0),
+    ("JINDALSTEL", "Jindal Steel & Power Ltd", "Metals & Mining", 920.0),
+    ("MARUTI", "Maruti Suzuki India Ltd", "Auto & EV", 11400.0),
+    ("TATAMOTORS", "Tata Motors Ltd", "Auto & EV", 820.0),
+    ("M&M", "Mahindra & Mahindra Ltd", "Auto & EV", 2950.0),
+    ("ITC", "ITC Ltd", "FMCG & Consumer", 480.0),
+    ("HINDUNILVR", "Hindustan Unilever Ltd", "FMCG & Consumer", 2480.0),
+    ("TITAN", "Titan Company Ltd", "FMCG & Consumer", 3250.0),
+    ("TRENT", "Trent Ltd", "FMCG & Consumer", 6600.0),
+    ("ASIANPAINT", "Asian Paints Ltd", "FMCG & Consumer", 2520.0),
+    ("BHARTIARTL", "Bharti Airtel Ltd", "Telecom & Infra", 1590.0),
+    ("LT", "Larsen & Toubro Ltd", "Telecom & Infra", 3650.0),
+    ("ADANIENT", "Adani Enterprises Ltd", "Telecom & Infra", 2850.0),
+    ("ADANIPORTS", "Adani Ports & Special Economic Zone Ltd", "Telecom & Infra", 1320.0),
+    ("IRCTC", "Indian Railway Catering & Tourism Corp Ltd", "Telecom & Infra", 840.0),
+]
+
+SECTOR_OPTIONS = [
+    "All Sectors",
+    "Defence & Aerospace",
+    "IT & Tech",
+    "Banking & Finance",
+    "Pharma & Healthcare",
+    "Energy & Power",
+    "Metals & Mining",
+    "Auto & EV",
+    "FMCG & Consumer",
+    "Telecom & Infra",
+]
+PRICE_BAND_OPTIONS = [
+    "All Prices",
+    "Under ₹500",
+    "₹500 – ₹2,000",
+    "Above ₹2,000",
 ]
 
 INTERVAL_OPTIONS = [
@@ -108,30 +136,57 @@ if "fit_far_smc_yaxis" not in st.session_state:
 if "jump_date" not in st.session_state:
     st.session_state.jump_date = None
 
+# Key-Factor Filters (Sector & Price Band)
+kf1, kf2, kf3 = st.columns([1.8, 1.5, 2.7])
+selected_sector = kf1.selectbox("🏷️ Filter by Sector", SECTOR_OPTIONS, index=0)
+selected_price_band = kf2.selectbox("💰 Filter by Price Tier", PRICE_BAND_OPTIONS, index=0)
+kf3.caption(
+    "💡 Tip: Filter by Sector or Price Tier, or type partial letters like `data` / `inf` to pick matching NSE stocks—or enter any NSE symbol directly."
+)
+
 # Type-to-Suggest NSE Stock Picker + Clickable Candle Interval Buttons Row
-sym_col, tf_bar_col = st.columns([1.6, 4.4])
+sym_col, tf_bar_col = st.columns([1.9, 4.1])
 with sym_col:
     typed_query = (
         st.text_input(
-            "Type NSE Symbol or Name (e.g., Inf)",
+            "Type NSE Symbol or Name (e.g., data, inf)",
             value="LICHSGFIN",
-            placeholder="Type letters like Inf, Tata, Bank...",
+            placeholder="Type letters like data, inf, hal...",
         )
         .strip()
         .upper()
     )
 
     q_clean = typed_query.replace(".NS", "")
-    matching_stocks = [
-        (sym, name)
-        for sym, name in NSE_STOCK_CATALOG
-        if (not q_clean) or (q_clean in sym.upper()) or (q_clean in name.upper())
+
+    def _matches_price_band(approx_p, band):
+        if band == "Under ₹500":
+            return approx_p < 500.0
+        if band == "₹500 – ₹2,000":
+            return 500.0 <= approx_p <= 2000.0
+        if band == "Above ₹2,000":
+            return approx_p > 2000.0
+        return True
+
+    filtered_stocks = [
+        (sym, name, sec, approx_p)
+        for sym, name, sec, approx_p in NSE_STOCK_CATALOG
+        if (selected_sector == "All Sectors" or sec == selected_sector)
+        and _matches_price_band(approx_p, selected_price_band)
+        and (
+            (not q_clean)
+            or (q_clean in sym.upper())
+            or (q_clean in name.upper())
+            or (q_clean in sec.upper())
+        )
     ]
 
-    if matching_stocks:
-        options_list = [f"{sym} — {name}" for sym, name in matching_stocks]
-        if q_clean and q_clean not in [s for s, _ in matching_stocks]:
-            options_list.append(f"{q_clean} — Use Typed Symbol ({q_clean}.NS)")
+    if filtered_stocks:
+        options_list = [
+            f"{sym} — {name} [{sec}]" for sym, name, sec, _ in filtered_stocks
+        ]
+        if q_clean and q_clean not in [s for s, _, _, _ in filtered_stocks]:
+            options_list.insert(0, f"{q_clean} — Custom NSE Symbol ({q_clean}.NS)")
         selected_entry = st.selectbox(
             f"Matching NSE Stocks ({len(options_list)} shown)",
             options_list,
@@ -140,7 +195,7 @@ with sym_col:
         )
         raw_sym = selected_entry.split(" — ")[0].strip().upper()
     else:
-        st.caption("No catalog match—using typed NSE symbol directly.")
+        st.caption("No catalog match under current filters—using typed NSE symbol directly.")
         raw_sym = q_clean or "LICHSGFIN"
 
 ticker = raw_sym if raw_sym.endswith(".NS") else f"{raw_sym}.NS"
@@ -251,7 +306,9 @@ def fetch_clean_smc(sym, tf):
 df, df_4h, df_1d = fetch_clean_smc(ticker, tf_choice)
 
 if df.empty:
-    st.error(f"No data returned for {ticker}. Please verify the NSE symbol.")
+    st.error(
+        f"No data returned for {ticker}. Check the exact NSE ticker (for example, Data Patterns is `DATAPATTNS` -> `DATAPATTNS.NS`)."
+    )
 else:
     df = df.reset_index(drop=True)
     ltp = float(df["Close"].iloc[-1])
