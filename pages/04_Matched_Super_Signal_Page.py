@@ -27,7 +27,9 @@ except Exception:
     _ledger_record_picks = None
 
 
-def _save_super_picks_to_ledger(picks: list[dict], module_label: str = "Matched Super Signal") -> int:
+def _save_super_picks_to_ledger(
+    picks: list[dict], module_label: str = "Matched Super Signal (Top 2)"
+) -> int:
     if not picks:
         return 0
     if callable(_ledger_record_picks):
@@ -67,7 +69,9 @@ def _save_super_picks_to_ledger(picks: list[dict], module_label: str = "Matched 
             sym = f"{sym}.NS"
         side = str(p.get("side", "BUY")).upper()
         entry = float(p["entry"])
-        pid = hashlib.sha1(f"{bucket}|{module_label}|{sym}|{side}|{entry:.4f}".encode("utf-8")).hexdigest()[:12]
+        pid = hashlib.sha1(
+            f"{bucket}|{module_label}|{sym}|{side}|{entry:.4f}".encode("utf-8")
+        ).hexdigest()[:12]
         if pid in seen:
             continue
         seen.add(pid)
@@ -111,8 +115,8 @@ st.caption(f"{status_label} • Synced: **{now_ist.strftime('%d %b %Y, %I:%M:%S 
 with st.expander("📘 Beginner Guide: How to Read Breakout Signals & Book Profit Safely", expanded=False):
     st.markdown(
         "- **🟢 Night-Before Triggered vs. 🔵 Fresh Breakout:** Night-before matched stocks had cleaner trend alignment beforehand; fresh breakouts are sudden momentum moves.\n"
-        "- **When to Buy:** Only after market hours begin (**9:15 AM IST**) when price is holding above the breakout/open and volume (`RVOL`) is active—never chase blindly at the open.\n"
-        "- **When to Book Profit:** Consider booking partial or full profit near **Target 1 (1.5R)** first rather than waiting blindly for **Target 2 (3.0R)**, and book early if momentum stalls.\n"
+        "- **When to Buy:** Only after market hours begin (**9:15 AM IST**) when price holds constructively near **Watch Buy / LTP** and volume (`RVOL`) is active—never chase blindly at the open.\n"
+        "- **When to Book Profit:** Consider booking partial or full profit near **Target 1 (1.5R)** first rather than waiting blindly for **Target 2 (2.8R)**, and book early if momentum stalls.\n"
         "- **Strict Stop-Loss:** If price drops to **Stop-Loss**, exit and accept the small planned loss—never average down. Not financial advice."
     )
 
@@ -333,16 +337,21 @@ def scan_matched_super_signals(tickers, strict_mode=True):
                     + (10 if near_day_high else 0)
                 )
 
-                sl = round(max(low_p, prev_c * 0.99) * 0.995, 2)
-                risk = max(ltp - sl, ltp * 0.012)
-                t1 = round(ltp + (risk * 1.5), 2)
-                t2 = round(ltp + (risk * 3.0), 2)
+                watch_buy = round(ltp * 0.996, 2)
+                raw_sl = round(max(low_p, prev_c * 0.99) * 0.995, 2)
+                # Cap max stop distance at ~2.8% below Watch Buy to avoid oversized stops on wide candles
+                sl = round(max(raw_sl, watch_buy * 0.972), 2)
+                sl = min(sl, round(watch_buy * 0.988, 2))
+                risk = max(watch_buy - sl, watch_buy * 0.01)
+                t1 = round(watch_buy + (risk * 1.5), 2)
+                t2 = round(watch_buy + (risk * 2.8), 2)
 
                 signals.append({
                     "Stock": t,
                     "Sector": STOCK_SECTOR_MAP.get(t, "General"),
                     "Action": "BUY",
                     "LTP": round(ltp, 2),
+                    "Watch_Buy": watch_buy,
                     "Change_%": pct_chg,
                     "Volume_Surge": f"{rvol:.2f}x",
                     "Stop_Loss": sl,
@@ -363,7 +372,7 @@ def scan_matched_super_signals(tickers, strict_mode=True):
     return pd.DataFrame(signals), auto_night_before
 
 
-ctrl1, ctrl2, ctrl3 = st.columns([2.0, 2.0, 1.4])
+ctrl1, ctrl2, ctrl3, ctrl4 = st.columns([1.9, 1.8, 1.2, 1.3])
 with ctrl1:
     filter_quality = st.selectbox(
         "🛡️ Signal Quality Mode:",
@@ -377,6 +386,9 @@ with ctrl2:
         index=0,
     )
 with ctrl3:
+    st.write("")
+    auto_log_top2 = st.toggle("Auto-Log Top 2", value=False)
+with ctrl4:
     st.write("")
     if st.button("🔄 Force Refresh Live Data", type="primary", use_container_width=True):
         st.cache_data.clear()
@@ -423,13 +435,14 @@ else:
     if top2_df.empty:
         st.info("No signals in this filter slice.")
     else:
+        st.session_state["matched_super_top2"] = top2_df["Stock"].tolist()
         t2_cols = st.columns(len(top2_df))
         for idx_t2, r2 in top2_df.iterrows():
             with t2_cols[idx_t2]:
                 st.metric(
                     label=f"#{r2['Rank']} {r2['Stock']} ({r2['Sector']})",
-                    value=f"BUY @ ₹{r2['LTP']:,.2f}",
-                    delta=f"+{r2['Change_%']:.2f}% | T1 ₹{r2['Target_1']:,.2f}",
+                    value=f"Watch ₹{r2['Watch_Buy']:,.2f}",
+                    delta=f"LTP ₹{r2['LTP']:,.2f} (+{r2['Change_%']:.2f}%) | T1 ₹{r2['Target_1']:,.2f}",
                 )
                 st.caption(f"{r2['Signal_Source']} • SL ₹{r2['Stop_Loss']:,.2f} • Vol {r2['Volume_Surge']}")
 
@@ -437,7 +450,7 @@ else:
             {
                 "symbol": r["Stock"],
                 "side": "BUY",
-                "entry": float(r["LTP"]),
+                "entry": float(r["Watch_Buy"]),
                 "sl": float(r["Stop_Loss"]),
                 "t1": float(r["Target_1"]),
                 "t2": float(r["Target_2"]),
@@ -445,6 +458,12 @@ else:
             }
             for _, r in top2_df.iterrows()
         ]
+
+        if auto_log_top2:
+            auto_saved = _save_super_picks_to_ledger(top2_payload, "Matched Super Signal (Top 2)")
+            if auto_saved > 0:
+                st.toast(f"Auto-logged {auto_saved} Top 2 Super Signal(s) to ledger!", icon="📌")
+
         if st.button("📌 Log Top 2 Super Signals to History Ledger", type="primary"):
             saved_n = _save_super_picks_to_ledger(top2_payload, "Matched Super Signal (Top 2)")
             st.success(f"Recorded {saved_n} Top 2 signal(s) to history ledger.")
@@ -463,6 +482,7 @@ else:
         "Signal_Source",
         "Action",
         "LTP",
+        "Watch_Buy",
         "Change_%",
         "Volume_Surge",
         "Stop_Loss",
@@ -475,6 +495,7 @@ else:
         .style.apply(highlight_signal_source, axis=1)
         .format({
             "LTP": "₹{:.2f}",
+            "Watch_Buy": "₹{:.2f}",
             "Change_%": "+{:.2f}%",
             "Stop_Loss": "₹{:.2f}",
             "Target_1": "₹{:.2f}",
@@ -496,9 +517,16 @@ else:
             f"### Rank #{row['Rank']}: {row['Stock']} ({row['Sector']}) — "
             f"+{row['Change_%']}% — {row['Signal_Source']}"
         )
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Reference Price", f"BUY @ ₹{row['LTP']:,.2f}")
+        c1, c2, c3, c4, c5 = st.columns([1.5, 1.5, 1.5, 1.5, 1.2])
+        c1.metric("Watch Buy (LTP)", f"₹{row['Watch_Buy']:,.2f}", f"LTP ₹{row['LTP']:,.2f}")
         c2.metric("Strict Stop-Loss", f"₹{row['Stop_Loss']:,.2f}")
         c3.metric("Target 1 (1.5R)", f"₹{row['Target_1']:,.2f}")
-        c4.metric("Target 2 (3.0R)", f"₹{row['Target_2']:,.2f}")
+        c4.metric("Target 2 (2.8R)", f"₹{row['Target_2']:,.2f}")
+        with c5:
+            st.write("")
+            if st.button(f"📋 Copy {row['Stock']}", key=f"copy_ms_{row['Stock']}", use_container_width=True):
+                st.toast(
+                    f"{row['Stock']} ({row['Sector']}) | Buy: ₹{row['Watch_Buy']:,.2f} | "
+                    f"SL: ₹{row['Stop_Loss']:,.2f} | T1: ₹{row['Target_1']:,.2f} | T2: ₹{row['Target_2']:,.2f}"
+                )
         st.info(f"💡 **Catalyst:** {row['Catalyst_Reason']}")
