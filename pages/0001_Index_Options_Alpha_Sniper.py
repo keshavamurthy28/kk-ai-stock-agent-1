@@ -25,7 +25,8 @@ with head_col1:
     st.title("⚡ Index Options Alpha Sniper: Predictive Trend & Expiry Engine")
     st.markdown(
         "**Expert Derivatives AI:** Combines multi-timeframe EMA structure, RSI momentum slope, "
-        "MACD acceleration, and breakout trigger levels to anticipate Nifty trend shifts in advance."
+        "MACD acceleration, breakout trigger zones, and live NSE option chain OI to anticipate "
+        "Nifty trend shifts in advance."
     )
 
 with head_col2:
@@ -34,7 +35,7 @@ with head_col2:
     with r_col1:
         if st.button("🔄 Refresh Now", type="primary", use_container_width=True):
             st.cache_data.clear()
-            st.toast("Fetching latest Nifty & VIX ticks...", icon="⚡")
+            st.toast("Fetching latest Nifty, VIX & Option Chain data...", icon="⚡")
             st.rerun()
     with r_col2:
         auto_refresh = st.toggle("Auto (60s)", value=False)
@@ -90,7 +91,112 @@ period_val, interval_val = tf_map[timeframe_choice]
 
 
 # ---------------------------------------------------------
-# 2. PREDICTIVE TREND & OPTION INTELLIGENCE ENGINE
+# 2. FREE NSE OPTION CHAIN CONNECTOR (PCR, MAX PAIN, LTP)
+# ---------------------------------------------------------
+@st.cache_data(ttl=60)
+def fetch_live_nse_option_chain(spot_ltp: float, expiry_label: str):
+    """
+    Attempts to fetch live NIFTY option chain data via nsepython / nsepythonserver.
+    Computes live PCR, Max Pain strike, and ATM CE/PE LTPs.
+    Returns None if NSE blocks cloud IPs or data is unavailable.
+    """
+    nse_oc_fn = None
+    try:
+        from nsepython import nse_optionchain_scalar as _fn
+        nse_oc_fn = _fn
+    except ImportError:
+        try:
+            from nsepythonserver import nse_optionchain_scalar as _fn
+            nse_oc_fn = _fn
+        except ImportError:
+            return None
+
+    try:
+        oc_data, _, timestamp, _ = nse_oc_fn("NIFTY")
+        if not isinstance(oc_data, dict):
+            return None
+
+        records = oc_data.get("records", {}).get("data", [])
+        expiries = oc_data.get("records", {}).get("expiryDates", [])
+
+        if not records or not expiries:
+            return None
+
+        target_expiry = expiries[0]
+        label_token = expiry_label.split()[0].lower()
+        for exp in expiries:
+            if label_token in str(exp).lower():
+                target_expiry = exp
+                break
+
+        chain_rows = []
+        total_ce_oi = 0.0
+        total_pe_oi = 0.0
+
+        for item in records:
+            if item.get("expiryDate") != target_expiry:
+                continue
+
+            strike = item.get("strikePrice")
+            if strike is None:
+                continue
+
+            ce = item.get("CE") or {}
+            pe = item.get("PE") or {}
+
+            ce_oi = float(ce.get("openInterest", 0) or 0)
+            pe_oi = float(pe.get("openInterest", 0) or 0)
+            ce_ltp = float(ce.get("lastPrice", 0) or 0)
+            pe_ltp = float(pe.get("lastPrice", 0) or 0)
+
+            total_ce_oi += ce_oi
+            total_pe_oi += pe_oi
+
+            chain_rows.append({
+                "strike": float(strike),
+                "ce_oi": ce_oi,
+                "pe_oi": pe_oi,
+                "ce_ltp": ce_ltp,
+                "pe_ltp": pe_ltp,
+            })
+
+        if not chain_rows:
+            return None
+
+        pcr = round(total_pe_oi / total_ce_oi, 2) if total_ce_oi > 0 else 1.0
+
+        min_pain = float("inf")
+        max_pain_strike = round(spot_ltp / 50) * 50
+        for pin_row in chain_rows:
+            pin = pin_row["strike"]
+            pain = 0.0
+            for r in chain_rows:
+                k = r["strike"]
+                if pin > k:
+                    pain += (pin - k) * r["pe_oi"]
+                elif pin < k:
+                    pain += (k - pin) * r["ce_oi"]
+            if pain < min_pain:
+                min_pain = pain
+                max_pain_strike = pin
+
+        atm_row = min(chain_rows, key=lambda r: abs(r["strike"] - spot_ltp))
+
+        return {
+            "ExpiryUsed": target_expiry,
+            "NSETime": timestamp,
+            "PCR": pcr,
+            "MaxPain": float(max_pain_strike),
+            "ATMStrike": int(round(atm_row["strike"])),
+            "CE_LTP": atm_row["ce_ltp"] if atm_row["ce_ltp"] > 0 else 132.0,
+            "PE_LTP": atm_row["pe_ltp"] if atm_row["pe_ltp"] > 0 else 135.0,
+        }
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------
+# 3. PREDICTIVE TREND & OPTION INTELLIGENCE ENGINE
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def fetch_predictive_nifty_engine(expiry_str, period, interval):
@@ -106,7 +212,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
     spot_ltp = float(df["Close"].iloc[-1])
     prev_close = float(df["Close"].iloc[-2])
     spot_chg = round(((spot_ltp - prev_close) / prev_close) * 100, 2)
-    current_vix = round(float(df_vix["Close"].iloc[-1]), 2) if not df_vix.empty else 15.50
+    current_vix = round(float(df_vix["Close"].iloc[-1]), 2) if not df_vix.empty else 15.57
 
     # 1. Multi-EMA Trend Structure (9, 20, 50)
     df["EMA9"] = df["Close"].ewm(span=9, adjust=False).mean()
@@ -130,7 +236,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
     rs = gain / loss.replace(0, np.nan)
     df["RSI"] = 100 - (100 / (1 + rs))
     latest_rsi = float(df["RSI"].iloc[-1])
-    prev_rsi = float(df["RSI"].iloc[-4])  # 3-candle RSI slope
+    prev_rsi = float(df["RSI"].iloc[-4])
     rsi_slope = round(latest_rsi - prev_rsi, 2)
 
     # 3. MACD Acceleration (12, 26, 9)
@@ -151,7 +257,6 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
     score = 0
     signals = []
 
-    # EMA Alignment (+30 / -30)
     if df["EMA9"].iloc[-1] > df["EMA20"].iloc[-1] > df["EMA50"].iloc[-1]:
         score += 30
         signals.append("Bullish EMA Ribbon (9 > 20 > 50)")
@@ -165,7 +270,6 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         score -= 15
         signals.append("Early Bearish 9/20 EMA Crossover")
 
-    # Price vs VWAP/Anchor (+20 / -20)
     if spot_ltp > df["VWAP"].iloc[-1]:
         score += 20
         signals.append("Trading Above Intraday Value Anchor")
@@ -173,7 +277,6 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         score -= 20
         signals.append("Trading Below Intraday Value Anchor")
 
-    # Leading RSI & Slope (+25 / -25)
     if latest_rsi > 55 and rsi_slope > 0:
         score += 25
         signals.append(f"Rising Bullish RSI ({latest_rsi:.1f}, +{rsi_slope})")
@@ -187,7 +290,6 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         score -= 15
         signals.append(f"Early RSI Reversal Downward ({rsi_slope})")
 
-    # MACD Histogram Acceleration (+25 / -25)
     if hist_now > 0 and hist_now > hist_prev:
         score += 25
         signals.append("MACD Bullish Expansion")
@@ -201,40 +303,81 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         score -= 10
         signals.append("MACD Bullish Exhaustion (Turning Down)")
 
-    atm_strike = round(spot_ltp / 50) * 50
-    max_pain = round((support_level + resistance_level) / 100) * 50
+    # 6. Live NSE Option Chain Integration (with Fallback)
+    atm_strike = int(round(spot_ltp / 50) * 50)
+    nse_oc = fetch_live_nse_option_chain(spot_ltp, expiry_str)
 
-    # Determine Advance Market Outlook
+    if nse_oc:
+        pcr = nse_oc["PCR"]
+        max_pain = nse_oc["MaxPain"]
+        rec_strike = nse_oc["ATMStrike"]
+        live_ce_prem = nse_oc["CE_LTP"]
+        live_pe_prem = nse_oc["PE_LTP"]
+        oc_source = f"Live NSE ({nse_oc['ExpiryUsed']})"
+
+        if pcr >= 1.15:
+            score += 10
+            signals.append(f"Bullish PCR ({pcr})")
+        elif pcr <= 0.70:
+            score -= 10
+            signals.append(f"Bearish PCR ({pcr})")
+    else:
+        pcr = 0.86
+        max_pain = float(round((support_level + resistance_level) / 100) * 50)
+        rec_strike = atm_strike
+        live_ce_prem = 132.0
+        live_pe_prem = 132.0
+        oc_source = "Fallback Est. (NSE blocked/closed)"
+
+    score = max(-100, min(100, score))
+
+    # 7. Advance Market Outlook & Option Levels
     if score >= 35:
         outlook = "STRONG UPTREND (HIGH CONVICTION)"
         action = "BUY CE (CALL OPTION)"
-        rec_strike = atm_strike
-        trigger_note = f"Breakout Confirmed above ₹{resistance_level:,.2f}" if spot_ltp >= resistance_level else f"Anticipating Breakout toward ₹{resistance_level:,.2f}"
-        entry_prem, sl_prem, t1_prem, t2_prem = 135.00, 101.25, 182.25, 243.00
+        trigger_note = (
+            f"Breakout Confirmed above ₹{resistance_level:,.2f}"
+            if spot_ltp >= resistance_level
+            else f"Anticipating Breakout toward ₹{resistance_level:,.2f}"
+        )
+        entry_prem = round(live_ce_prem, 2)
     elif 10 <= score < 35:
         outlook = "EARLY UPTREND / ACCUMULATION"
         action = "BUY CE ON DIPS (CALL OPTION)"
-        rec_strike = atm_strike
-        trigger_note = f"Watch Breakout Trigger: ₹{resistance_level:,.2f} (Invalidated below ₹{support_level:,.2f})"
-        entry_prem, sl_prem, t1_prem, t2_prem = 128.00, 96.00, 172.80, 230.40
+        trigger_note = (
+            f"Watch Breakout Trigger: ₹{resistance_level:,.2f} "
+            f"(Invalidated below ₹{support_level:,.2f})"
+        )
+        entry_prem = round(live_ce_prem, 2)
     elif -35 < score <= -10:
         outlook = "EARLY DOWNTREND / DISTRIBUTION"
         action = "BUY PE ON RALLIES (PUT OPTION)"
-        rec_strike = atm_strike
-        trigger_note = f"Watch Breakdown Trigger: ₹{support_level:,.2f} (Invalidated above ₹{resistance_level:,.2f})"
-        entry_prem, sl_prem, t1_prem, t2_prem = 132.00, 99.00, 178.20, 237.60
+        trigger_note = (
+            f"Watch Breakdown Trigger: ₹{support_level:,.2f} "
+            f"(Invalidated above ₹{resistance_level:,.2f})"
+        )
+        entry_prem = round(live_pe_prem, 2)
     elif score <= -35:
         outlook = "STRONG DOWNTREND (HIGH CONVICTION)"
         action = "BUY PE (PUT OPTION)"
-        rec_strike = atm_strike
-        trigger_note = f"Breakdown Confirmed below ₹{support_level:,.2f}" if spot_ltp <= support_level else f"Anticipating Breakdown toward ₹{support_level:,.2f}"
-        entry_prem, sl_prem, t1_prem, t2_prem = 142.50, 106.80, 192.30, 256.50
+        trigger_note = (
+            f"Breakdown Confirmed below ₹{support_level:,.2f}"
+            if spot_ltp <= support_level
+            else f"Anticipating Breakdown toward ₹{support_level:,.2f}"
+        )
+        entry_prem = round(live_pe_prem, 2)
     else:
         outlook = "SIDEWAYS / CHOPPY CONSOLIDATION"
         action = "WAIT FOR BREAKOUT (NO TRADE)"
-        rec_strike = atm_strike
-        trigger_note = f"Range-Bound: Buy CE > ₹{resistance_level:,.2f} | Buy PE < ₹{support_level:,.2f}"
-        entry_prem, sl_prem, t1_prem, t2_prem = 120.00, 90.00, 162.00, 216.00
+        trigger_note = (
+            f"Range-Bound: Buy CE > ₹{resistance_level:,.2f} | "
+            f"Buy PE < ₹{support_level:,.2f}"
+        )
+        entry_prem = round(min(live_ce_prem, live_pe_prem), 2)
+
+    sl_prem = round(entry_prem * 0.75, 2)
+    t1_prem = round(entry_prem * 1.35, 2)
+    t2_prem = round(entry_prem * 1.80, 2)
 
     theta_warning = (
         "⚠️ **Weekly Expiry Caution:** High time-decay (Theta). Exit intraday before expiry day!"
@@ -246,6 +389,9 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         "Spot": round(spot_ltp, 2),
         "Change": spot_chg,
         "VIX": current_vix,
+        "PCR": pcr,
+        "MaxPain": max_pain,
+        "OCSource": oc_source,
         "RSI": round(latest_rsi, 1),
         "RSISlope": rsi_slope,
         "Score": score,
@@ -256,7 +402,6 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         "Resistance": resistance_level,
         "Support": support_level,
         "TriggerNote": trigger_note,
-        "MaxPain": max_pain,
         "Expiry": expiry_str,
         "ThetaNote": theta_warning,
         "Entry": entry_prem,
@@ -273,14 +418,14 @@ if not intel:
     st.error("⚠️ Unable to fetch live Nifty data. Click **Refresh Now** to retry.")
 else:
     # ---------------------------------------------------------
-    # 3. ADVANCE TREND PREDICTOR DASHBOARD
+    # 4. ADVANCE TREND PREDICTOR DASHBOARD
     # ---------------------------------------------------------
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Nifty Spot LTP", f"₹{intel['Spot']:,.2f}", f"{intel['Change']:+.2f}%")
     m2.metric("Trend Prediction Score", f"{intel['Score']:+d} / 100", intel["Outlook"].split(" (")[0])
     m3.metric("Momentum RSI (14)", f"{intel['RSI']}", f"{intel['RSISlope']:+.1f} Slope")
     m4.metric("Breakout / Breakdown", f"₹{intel['Resistance']:,.0f} / ₹{intel['Support']:,.0f}", "Key Trigger Zone")
-    m5.metric("India VIX", f"{intel['VIX']}", "High IV" if intel["VIX"] > 15 else "Normal IV")
+    m5.metric("PCR / Max Pain", f"{intel['PCR']} / ₹{intel['MaxPain']:,.0f}", intel["OCSource"])
 
     st.markdown("---")
 
@@ -307,7 +452,7 @@ else:
     )
 
     # ---------------------------------------------------------
-    # 4. POSITION SIZING & EXECUTION LEVELS
+    # 5. POSITION SIZING & EXECUTION LEVELS
     # ---------------------------------------------------------
     total_investment = round(intel["Entry"] * selected_qty, 2)
     total_risk_amt = round((intel["Entry"] - intel["SL"]) * selected_qty, 2)
@@ -316,14 +461,14 @@ else:
     st.markdown(f"### 💰 Position Sizing & Capital Outlay ({lot_multiplier})")
     sc1, sc2, sc3, sc4 = st.columns(4)
     sc1.metric("📦 Selected Quantity", f"{selected_qty} Qty", lot_multiplier)
-    sc2.metric("💵 Total Capital Required", f"₹{total_investment:,.2f}", f"@ ₹{intel['Entry']} est. prem")
+    sc2.metric("💵 Total Capital Required", f"₹{total_investment:,.2f}", f"@ ₹{intel['Entry']} prem")
     sc3.metric("🛡️ Total Max Risk (SL)", f"₹{total_risk_amt:,.2f}", f"@ ₹{intel['SL']} stop-loss")
     sc4.metric("🎯 Target 1 Profit (+35%)", f"₹{potential_profit_t1:,.2f}", f"@ ₹{intel['T1']}")
 
     st.markdown("---")
 
     # ---------------------------------------------------------
-    # 5. PREDICTIVE MULTI-PANE CHART (PRICE + EMA RIBBON + RSI)
+    # 6. PREDICTIVE MULTI-PANE CHART (PRICE + EMA RIBBON + RSI)
     # ---------------------------------------------------------
     st.subheader(f"📊 Predictive Trend & Trigger Chart ({timeframe_choice})")
 
@@ -336,7 +481,6 @@ else:
         row_heights=[0.74, 0.26],
     )
 
-    # Candlesticks
     fig.add_trace(
         go.Candlestick(
             x=df_c.index,
@@ -352,7 +496,6 @@ else:
         col=1,
     )
 
-    # Fast 9 EMA & Slow 20 EMA
     fig.add_trace(
         go.Scatter(
             x=df_c.index,
@@ -376,7 +519,6 @@ else:
         col=1,
     )
 
-    # Breakout Resistance & Breakdown Support Lines
     fig.add_hline(
         y=intel["Resistance"],
         line_dash="dot",
@@ -396,7 +538,6 @@ else:
         col=1,
     )
 
-    # RSI Momentum Subplot
     fig.add_trace(
         go.Scatter(
             x=df_c.index,
