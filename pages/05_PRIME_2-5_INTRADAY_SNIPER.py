@@ -1,4 +1,7 @@
 from datetime import datetime, time as dt_time
+import hashlib
+from pathlib import Path
+import sys
 import time
 import numpy as np
 import pandas as pd
@@ -21,6 +24,83 @@ is_market_open = (
     and dt_time(9, 15) <= now_ist.time() <= dt_time(15, 30)
 )
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from utils.pick_ledger import record_picks as _ledger_record_picks
+except Exception:
+    _ledger_record_picks = None
+
+
+def _save_prime_picks_to_ledger(picks: list[dict], module_label: str = "PRIME Top 3") -> int:
+    if not picks:
+        return 0
+    if callable(_ledger_record_picks):
+        try:
+            return int(_ledger_record_picks(module_label, picks))
+        except Exception:
+            pass
+
+    ledger_dir = REPO_ROOT / "data_ledger"
+    ledger_dir.mkdir(parents=True, exist_ok=True)
+    ledger_file = ledger_dir / "pick_click_ledger.csv"
+    cols = [
+        "pick_id",
+        "logged_at_ist",
+        "session_date",
+        "iso_week",
+        "module",
+        "symbol",
+        "side",
+        "entry_price",
+        "stop_loss",
+        "target_1",
+        "target_2",
+        "notes",
+    ]
+    ts_str = now_ist.strftime("%Y-%m-%d %H:%M:%S IST")
+    s_date = now_ist.strftime("%Y-%m-%d")
+    i_week = f"{now_ist.isocalendar().year}-W{now_ist.isocalendar().week:02d}"
+    bucket = now_ist.strftime("%Y-%m-%d %H:%M")
+
+    existing = pd.read_csv(ledger_file) if ledger_file.exists() else pd.DataFrame(columns=cols)
+    seen = set(existing["pick_id"].dropna().astype(str)) if not existing.empty else set()
+    new_rows = []
+    for p in picks:
+        sym = str(p["symbol"]).strip().upper()
+        if not sym.endswith(".NS"):
+            sym = f"{sym}.NS"
+        side = str(p.get("side", "BUY")).upper()
+        entry = float(p["entry"])
+        pid = hashlib.sha1(f"{bucket}|{module_label}|{sym}|{side}|{entry:.4f}".encode("utf-8")).hexdigest()[:12]
+        if pid in seen:
+            continue
+        seen.add(pid)
+        new_rows.append({
+            "pick_id": pid,
+            "logged_at_ist": ts_str,
+            "session_date": s_date,
+            "iso_week": i_week,
+            "module": module_label,
+            "symbol": sym,
+            "side": side,
+            "entry_price": round(entry, 2),
+            "stop_loss": round(float(p["sl"]), 2),
+            "target_1": round(float(p["t1"]), 2),
+            "target_2": round(float(p["t2"]), 2),
+            "notes": str(p.get("notes", "")),
+        })
+    if not new_rows:
+        return 0
+    out = pd.concat([existing, pd.DataFrame(new_rows)], ignore_index=True).drop_duplicates(
+        subset=["pick_id"], keep="first"
+    )
+    out.to_csv(ledger_file, index=False)
+    return len(new_rows)
+
+
 st.title("🎯 Institutional Alpha Intraday Sniper Terminal (Anti-Trap)")
 st.markdown(
     "**Beginner-Friendly Sniper Guide:** Scans NSE stocks for intraday trend alignment "
@@ -31,7 +111,7 @@ st.markdown(
 # ---------------------------------------------------------
 # 1. TOP CONTROLS & LIVE REFRESH
 # ---------------------------------------------------------
-col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([2.6, 1.4, 1.0])
+col_ctrl1, col_ctrl2, col_ctrl3, col_ctrl4 = st.columns([2.2, 1.5, 1.2, 1.0])
 with col_ctrl1:
     session_badge = (
         "🟢 NSE Live Session (9:15 AM – 3:30 PM IST)"
@@ -40,8 +120,15 @@ with col_ctrl1:
     )
     st.caption(f"{session_badge} • Synced: **{now_ist.strftime('%d %b %Y, %I:%M:%S %p IST')}**")
 with col_ctrl2:
-    auto_refresh = st.toggle("Auto-Refresh (60s)", value=False)
+    sniper_mode = st.selectbox(
+        "🛡️ Sniper Anti-Trap Filter:",
+        ["Strict (RVOL ≥ 1.3x & ≤5.5% Move)", "Standard Sniper"],
+        index=0,
+    )
 with col_ctrl3:
+    auto_refresh = st.toggle("Auto-Refresh (60s)", value=False)
+with col_ctrl4:
+    st.write("")
     if st.button("🔄 Force Refresh Sniper Scans", type="primary", use_container_width=True):
         st.cache_data.clear()
         st.toast("Cleared cache and running fresh sniper scan...", icon="⚡")
@@ -119,7 +206,7 @@ def _extract_ticker_df(raw_df, sym, total_tickers):
 # 2. FAST BATCH SNIPER SCANNER (5m INTRADAY + 14d DAILY ATR)
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
-def fetch_institutional_sniper_picks():
+def fetch_institutional_sniper_picks(strict_mode=True):
     market_universe = list(STOCK_SECTOR_MAP.keys())
     symbols = [f"{s}.NS" for s in market_universe]
     sniper_rows = []
@@ -145,6 +232,10 @@ def fetch_institutional_sniper_picks():
         )
     except Exception:
         return pd.DataFrame()
+
+    min_rvol_req = 1.30 if strict_mode else 1.10
+    max_chg_req = 5.50 if strict_mode else 6.50
+    min_rr_req = 1.15 if strict_mode else 0.0
 
     for clean_sym in market_universe:
         symbol = f"{clean_sym}.NS"
@@ -220,10 +311,10 @@ def fetch_institutional_sniper_picks():
                 atr_14 = ltp * 0.03
 
             if (
-                0.4 <= change_pct <= 6.5
+                0.4 <= change_pct <= max_chg_req
                 and ltp >= latest_vwap
                 and ltp >= latest_ema
-                and rvol >= 1.1
+                and rvol >= min_rvol_req
             ):
                 v_avg = vol_series.rolling(20, min_periods=1).mean()
                 v_col = [
@@ -245,6 +336,14 @@ def fetch_institutional_sniper_picks():
                 stop_loss = round(latest_vwap * 0.990, 2)
                 t1 = round(ltp + (atr_14 * 0.8), 2)
                 t2 = round(ltp + (atr_14 * 1.3), 2)
+
+                risk_from_buy = max(vwap_buy - stop_loss, vwap_buy * 0.004)
+                reward_t1 = max(t1 - vwap_buy, 0.01)
+                rr_ratio = reward_t1 / risk_from_buy
+
+                if strict_mode and rr_ratio < min_rr_req:
+                    continue
+
                 alpha_score = round(change_pct * rvol * (ltp / max(latest_vwap, 0.01)), 2)
 
                 sniper_rows.append({
@@ -390,16 +489,47 @@ def render_sniper_chart(symbol, df, v_col, entry, sl, t1, t2, atr):
 # 4. MAIN RENDER BLOCK
 # ---------------------------------------------------------
 with st.spinner("🎯 Scanning market-wide intraday sniper setups..."):
-    df_sniper = fetch_institutional_sniper_picks()
+    df_sniper = fetch_institutional_sniper_picks(
+        strict_mode=sniper_mode.startswith("Strict")
+    )
 
 if df_sniper is None or df_sniper.empty:
     st.warning(
         "⚠️ No stocks currently meet the sniper confluence filters. "
-        "Click **Force Refresh Sniper Scans** above."
+        "Try **Standard Sniper** or click **Force Refresh Sniper Scans** above."
     )
 else:
+    top3_sniper = df_sniper.head(3)
+
+    # Dedicated PRIME Top 3 Strip
+    st.subheader("⭐ PRIME Top 3 Sniper Picks (Highlighted Separately)")
+    p3_cols = st.columns(len(top3_sniper))
+    prime_payload = []
+    for idx_p, p_row in top3_sniper.iterrows():
+        with p3_cols[idx_p]:
+            st.metric(
+                label=f"#{idx_p + 1} {p_row['Symbol']} ({p_row['Sector']})",
+                value=f"₹{p_row['LTP']:,.2f}",
+                delta=f"+{p_row['Change']}% | T1 ₹{p_row['Target_1']:,.2f}",
+            )
+            st.caption(f"Buy ₹{p_row['VWAP_Buy']:,.2f} • SL ₹{p_row['Stop_Loss']:,.2f} • RVOL {p_row['RVOL']}x")
+        prime_payload.append({
+            "symbol": p_row["Symbol"],
+            "side": "BUY",
+            "entry": float(p_row["VWAP_Buy"]),
+            "sl": float(p_row["Stop_Loss"]),
+            "t1": float(p_row["Target_1"]),
+            "t2": float(p_row["Target_2"]),
+            "notes": f"PRIME #{idx_p + 1} | Alpha {p_row['Alpha_Score']} | RVOL {p_row['RVOL']}x",
+        })
+
+    if st.button("📌 Log PRIME Top 3 Picks to History Ledger", type="primary"):
+        saved_3 = _save_prime_picks_to_ledger(prime_payload, "PRIME Top 3")
+        st.success(f"Recorded {saved_3} PRIME Top 3 pick(s) to history ledger.")
+
+    st.markdown("---")
     st.subheader("🏆 Intraday Sniper Ranking (VWAP, 20 EMA & RVOL Filtered)")
-    for idx, row in df_sniper.head(3).iterrows():
+    for idx, row in top3_sniper.iterrows():
         with st.container():
             c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
             with c1:
