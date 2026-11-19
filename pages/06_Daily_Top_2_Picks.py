@@ -1,4 +1,7 @@
 from datetime import datetime, time as dt_time
+import hashlib
+from pathlib import Path
+import sys
 import numpy as np
 import pandas as pd
 import pytz
@@ -18,6 +21,83 @@ is_market_open = (
     and dt_time(9, 15) <= now_ist.time() <= dt_time(15, 30)
 )
 is_late_session = is_market_open and now_ist.time() >= dt_time(14, 45)
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from utils.pick_ledger import record_picks as _ledger_record_picks
+except Exception:
+    _ledger_record_picks = None
+
+
+def _save_top2_to_ledger(picks: list[dict]) -> int:
+    if not picks:
+        return 0
+    if callable(_ledger_record_picks):
+        try:
+            return int(_ledger_record_picks("Daily Top 2", picks))
+        except Exception:
+            pass
+
+    ledger_dir = REPO_ROOT / "data_ledger"
+    ledger_dir.mkdir(parents=True, exist_ok=True)
+    ledger_file = ledger_dir / "pick_click_ledger.csv"
+    cols = [
+        "pick_id",
+        "logged_at_ist",
+        "session_date",
+        "iso_week",
+        "module",
+        "symbol",
+        "side",
+        "entry_price",
+        "stop_loss",
+        "target_1",
+        "target_2",
+        "notes",
+    ]
+    ts_str = now_ist.strftime("%Y-%m-%d %H:%M:%S IST")
+    s_date = now_ist.strftime("%Y-%m-%d")
+    i_week = f"{now_ist.isocalendar().year}-W{now_ist.isocalendar().week:02d}"
+    bucket = now_ist.strftime("%Y-%m-%d %H:%M")
+
+    existing = pd.read_csv(ledger_file) if ledger_file.exists() else pd.DataFrame(columns=cols)
+    seen = set(existing["pick_id"].dropna().astype(str)) if not existing.empty else set()
+    new_rows = []
+    for p in picks:
+        sym = str(p["symbol"]).strip().upper()
+        if not sym.endswith(".NS"):
+            sym = f"{sym}.NS"
+        side = str(p.get("side", "BUY")).upper()
+        entry = float(p["entry"])
+        pid = hashlib.sha1(f"{bucket}|Daily Top 2|{sym}|{side}|{entry:.4f}".encode("utf-8")).hexdigest()[:12]
+        if pid in seen:
+            continue
+        seen.add(pid)
+        new_rows.append({
+            "pick_id": pid,
+            "logged_at_ist": ts_str,
+            "session_date": s_date,
+            "iso_week": i_week,
+            "module": "Daily Top 2",
+            "symbol": sym,
+            "side": side,
+            "entry_price": round(entry, 2),
+            "stop_loss": round(float(p["sl"]), 2),
+            "target_1": round(float(p["t1"]), 2),
+            "target_2": round(float(p["t2"]), 2),
+            "notes": str(p.get("notes", "")),
+        })
+    if not new_rows:
+        return 0
+    out = pd.concat([existing, pd.DataFrame(new_rows)], ignore_index=True).drop_duplicates(
+        subset=["pick_id"], keep="first"
+    )
+    out.to_csv(ledger_file, index=False)
+    return len(new_rows)
+
 
 st.title("⚡ Pure Same-Day Intraday Setups + Separate Long-Term Table")
 st.markdown(
@@ -66,7 +146,7 @@ UNIVERSE = [
     "HINDALCO.NS",
 ]
 
-col_f1, col_f2, col_f3, col_r1 = st.columns([2.4, 1.3, 1.3, 1.4])
+col_f1, col_f2, col_f3, col_r1 = st.columns([2.2, 1.3, 1.5, 1.4])
 with col_f1:
     intraday_bias = st.selectbox(
         "🎯 Same-Day Intraday Direction:",
@@ -85,9 +165,9 @@ with col_f2:
         step=100.0,
     )
 with col_f3:
-    lt_filter = st.selectbox(
-        "🏦 Long-Term Filter:",
-        ["All Stocks", "Strong Uptrend Only", "Pullback Above 50 EMA"],
+    quality_mode = st.selectbox(
+        "🛡️ SL-Reduction Guardrails:",
+        ["Strict (Vol ≥ 1.2x & R:R ≥ 1.25x)", "Balanced (Standard VWAP + Move)"],
         index=0,
     )
 with col_r1:
@@ -96,6 +176,12 @@ with col_r1:
         st.cache_data.clear()
         st.toast("Refreshing live 5m intraday & daily long-term tables...", icon="⚡")
         st.rerun()
+
+lt_filter = st.selectbox(
+    "🏦 Long-Term Filter:",
+    ["All Stocks", "Strong Uptrend Only", "Pullback Above 50 EMA"],
+    index=0,
+)
 
 
 def _extract_ticker_df(raw_df, sym):
@@ -113,7 +199,7 @@ def _extract_ticker_df(raw_df, sym):
 
 
 @st.cache_data(ttl=60)
-def fetch_intraday_and_longterm_tables(direction_choice, risk_budget_inr):
+def fetch_intraday_and_longterm_tables(direction_choice, risk_budget_inr, strict_guardrails):
     bullish_mode = "Bullish Intraday" in direction_choice
     intraday_rows = []
     longterm_rows = []
@@ -143,7 +229,7 @@ def fetch_intraday_and_longterm_tables(direction_choice, risk_budget_inr):
     for symbol in UNIVERSE:
         clean_sym = symbol.replace(".NS", "")
 
-        # --- 1. PURE SAME-DAY INTRADAY (5m + VWAP + Volatility-Adjusted Targets) ---
+        # --- 1. PURE SAME-DAY INTRADAY (5m + VWAP + Volatility & R:R Guardrails) ---
         try:
             df_5m = _extract_ticker_df(raw_5m, symbol).dropna(
                 subset=["Open", "High", "Low", "Close"]
@@ -198,8 +284,7 @@ def fetch_intraday_and_longterm_tables(direction_choice, risk_budget_inr):
                     if not np.isnan(bar_range_pct) and bar_range_pct > 0
                     else 0.25
                 )
-                # Scale quick profit booking target to recent 5m bar noise (clamped 0.7% to 1.8%)
-                t1_pct = float(np.clip(avg_5m_move_pct * 4.5, 0.7, 1.8)) / 100.0
+                t1_pct = float(np.clip(avg_5m_move_pct * 4.5, 0.75, 1.8)) / 100.0
                 t2_pct = float(np.clip(avg_5m_move_pct * 8.5, 1.4, 3.0)) / 100.0
 
                 if prev_close_ref > 0 and not np.isnan(ltp_5m):
@@ -209,19 +294,35 @@ def fetch_intraday_and_longterm_tables(direction_choice, risk_budget_inr):
                     vwap_dist_pct = round(
                         ((ltp_5m - vwap_val) / max(vwap_val, 0.01)) * 100, 2
                     )
+                    recent_swing_low = float(df_5m["Low"].tail(8).min())
+                    recent_swing_high = float(df_5m["High"].tail(8).max())
 
                     if bullish_mode and intra_chg > 0.25 and ltp_5m >= vwap_val * 0.998:
-                        sl_intra = round(min(vwap_val * 0.995, ltp_5m * 0.992), 2)
-                        sl_intra = min(sl_intra, round(ltp_5m * 0.995, 2))
+                        sl_candidate = min(
+                            vwap_val * 0.996,
+                            recent_swing_low * 0.998,
+                            ltp_5m * 0.992,
+                        )
+                        sl_intra = round(min(sl_candidate, ltp_5m * 0.995), 2)
                         t1_intra = round(ltp_5m * (1.0 + t1_pct), 2)
                         t2_intra = round(ltp_5m * (1.0 + t2_pct), 2)
+
                         per_share_risk = max(ltp_5m - sl_intra, ltp_5m * 0.004)
                         per_share_t1 = max(t1_intra - ltp_5m, 0.01)
                         rr_t1 = round(per_share_t1 / per_share_risk, 2)
+
+                        if strict_guardrails:
+                            if vol_ratio < 1.20 or vwap_dist_pct > 1.50 or rr_t1 < 1.25:
+                                continue
+
                         qty_est = max(1, int(risk_budget_inr // per_share_risk))
                         est_t1_profit = round(qty_est * per_share_t1, 0)
-                        stretch_tag = "Extended (>1.5% VWAP)" if vwap_dist_pct > 1.5 else "Near VWAP"
-                        score_intra = round(intra_chg * max(vol_ratio, 0.8), 2)
+                        stretch_tag = (
+                            "Extended (>1.5% VWAP)"
+                            if vwap_dist_pct > 1.5
+                            else ("Sweet Spot (≤1.5% VWAP)" if vwap_dist_pct >= 0.15 else "Near VWAP")
+                        )
+                        score_intra = round(intra_chg * max(vol_ratio, 0.8) * min(rr_t1, 2.5), 2)
 
                         intraday_rows.append({
                             "Stock": clean_sym,
@@ -246,17 +347,31 @@ def fetch_intraday_and_longterm_tables(direction_choice, risk_budget_inr):
                         and intra_chg < -0.25
                         and ltp_5m <= vwap_val * 1.002
                     ):
-                        sl_intra = round(max(vwap_val * 1.005, ltp_5m * 1.008), 2)
-                        sl_intra = max(sl_intra, round(ltp_5m * 1.005, 2))
+                        sl_candidate = max(
+                            vwap_val * 1.004,
+                            recent_swing_high * 1.002,
+                            ltp_5m * 1.008,
+                        )
+                        sl_intra = round(max(sl_candidate, ltp_5m * 1.005), 2)
                         t1_intra = round(ltp_5m * (1.0 - t1_pct), 2)
                         t2_intra = round(ltp_5m * (1.0 - t2_pct), 2)
+
                         per_share_risk = max(sl_intra - ltp_5m, ltp_5m * 0.004)
                         per_share_t1 = max(ltp_5m - t1_intra, 0.01)
                         rr_t1 = round(per_share_t1 / per_share_risk, 2)
+
+                        if strict_guardrails:
+                            if vol_ratio < 1.20 or vwap_dist_pct < -1.50 or rr_t1 < 1.25:
+                                continue
+
                         qty_est = max(1, int(risk_budget_inr // per_share_risk))
                         est_t1_profit = round(qty_est * per_share_t1, 0)
-                        stretch_tag = "Extended (<-1.5% VWAP)" if vwap_dist_pct < -1.5 else "Near VWAP"
-                        score_intra = round(abs(intra_chg) * max(vol_ratio, 0.8), 2)
+                        stretch_tag = (
+                            "Extended (<-1.5% VWAP)"
+                            if vwap_dist_pct < -1.5
+                            else ("Sweet Spot (≥-1.5% VWAP)" if vwap_dist_pct <= -0.15 else "Near VWAP")
+                        )
+                        score_intra = round(abs(intra_chg) * max(vol_ratio, 0.8) * min(rr_t1, 2.5), 2)
 
                         intraday_rows.append({
                             "Stock": clean_sym,
@@ -339,9 +454,10 @@ def fetch_intraday_and_longterm_tables(direction_choice, risk_budget_inr):
     return df_intra, df_lt
 
 
+is_strict = quality_mode.startswith("Strict")
 with st.spinner("Scanning live 5m intraday setups & daily long-term trends..."):
     df_intraday, df_longterm = fetch_intraday_and_longterm_tables(
-        intraday_bias, max_risk_inr
+        intraday_bias, max_risk_inr, is_strict
     )
 
 # ---------------------------------------------------------
@@ -350,8 +466,8 @@ with st.spinner("Scanning live 5m intraday setups & daily long-term trends..."):
 st.subheader("🎯 Table 1: Same-Day Intraday Setups (Buy & Exit Today)")
 if df_intraday.empty:
     st.info(
-        "ℹ️ No stocks matched the same-day intraday filter right now. Click **Refresh Intraday & Long-Term** "
-        "or switch direction above."
+        "ℹ️ No stocks matched the same-day intraday filter right now. Try **Balanced** mode, "
+        "click **Refresh Intraday & Long-Term**, or switch direction above."
     )
 else:
     st.dataframe(
@@ -371,6 +487,7 @@ else:
     )
 
     st.markdown("#### Quick Same-Day Execution Cards (Top 2)")
+    top2_records = []
     for idx, row in df_intraday.head(2).iterrows():
         c1, c2, c3, c4 = st.columns([2.1, 1.9, 2.0, 2.0])
         c1.metric(
@@ -393,6 +510,19 @@ else:
             f"₹{row['Target_2_Stretch']:,.2f}",
             row["Exit_Rule"],
         )
+        top2_records.append({
+            "symbol": row["Stock"],
+            "side": "SHORT" if "SHORT" in str(row["Plan"]).upper() else "BUY",
+            "entry": float(row["LTP"]),
+            "sl": float(row["Stop_Loss"]),
+            "t1": float(row["Target_1_Book"]),
+            "t2": float(row["Target_2_Stretch"]),
+            "notes": f"{row['Entry_Zone']} | Vol {row['Vol_Pace']} | R:R {row['RR_T1']:.2f}x",
+        })
+
+    if top2_records and st.button("📌 Log Top 2 Intraday Picks to History Ledger", type="primary"):
+        saved_n = _save_top2_to_ledger(top2_records)
+        st.success(f"Recorded {saved_n} Top 2 pick(s) to the history ledger.")
 
 st.markdown("---")
 
