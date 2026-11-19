@@ -1,4 +1,7 @@
 from datetime import datetime, time as dt_time
+import hashlib
+from pathlib import Path
+import sys
 import numpy as np
 import pandas as pd
 import pytz
@@ -13,6 +16,83 @@ is_market_open = (
     now_ist.weekday() < 5
     and dt_time(9, 15) <= now_ist.time() <= dt_time(15, 30)
 )
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from utils.pick_ledger import record_picks as _ledger_record_picks
+except Exception:
+    _ledger_record_picks = None
+
+
+def _save_super_picks_to_ledger(picks: list[dict], module_label: str = "Matched Super Signal") -> int:
+    if not picks:
+        return 0
+    if callable(_ledger_record_picks):
+        try:
+            return int(_ledger_record_picks(module_label, picks))
+        except Exception:
+            pass
+
+    ledger_dir = REPO_ROOT / "data_ledger"
+    ledger_dir.mkdir(parents=True, exist_ok=True)
+    ledger_file = ledger_dir / "pick_click_ledger.csv"
+    cols = [
+        "pick_id",
+        "logged_at_ist",
+        "session_date",
+        "iso_week",
+        "module",
+        "symbol",
+        "side",
+        "entry_price",
+        "stop_loss",
+        "target_1",
+        "target_2",
+        "notes",
+    ]
+    ts_str = now_ist.strftime("%Y-%m-%d %H:%M:%S IST")
+    s_date = now_ist.strftime("%Y-%m-%d")
+    i_week = f"{now_ist.isocalendar().year}-W{now_ist.isocalendar().week:02d}"
+    bucket = now_ist.strftime("%Y-%m-%d %H:%M")
+
+    existing = pd.read_csv(ledger_file) if ledger_file.exists() else pd.DataFrame(columns=cols)
+    seen = set(existing["pick_id"].dropna().astype(str)) if not existing.empty else set()
+    new_rows = []
+    for p in picks:
+        sym = str(p["symbol"]).strip().upper()
+        if not sym.endswith(".NS"):
+            sym = f"{sym}.NS"
+        side = str(p.get("side", "BUY")).upper()
+        entry = float(p["entry"])
+        pid = hashlib.sha1(f"{bucket}|{module_label}|{sym}|{side}|{entry:.4f}".encode("utf-8")).hexdigest()[:12]
+        if pid in seen:
+            continue
+        seen.add(pid)
+        new_rows.append({
+            "pick_id": pid,
+            "logged_at_ist": ts_str,
+            "session_date": s_date,
+            "iso_week": i_week,
+            "module": module_label,
+            "symbol": sym,
+            "side": side,
+            "entry_price": round(entry, 2),
+            "stop_loss": round(float(p["sl"]), 2),
+            "target_1": round(float(p["t1"]), 2),
+            "target_2": round(float(p["t2"]), 2),
+            "notes": str(p.get("notes", "")),
+        })
+    if not new_rows:
+        return 0
+    out = pd.concat([existing, pd.DataFrame(new_rows)], ignore_index=True).drop_duplicates(
+        subset=["pick_id"], keep="first"
+    )
+    out.to_csv(ledger_file, index=False)
+    return len(new_rows)
+
 
 st.title("🎯 Live Intraday Super-Signal & Night-Before Trigger Engine")
 st.markdown(
@@ -184,7 +264,7 @@ def _extract_ticker_df(raw_df, sym, total_tickers):
 
 
 @st.cache_data(ttl=90)
-def scan_matched_super_signals(tickers):
+def scan_matched_super_signals(tickers, strict_mode=True):
     symbols = [f"{t}.NS" for t in tickers]
     try:
         raw = yf.download(
@@ -233,7 +313,18 @@ def scan_matched_super_signals(tickers):
                 auto_night_before.append(t)
 
             near_day_high = (high_p - ltp) / max(high_p - low_p, 0.01) <= 0.35
-            if pct_chg >= 1.2 and rvol >= 1.3 and ltp > open_p and ltp > ema20:
+            min_pct = 1.4 if strict_mode else 1.2
+            min_rvol = 1.5 if strict_mode else 1.3
+            max_pct_cap = 6.5 if strict_mode else 15.0
+
+            if (
+                pct_chg >= min_pct
+                and pct_chg <= max_pct_cap
+                and rvol >= min_rvol
+                and ltp > open_p
+                and ltp > ema20
+                and (not strict_mode or near_day_high)
+            ):
                 broke_20d = ltp >= res_20d
                 score = (
                     (pct_chg * 6)
@@ -272,17 +363,35 @@ def scan_matched_super_signals(tickers):
     return pd.DataFrame(signals), auto_night_before
 
 
-if st.button("🔄 Force Refresh Live Data", type="primary"):
-    st.cache_data.clear()
-    st.rerun()
+ctrl1, ctrl2, ctrl3 = st.columns([2.0, 2.0, 1.4])
+with ctrl1:
+    filter_quality = st.selectbox(
+        "🛡️ Signal Quality Mode:",
+        ["Strict (Near High, RVOL ≥ 1.5x, ≤6.5% Move)", "Standard Breakout"],
+        index=0,
+    )
+with ctrl2:
+    source_filter = st.selectbox(
+        "Filter Signals by Type:",
+        ["All Signals", "🟢 Night-Before Triggered Only", "🔵 Fresh Breakouts Only"],
+        index=0,
+    )
+with ctrl3:
+    st.write("")
+    if st.button("🔄 Force Refresh Live Data", type="primary", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
 
-df_live, computed_nb = scan_matched_super_signals(NSE_ACTIVE_UNIVERSE)
+df_live, computed_nb = scan_matched_super_signals(
+    NSE_ACTIVE_UNIVERSE,
+    strict_mode=filter_quality.startswith("Strict"),
+)
 
 session_nb = st.session_state.get("night_before_watchlist", [])
 nb_watchlist = set(session_nb) | set(computed_nb)
 
 if df_live.empty:
-    st.warning("No stocks currently meet the breakout + RVOL threshold. Try clicking **Force Refresh Live Data**.")
+    st.warning("No stocks currently meet the breakout + RVOL threshold. Try switching to **Standard Breakout** or clicking **Force Refresh Live Data**.")
 else:
     df_live["Night_Before_Match"] = df_live["Stock"].isin(nb_watchlist)
     df_live["Final_Score"] = df_live["Score"] + np.where(
@@ -301,18 +410,44 @@ else:
         df_live["Night_Before_Match"]
     ]["Stock"].tolist()
 
-    source_filter = st.selectbox(
-        "Filter Signals by Type:",
-        ["All Signals", "🟢 Night-Before Triggered Only", "🔵 Fresh Breakouts Only"],
-        index=0,
-    )
-
     if source_filter == "🟢 Night-Before Triggered Only":
         df_shown = df_live[df_live["Night_Before_Match"]].reset_index(drop=True)
     elif source_filter == "🔵 Fresh Breakouts Only":
         df_shown = df_live[~df_live["Night_Before_Match"]].reset_index(drop=True)
     else:
         df_shown = df_live.copy()
+
+    # Dedicated Top 2 Highlight Strip at the Top
+    st.subheader("⭐ Top 2 Highlighted Super Signals")
+    top2_df = df_shown.head(2)
+    if top2_df.empty:
+        st.info("No signals in this filter slice.")
+    else:
+        t2_cols = st.columns(len(top2_df))
+        for idx_t2, r2 in top2_df.iterrows():
+            with t2_cols[idx_t2]:
+                st.metric(
+                    label=f"#{r2['Rank']} {r2['Stock']} ({r2['Sector']})",
+                    value=f"BUY @ ₹{r2['LTP']:,.2f}",
+                    delta=f"+{r2['Change_%']:.2f}% | T1 ₹{r2['Target_1']:,.2f}",
+                )
+                st.caption(f"{r2['Signal_Source']} • SL ₹{r2['Stop_Loss']:,.2f} • Vol {r2['Volume_Surge']}")
+
+        top2_payload = [
+            {
+                "symbol": r["Stock"],
+                "side": "BUY",
+                "entry": float(r["LTP"]),
+                "sl": float(r["Stop_Loss"]),
+                "t1": float(r["Target_1"]),
+                "t2": float(r["Target_2"]),
+                "notes": f"{r['Signal_Source']} | {r['Catalyst_Reason']}",
+            }
+            for _, r in top2_df.iterrows()
+        ]
+        if st.button("📌 Log Top 2 Super Signals to History Ledger", type="primary"):
+            saved_n = _save_super_picks_to_ledger(top2_payload, "Matched Super Signal (Top 2)")
+            st.success(f"Recorded {saved_n} Top 2 signal(s) to history ledger.")
 
     def highlight_signal_source(row):
         if "NIGHT-BEFORE TRIGGERED" in str(row["Signal_Source"]):
