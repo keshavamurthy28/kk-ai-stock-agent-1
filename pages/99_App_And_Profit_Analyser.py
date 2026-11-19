@@ -1,26 +1,114 @@
 import ast
+from datetime import datetime
+import hashlib
 from pathlib import Path
 import sys
 import numpy as np
 import pandas as pd
+import pytz
 import streamlit as st
 import yfinance as yf
 
+ist = pytz.timezone("Asia/Kolkata")
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from utils.pick_ledger import (
-    import_historical_csv,
-    load_ledger,
-    record_picks,
-    top_n_picks,
-)
+try:
+    from utils.pick_ledger import (
+        import_historical_csv,
+        load_ledger,
+        record_picks,
+        top_n_picks,
+    )
+except Exception:
+    LEDGER_COLS = [
+        "pick_id",
+        "logged_at_ist",
+        "session_date",
+        "iso_week",
+        "module",
+        "symbol",
+        "side",
+        "entry_price",
+        "stop_loss",
+        "target_1",
+        "target_2",
+        "notes",
+    ]
+    LEDGER_FILE = REPO_ROOT / "data_ledger" / "pick_click_ledger.csv"
+
+    def top_n_picks(picks: list[dict], n: int) -> list[dict]:
+        return list(picks[:n]) if picks else []
+
+    def load_ledger() -> pd.DataFrame:
+        if LEDGER_FILE.exists():
+            return pd.read_csv(LEDGER_FILE)
+        return pd.DataFrame(columns=LEDGER_COLS)
+
+    def record_picks(module_label: str, picks: list[dict]) -> int:
+        if not picks:
+            return 0
+        LEDGER_FILE.parent.mkdir(parents=True, exist_ok=True)
+        now_i = datetime.now(ist)
+        ts_str = now_i.strftime("%Y-%m-%d %H:%M:%S IST")
+        s_date = now_i.strftime("%Y-%m-%d")
+        i_week = f"{now_i.isocalendar().year}-W{now_i.isocalendar().week:02d}"
+        bucket = now_i.strftime("%Y-%m-%d %H:%M")
+
+        existing = load_ledger()
+        seen = set(existing["pick_id"].dropna().astype(str)) if not existing.empty else set()
+        rows = []
+        for p in picks:
+            sym = str(p["symbol"]).strip().upper()
+            if not sym.endswith(".NS"):
+                sym = f"{sym}.NS"
+            side = str(p.get("side", "BUY")).upper()
+            entry = float(p["entry"])
+            pid = hashlib.sha1(
+                f"{bucket}|{module_label}|{sym}|{side}|{entry:.4f}".encode("utf-8")
+            ).hexdigest()[:12]
+            if pid in seen:
+                continue
+            seen.add(pid)
+            rows.append({
+                "pick_id": pid,
+                "logged_at_ist": ts_str,
+                "session_date": s_date,
+                "iso_week": i_week,
+                "module": module_label,
+                "symbol": sym,
+                "side": side,
+                "entry_price": round(entry, 2),
+                "stop_loss": round(float(p["sl"]), 2),
+                "target_1": round(float(p["t1"]), 2),
+                "target_2": round(float(p["t2"]), 2),
+                "notes": str(p.get("notes", "")),
+            })
+        if not rows:
+            return 0
+        out = pd.concat([existing, pd.DataFrame(rows)], ignore_index=True).drop_duplicates(
+            subset=["pick_id"], keep="first"
+        )
+        out.to_csv(LEDGER_FILE, index=False)
+        return len(rows)
+
+    def import_historical_csv(uploaded_file) -> tuple[int, int]:
+        incoming = pd.read_csv(uploaded_file)
+        existing = load_ledger()
+        before = len(existing)
+        merged = pd.concat([existing, incoming], ignore_index=True)
+        if "pick_id" in merged.columns:
+            merged = merged.drop_duplicates(subset=["pick_id"], keep="first")
+        LEDGER_FILE.parent.mkdir(parents=True, exist_ok=True)
+        merged.to_csv(LEDGER_FILE, index=False)
+        return max(0, len(merged) - before), len(merged)
+
 
 st.set_page_config(page_title="App & Profit-Booking Analyser", layout="wide")
 st.title("🧪 Streamlit App, GitHub Code & Long-Term Profit Analyser")
 st.caption(
-    "Tracks every logged pick forever (with CSV import/export), evaluates Target-1 vs. Stop-Loss outcomes, "
+    "Tracks every logged pick forever (with CSV import/export), evaluates post-entry Target-1 vs. Stop-Loss outcomes, "
     "and shows how performance evolves over time. Past hit rates do not guarantee future profits—always use a stop-loss."
 )
 
@@ -34,12 +122,12 @@ MODULE_PICKS = {
     "Night Before -> Morning Top 2": [
         {"symbol": "RELIANCE.NS", "side": "BUY", "entry": 1376.6, "sl": 1364.0, "t1": 1393.0, "t2": 1406.0, "notes": "Morning Top #1"},
         {"symbol": "ICICIBANK.NS", "side": "BUY", "entry": 1606.6, "sl": 1592.0, "t1": 1625.0, "t2": 1640.0, "notes": "Morning Top #2"},
-        {"symbol": "INFY.NS", "side": "BUY", "entry": 1090.6, "sl": 1080.0, "t1": 1104.0, "t2": 1115.0, "notes": "Morning Watch #3"},
+        {"symbol": "INFY.NS", "side": "BUY", "entry": 1090.6, "sl": 1080.0, "t1": 1104.0, "t2": 1115.0, "notes": "Morning Watch #3 (trimmed to Top 2)"},
     ],
-    "Matched Super Signal (Top 2 Highlighted)": [
+    "Matched Super Signal (Top 2)": [
         {"symbol": "SBIN.NS", "side": "BUY", "entry": 1156.2, "sl": 1145.0, "t1": 1170.0, "t2": 1182.0, "notes": "Matched Super #1"},
         {"symbol": "BHARTIARTL.NS", "side": "BUY", "entry": 2149.8, "sl": 2130.0, "t1": 2175.0, "t2": 2196.0, "notes": "Matched Super #2"},
-        {"symbol": "ITC.NS", "side": "BUY", "entry": 301.15, "sl": 298.0, "t1": 305.0, "t2": 308.0, "notes": "Matched Super #3"},
+        {"symbol": "ITC.NS", "side": "BUY", "entry": 301.15, "sl": 298.0, "t1": 305.0, "t2": 308.0, "notes": "Matched Super #3 (trimmed to Top 2)"},
     ],
     "MUDRA Top 5": [
         {"symbol": "RELIANCE.NS", "side": "BUY", "entry": 1376.6, "sl": 1364.0, "t1": 1393.0, "t2": 1406.0, "notes": "MUDRA #1"},
@@ -63,32 +151,51 @@ MODULE_PICKS = {
         {"symbol": "TCS.NS", "side": "SHORT", "entry": 2347.5, "sl": 2368.0, "t1": 2320.0, "t2": 2298.0, "notes": "Bearish Top #1"},
         {"symbol": "HDFCBANK.NS", "side": "SHORT", "entry": 821.0, "sl": 828.5, "t1": 811.0, "t2": 803.0, "notes": "Bearish Top #2"},
     ],
-    "Smart Money Top 2 (Green & Red)": [
+    "Smart Money Top 2 Green & Red": [
         {"symbol": "BHARTIARTL.NS", "side": "BUY", "entry": 2149.8, "sl": 2130.0, "t1": 2175.0, "t2": 2196.0, "notes": "Smart Money Green #1"},
         {"symbol": "SBIN.NS", "side": "BUY", "entry": 1156.2, "sl": 1145.0, "t1": 1170.0, "t2": 1182.0, "notes": "Smart Money Green #2"},
         {"symbol": "TCS.NS", "side": "SHORT", "entry": 2347.5, "sl": 2368.0, "t1": 2320.0, "t2": 2298.0, "notes": "Smart Money Red #1"},
         {"symbol": "HDFCBANK.NS", "side": "SHORT", "entry": 821.0, "sl": 828.5, "t1": 811.0, "t2": 803.0, "notes": "Smart Money Red #2"},
     ],
+    "Sector Rotation Top 2 Green & Red": [
+        {"symbol": "SBIN.NS", "side": "BUY", "entry": 1156.2, "sl": 1145.0, "t1": 1170.0, "t2": 1182.0, "notes": "Sector Green #1"},
+        {"symbol": "LT.NS", "side": "BUY", "entry": 4205.7, "sl": 4170.0, "t1": 4252.0, "t2": 4290.0, "notes": "Sector Green #2"},
+        {"symbol": "TCS.NS", "side": "SHORT", "entry": 2347.5, "sl": 2368.0, "t1": 2320.0, "t2": 2298.0, "notes": "Sector Red #1"},
+        {"symbol": "INFY.NS", "side": "SHORT", "entry": 1090.6, "sl": 1102.0, "t1": 1076.0, "t2": 1064.0, "notes": "Sector Red #2"},
+    ],
 }
 
 CAP_BY_MODULE = {
     "Night Before -> Morning Top 2": 2,
-    "Matched Super Signal (Top 2 Highlighted)": 2,
+    "Matched Super Signal (Top 2)": 2,
     "MUDRA Top 5": 5,
     "PRIME Top 3": 3,
     "Daily Top 2": 2,
     "Bearish Top 2": 2,
-    "Smart Money Top 2 (Green & Red)": 4,
+    "Smart Money Top 2 Green & Red": 4,
+    "Sector Rotation Top 2 Green & Red": 4,
 }
 
 
 def _color_outcome_row(row):
-    outcome = str(row.get("Outcome", ""))
-    if outcome == "Target_1_Hit":
+    outcome = str(row.get("Outcome", row.get("status", "")))
+    if "Target_1_Hit" in outcome or "Target 1 Reached" in outcome or "Target 2 Reached" in outcome:
         return ["background-color: rgba(0, 200, 83, 0.22); color: #A5F3C5"] * len(row)
-    if outcome == "Stop_Loss_Hit":
+    if "Stop_Loss_Hit" in outcome or "Stop-Loss Touched" in outcome:
         return ["background-color: rgba(255, 82, 82, 0.24); color: #FFB4B4"] * len(row)
     return ["background-color: rgba(255, 193, 7, 0.14); color: #FFE599"] * len(row)
+
+
+def _parse_logged_ts_ist(ts_val) -> pd.Timestamp | None:
+    if pd.isna(ts_val):
+        return None
+    s = str(ts_val).replace(" IST", "").strip()
+    dt_parsed = pd.to_datetime(s, errors="coerce")
+    if pd.isna(dt_parsed):
+        return None
+    if dt_parsed.tzinfo is None:
+        return dt_parsed.tz_localize("Asia/Kolkata")
+    return dt_parsed.tz_convert("Asia/Kolkata")
 
 
 def audit_repo_files() -> pd.DataFrame:
@@ -256,8 +363,8 @@ def evaluate_logged_ledger(ledger_df: pd.DataFrame) -> pd.DataFrame:
     try:
         raw_5m = yf.download(
             symbols,
-            period="5d",
-            interval="5m",
+            period="1mo",
+            interval="15m",
             group_by="ticker",
             progress=False,
             threads=True,
@@ -274,6 +381,7 @@ def evaluate_logged_ledger(ledger_df: pd.DataFrame) -> pd.DataFrame:
         sl = float(r["stop_loss"])
         t1 = float(r["target_1"])
         t2 = float(r["target_2"])
+        logged_dt = _parse_logged_ts_ist(r.get("logged_at_ist"))
 
         sub = pd.DataFrame()
         if not raw_5m.empty:
@@ -294,50 +402,95 @@ def evaluate_logged_ledger(ledger_df: pd.DataFrame) -> pd.DataFrame:
                 "session_date": r["session_date"],
                 "iso_week": r["iso_week"],
                 "module": r["module"],
-                "symbol": sym,
+                "symbol": sym.replace(".NS", ""),
                 "side": side,
+                "entry": round(entry, 2),
                 "ltp": np.nan,
                 "status": "No Price Feed",
                 "t1_hit_flag": 0,
+                "sl_hit_flag": 0,
                 "r_est": np.nan,
             })
             continue
 
-        ltp = float(sub["Close"].iloc[-1])
-        max_h = float(sub["High"].max())
-        min_l = float(sub["Low"].min())
+        sub = sub.copy()
+        idx_dt = pd.to_datetime(sub.index)
+        if idx_dt.tz is None:
+            idx_dt = idx_dt.tz_localize("Asia/Kolkata")
+        else:
+            idx_dt = idx_dt.tz_convert("Asia/Kolkata")
+        sub.index = idx_dt
 
+        ltp = float(sub["Close"].iloc[-1])
+
+        # Evaluate only bars AT OR AFTER the pick was logged so past days don't contaminate results
+        if logged_dt is not None:
+            post_sub = sub[sub.index >= (logged_dt - pd.Timedelta(minutes=15))]
+        else:
+            post_sub = sub
+
+        if post_sub.empty:
+            rows.append({
+                "pick_id": r["pick_id"],
+                "logged_at_ist": r["logged_at_ist"],
+                "session_date": r["session_date"],
+                "iso_week": r["iso_week"],
+                "module": r["module"],
+                "symbol": sym.replace(".NS", ""),
+                "side": side,
+                "entry": round(entry, 2),
+                "ltp": round(ltp, 2),
+                "status": "⏳ Awaiting Next Session Bar",
+                "t1_hit_flag": 0,
+                "sl_hit_flag": 0,
+                "r_est": 0.0,
+            })
+            continue
+
+        # Walk forward chronologically to see whether Stop-Loss or Target 1/2 was touched first
+        status = "⏳ Open / Unresolved"
+        t1_flag = 0
+        sl_flag = 0
         if side == "SHORT":
-            hit_t1 = min_l <= t1
-            hit_t2 = min_l <= t2
-            hit_sl = max_h >= sl
             risk_pts = max(sl - entry, 1e-6)
             reward_t1_pts = max(entry - t1, 1e-6)
-            move_pts = entry - ltp
+            reward_t2_pts = max(entry - t2, 1e-6)
+            r_est = round((entry - ltp) / risk_pts, 2)
+            for _, bar in post_sub.iterrows():
+                if float(bar["High"]) >= sl:
+                    status = "🛑 Stop-Loss Touched"
+                    sl_flag = 1
+                    r_est = -1.0
+                    break
+                if float(bar["Low"]) <= t2:
+                    status = "✅ Target 2 Reached"
+                    t1_flag = 1
+                    r_est = round(reward_t2_pts / risk_pts, 2)
+                    break
+                if float(bar["Low"]) <= t1 and t1_flag == 0:
+                    status = "✅ Target 1 Reached"
+                    t1_flag = 1
+                    r_est = round(reward_t1_pts / risk_pts, 2)
         else:
-            hit_t1 = max_h >= t1
-            hit_t2 = max_h >= t2
-            hit_sl = min_l <= sl
             risk_pts = max(entry - sl, 1e-6)
             reward_t1_pts = max(t1 - entry, 1e-6)
-            move_pts = ltp - entry
-
-        if hit_t2:
-            status = "✅ Target 2 Reached"
-            t1_flag = 1
-            r_est = round(reward_t1_pts / risk_pts, 2)
-        elif hit_t1:
-            status = "✅ Target 1 Reached"
-            t1_flag = 1
-            r_est = round(reward_t1_pts / risk_pts, 2)
-        elif hit_sl:
-            status = "🛑 Stop-Loss Touched"
-            t1_flag = 0
-            r_est = -1.0
-        else:
-            status = "⏳ Open / Unresolved"
-            t1_flag = 0
-            r_est = round(move_pts / risk_pts, 2)
+            reward_t2_pts = max(t2 - entry, 1e-6)
+            r_est = round((ltp - entry) / risk_pts, 2)
+            for _, bar in post_sub.iterrows():
+                if float(bar["Low"]) <= sl:
+                    status = "🛑 Stop-Loss Touched"
+                    sl_flag = 1
+                    r_est = -1.0
+                    break
+                if float(bar["High"]) >= t2:
+                    status = "✅ Target 2 Reached"
+                    t1_flag = 1
+                    r_est = round(reward_t2_pts / risk_pts, 2)
+                    break
+                if float(bar["High"]) >= t1 and t1_flag == 0:
+                    status = "✅ Target 1 Reached"
+                    t1_flag = 1
+                    r_est = round(reward_t1_pts / risk_pts, 2)
 
         rows.append({
             "pick_id": r["pick_id"],
@@ -345,11 +498,13 @@ def evaluate_logged_ledger(ledger_df: pd.DataFrame) -> pd.DataFrame:
             "session_date": r["session_date"],
             "iso_week": r["iso_week"],
             "module": r["module"],
-            "symbol": sym,
+            "symbol": sym.replace(".NS", ""),
             "side": side,
+            "entry": round(entry, 2),
             "ltp": round(ltp, 2),
             "status": status,
             "t1_hit_flag": t1_flag,
+            "sl_hit_flag": sl_flag,
             "r_est": r_est,
         })
 
@@ -425,18 +580,60 @@ with exp_col:
 if ledger_df.empty:
     st.info("No picks in history yet. Log picks above or import a historical CSV.")
 else:
-    st.dataframe(ledger_df.tail(25), use_container_width=True, hide_index=True)
-
     with st.spinner("Evaluating recorded history & tracking week-over-week improvement..."):
         hist_eval = evaluate_logged_ledger(ledger_df)
 
     if not hist_eval.empty:
+        mod_options = ["All Modules"] + sorted(hist_eval["module"].dropna().unique().tolist())
+        sel_mod_eval = st.selectbox("Filter Recorded Ledger by Scanner Module:", mod_options, index=0)
+        eval_view = (
+            hist_eval
+            if sel_mod_eval == "All Modules"
+            else hist_eval[hist_eval["module"] == sel_mod_eval].reset_index(drop=True)
+        )
+
+        tot_logged = len(eval_view)
+        t1_cnt = int(eval_view["t1_hit_flag"].sum())
+        sl_cnt = int(eval_view["sl_hit_flag"].sum())
+        avg_r_logged = float(eval_view["r_est"].dropna().mean()) if not eval_view["r_est"].dropna().empty else 0.0
+
+        lk1, lk2, lk3, lk4 = st.columns(4)
+        lk1.metric("Logged Picks", f"{tot_logged}")
+        lk2.metric("Target 1 / 2 Hit Rate", f"{(t1_cnt / max(tot_logged, 1)) * 100:.1f}%", f"{t1_cnt} Hits")
+        lk3.metric("Stop-Loss Touched", f"{(sl_cnt / max(tot_logged, 1)) * 100:.1f}%", f"{sl_cnt} SL", delta_color="inverse")
+        lk4.metric("Avg Est. R-Multiple", f"{avg_r_logged:+.2f}R")
+
+        eval_display_cols = [
+            "logged_at_ist",
+            "iso_week",
+            "module",
+            "symbol",
+            "side",
+            "entry",
+            "ltp",
+            "status",
+            "r_est",
+        ]
+        st.dataframe(
+            eval_view[eval_display_cols]
+            .tail(30)
+            .style.apply(_color_outcome_row, axis=1)
+            .format({
+                "entry": "₹{:,.2f}",
+                "ltp": "₹{:,.2f}",
+                "r_est": "{:+.2f}R",
+            }),
+            use_container_width=True,
+            hide_index=True,
+        )
+
         st.subheader("📈 Improvement Over Time (By Week & Scanner Module)")
         weekly_perf = (
             hist_eval.groupby("iso_week", as_index=False)
             .agg(
                 Total_Picks=("pick_id", "count"),
                 T1_Hits=("t1_hit_flag", "sum"),
+                SL_Hits=("sl_hit_flag", "sum"),
                 Avg_R=("r_est", "mean"),
             )
         )
@@ -459,6 +656,7 @@ else:
             .agg(
                 Total_Picks=("pick_id", "count"),
                 T1_Hits=("t1_hit_flag", "sum"),
+                SL_Hits=("sl_hit_flag", "sum"),
                 Avg_R=("r_est", "mean"),
             )
         )
