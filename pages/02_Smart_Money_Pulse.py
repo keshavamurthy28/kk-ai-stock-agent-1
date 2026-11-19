@@ -1,4 +1,7 @@
 from datetime import datetime, time as dt_time
+import hashlib
+from pathlib import Path
+import sys
 import time
 import numpy as np
 import pandas as pd
@@ -19,19 +22,106 @@ is_market_open = (
     and dt_time(9, 15) <= now_ist.time() <= dt_time(15, 30)
 )
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from utils.pick_ledger import record_picks as _ledger_record_picks
+except Exception:
+    _ledger_record_picks = None
+
+
+def _save_smart_money_picks_to_ledger(
+    picks: list[dict], module_label: str = "Smart Money Top 2 Green & Red"
+) -> int:
+    if not picks:
+        return 0
+    if callable(_ledger_record_picks):
+        try:
+            return int(_ledger_record_picks(module_label, picks))
+        except Exception:
+            pass
+
+    ledger_dir = REPO_ROOT / "data_ledger"
+    ledger_dir.mkdir(parents=True, exist_ok=True)
+    ledger_file = ledger_dir / "pick_click_ledger.csv"
+    cols = [
+        "pick_id",
+        "logged_at_ist",
+        "session_date",
+        "iso_week",
+        "module",
+        "symbol",
+        "side",
+        "entry_price",
+        "stop_loss",
+        "target_1",
+        "target_2",
+        "notes",
+    ]
+    ts_str = now_ist.strftime("%Y-%m-%d %H:%M:%S IST")
+    s_date = now_ist.strftime("%Y-%m-%d")
+    i_week = f"{now_ist.isocalendar().year}-W{now_ist.isocalendar().week:02d}"
+    bucket = now_ist.strftime("%Y-%m-%d %H:%M")
+
+    existing = pd.read_csv(ledger_file) if ledger_file.exists() else pd.DataFrame(columns=cols)
+    seen = set(existing["pick_id"].dropna().astype(str)) if not existing.empty else set()
+    new_rows = []
+    for p in picks:
+        sym = str(p["symbol"]).strip().upper()
+        if not sym.endswith(".NS"):
+            sym = f"{sym}.NS"
+        side = str(p.get("side", "BUY")).upper()
+        entry = float(p["entry"])
+        pid = hashlib.sha1(
+            f"{bucket}|{module_label}|{sym}|{side}|{entry:.4f}".encode("utf-8")
+        ).hexdigest()[:12]
+        if pid in seen:
+            continue
+        seen.add(pid)
+        new_rows.append({
+            "pick_id": pid,
+            "logged_at_ist": ts_str,
+            "session_date": s_date,
+            "iso_week": i_week,
+            "module": module_label,
+            "symbol": sym,
+            "side": side,
+            "entry_price": round(entry, 2),
+            "stop_loss": round(float(p["sl"]), 2),
+            "target_1": round(float(p["t1"]), 2),
+            "target_2": round(float(p["t2"]), 2),
+            "notes": str(p.get("notes", "")),
+        })
+    if not new_rows:
+        return 0
+    out = pd.concat([existing, pd.DataFrame(new_rows)], ignore_index=True).drop_duplicates(
+        subset=["pick_id"], keep="first"
+    )
+    out.to_csv(ledger_file, index=False)
+    return len(new_rows)
+
+
 st.title("⚡ Institutional Smart Money Flow & Pulse Terminal")
 st.caption(
-    "Volume-Weighted Money Flow Estimates, Carry-Forward Watchlist Radar & Interactive 15m Charting."
+    "Volume-Weighted Money Flow Estimates, Top 2 Green & Red Picks, Carry-Forward Watchlist Radar & Interactive 15m Charting."
 )
 
-c_ref1, c_ref2, c_ref3 = st.columns([1.4, 1.2, 3.4])
+c_ref1, c_ref2, c_ref3, c_ref4 = st.columns([1.4, 1.5, 1.1, 2.0])
 with c_ref1:
     if st.button("🔄 Refresh Smart Money Flows", type="primary", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 with c_ref2:
-    live_stream = st.toggle("🌊 Auto-Stream (30s)", value=False)
+    flow_mode = st.selectbox(
+        "🛡️ Flow Quality Filter:",
+        ["Strict (RVOL ≥ 1.15x & Close Conviction)", "All Flow Movers"],
+        index=0,
+    )
 with c_ref3:
+    live_stream = st.toggle("🌊 Auto-Stream (30s)", value=False)
+with c_ref4:
     status_txt = "🟢 Live NSE Session" if is_market_open else "🟡 Pre-Market / Market Closed"
     st.caption(f"{status_txt} • Synced: **{now_ist.strftime('%I:%M:%S %p IST')}**")
 
@@ -104,6 +194,18 @@ def fetch_smart_money_pulse():
                 1,
             )
 
+            # Balanced intraday / carry reference levels
+            if est_flow_cr >= 0:
+                ref_entry = round(close_now * 0.996, 2)
+                ref_sl = round(close_now * 0.982, 2)
+                ref_t1 = round(close_now * 1.021, 2)
+                ref_t2 = round(close_now * 1.038, 2)
+            else:
+                ref_entry = round(close_now * 1.003, 2)
+                ref_sl = round(close_now * 1.016, 2)
+                ref_t1 = round(close_now * 0.980, 2)
+                ref_t2 = round(close_now * 0.962, 2)
+
             rows.append({
                 "Symbol": sym.replace(".NS", ""),
                 "Sector": sector,
@@ -113,6 +215,10 @@ def fetch_smart_money_pulse():
                 "RVOL": rvol,
                 "Close Strength %": round(close_pos, 1),
                 "Carry Score": carry_score,
+                "Ref_Entry": ref_entry,
+                "Ref_SL": ref_sl,
+                "Ref_T1": ref_t1,
+                "Ref_T2": ref_t2,
                 "Watchlist Signal": (
                     "🔥 STRONG CARRY WATCH"
                     if carry_score >= 65 and est_flow_cr > 0
@@ -232,6 +338,8 @@ def render_inline_smc_chart(symbol_clean):
 df_pulse = fetch_smart_money_pulse()
 
 if not df_pulse.empty:
+    strict_flow = flow_mode.startswith("Strict")
+
     inflow = df_pulse[df_pulse["Est. Flow (Cr)"] > 0]["Est. Flow (Cr)"].sum()
     outflow = abs(df_pulse[df_pulse["Est. Flow (Cr)"] < 0]["Est. Flow (Cr)"].sum())
     net_bias = inflow - outflow
@@ -247,6 +355,81 @@ if not df_pulse.empty:
         f"₹{net_bias:+,.0f} Cr",
         "Bullish Edge" if net_bias >= 0 else "Bearish Pressure",
     )
+
+    st.markdown("---")
+
+    # DEDICATED TOP 2 GREEN (INFLOW) & TOP 2 RED (OUTFLOW) PICKS
+    st.subheader("⭐ Smart Money Top 2 Green (Inflow) & Top 2 Red (Outflow) Picks")
+    green_pool = df_pulse[df_pulse["Est. Flow (Cr)"] > 0].copy()
+    red_pool = df_pulse[df_pulse["Est. Flow (Cr)"] < 0].copy()
+
+    if strict_flow:
+        strict_green = green_pool[(green_pool["RVOL"] >= 1.15) & (green_pool["Close Strength %"] >= 55.0)]
+        if not strict_green.empty:
+            green_pool = strict_green
+        strict_red = red_pool[(red_pool["RVOL"] >= 1.15) & (red_pool["Close Strength %"] <= 45.0)]
+        if not strict_red.empty:
+            red_pool = strict_red
+
+    top2_green = green_pool.sort_values(
+        by=["Est. Flow (Cr)", "Carry Score"], ascending=[False, False]
+    ).head(2).reset_index(drop=True)
+    top2_red = red_pool.sort_values(
+        by=["Est. Flow (Cr)", "Close Strength %"], ascending=[True, True]
+    ).head(2).reset_index(drop=True)
+
+    sm_ledger_payload = []
+    col_g, col_r = st.columns(2)
+
+    with col_g:
+        st.markdown("#### 🟢 Top 2 Green — Smart Inflow (Long Bias)")
+        if top2_green.empty:
+            st.info("No positive inflow stocks matched right now.")
+        else:
+            for idx_g, g_row in top2_green.iterrows():
+                st.success(
+                    f"**#{idx_g + 1} GREEN: {g_row['Symbol']} ({g_row['Sector']})** — LTP ₹{g_row['Price']:,.2f} ({g_row['Change %']:+.2f}%)\n\n"
+                    f"• **Est. Flow:** ₹{g_row['Est. Flow (Cr)']:+.2f} Cr | **RVOL:** {g_row['RVOL']}x | **Close Strength:** {g_row['Close Strength %']}%\n\n"
+                    f"• **Watch Buy:** ₹{g_row['Ref_Entry']:,.2f} | **SL:** ₹{g_row['Ref_SL']:,.2f} | **T1:** ₹{g_row['Ref_T1']:,.2f} | **T2:** ₹{g_row['Ref_T2']:,.2f}"
+                )
+                sm_ledger_payload.append({
+                    "symbol": g_row["Symbol"],
+                    "side": "BUY",
+                    "entry": float(g_row["Ref_Entry"]),
+                    "sl": float(g_row["Ref_SL"]),
+                    "t1": float(g_row["Ref_T1"]),
+                    "t2": float(g_row["Ref_T2"]),
+                    "notes": f"Smart Money Green #{idx_g + 1} | Flow ₹{g_row['Est. Flow (Cr)']:+.2f} Cr | RVOL {g_row['RVOL']}x",
+                })
+
+    with col_r:
+        st.markdown("#### 🔴 Top 2 Red — Smart Outflow (Short Bias)")
+        if top2_red.empty:
+            st.info("No heavy outflow stocks matched right now.")
+        else:
+            for idx_r, r_row in top2_red.iterrows():
+                st.error(
+                    f"**#{idx_r + 1} RED: {r_row['Symbol']} ({r_row['Sector']})** — LTP ₹{r_row['Price']:,.2f} ({r_row['Change %']:+.2f}%)\n\n"
+                    f"• **Est. Flow:** ₹{r_row['Est. Flow (Cr)']:+.2f} Cr | **RVOL:** {r_row['RVOL']}x | **Close Strength:** {r_row['Close Strength %']}%\n\n"
+                    f"• **Watch Short:** ₹{r_row['Ref_Entry']:,.2f} | **SL:** ₹{r_row['Ref_SL']:,.2f} | **T1:** ₹{r_row['Ref_T1']:,.2f} | **T2:** ₹{r_row['Ref_T2']:,.2f}"
+                )
+                sm_ledger_payload.append({
+                    "symbol": r_row["Symbol"],
+                    "side": "SHORT",
+                    "entry": float(r_row["Ref_Entry"]),
+                    "sl": float(r_row["Ref_SL"]),
+                    "t1": float(r_row["Ref_T1"]),
+                    "t2": float(r_row["Ref_T2"]),
+                    "notes": f"Smart Money Red #{idx_r + 1} | Flow ₹{r_row['Est. Flow (Cr)']:+.2f} Cr | RVOL {r_row['RVOL']}x",
+                })
+
+    if sm_ledger_payload and st.button(
+        "📌 Log Smart Money Top 2 Green & Red Picks to History Ledger", type="primary"
+    ):
+        saved_sm = _save_smart_money_picks_to_ledger(
+            sm_ledger_payload, "Smart Money Top 2 Green & Red"
+        )
+        st.success(f"Recorded {saved_sm} Smart Money Top 2 Green/Red pick(s) to history ledger.")
 
     st.markdown("---")
 
@@ -357,10 +540,22 @@ if not df_pulse.empty:
         else df_pulse[df_pulse["Sector"] == chosen_sector].reset_index(drop=True)
     )
 
+    display_cols = [
+        "Symbol",
+        "Sector",
+        "Price",
+        "Change %",
+        "Est. Flow (Cr)",
+        "RVOL",
+        "Close Strength %",
+        "Carry Score",
+        "Watchlist Signal",
+    ]
+
     st.caption("Select a stock row to inspect its 15-minute candlesticks, VWAP/anchor, and 20 EMA below.")
 
     event = st.dataframe(
-        df_view,
+        df_view[display_cols],
         use_container_width=True,
         hide_index=True,
         on_select="rerun",
