@@ -1,6 +1,11 @@
+from datetime import datetime
+import hashlib
+from pathlib import Path
+import sys
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import pytz
 import streamlit as st
 import yfinance as yf
 
@@ -9,18 +14,109 @@ st.set_page_config(
     page_title="Institutional Sector Rotation & Macro Pulse", layout="wide"
 )
 
+ist = pytz.timezone("Asia/Kolkata")
+now_ist = datetime.now(ist)
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from utils.pick_ledger import record_picks as _ledger_record_picks
+except Exception:
+    _ledger_record_picks = None
+
+
+def _save_sector_picks_to_ledger(
+    picks: list[dict], module_label: str = "Sector Rotation Top 2 Green & Red"
+) -> int:
+    if not picks:
+        return 0
+    if callable(_ledger_record_picks):
+        try:
+            return int(_ledger_record_picks(module_label, picks))
+        except Exception:
+            pass
+
+    ledger_dir = REPO_ROOT / "data_ledger"
+    ledger_dir.mkdir(parents=True, exist_ok=True)
+    ledger_file = ledger_dir / "pick_click_ledger.csv"
+    cols = [
+        "pick_id",
+        "logged_at_ist",
+        "session_date",
+        "iso_week",
+        "module",
+        "symbol",
+        "side",
+        "entry_price",
+        "stop_loss",
+        "target_1",
+        "target_2",
+        "notes",
+    ]
+    ts_str = now_ist.strftime("%Y-%m-%d %H:%M:%S IST")
+    s_date = now_ist.strftime("%Y-%m-%d")
+    i_week = f"{now_ist.isocalendar().year}-W{now_ist.isocalendar().week:02d}"
+    bucket = now_ist.strftime("%Y-%m-%d %H:%M")
+
+    existing = pd.read_csv(ledger_file) if ledger_file.exists() else pd.DataFrame(columns=cols)
+    seen = set(existing["pick_id"].dropna().astype(str)) if not existing.empty else set()
+    new_rows = []
+    for p in picks:
+        sym = str(p["symbol"]).strip().upper()
+        if not sym.endswith(".NS"):
+            sym = f"{sym}.NS"
+        side = str(p.get("side", "BUY")).upper()
+        entry = float(p["entry"])
+        pid = hashlib.sha1(
+            f"{bucket}|{module_label}|{sym}|{side}|{entry:.4f}".encode("utf-8")
+        ).hexdigest()[:12]
+        if pid in seen:
+            continue
+        seen.add(pid)
+        new_rows.append({
+            "pick_id": pid,
+            "logged_at_ist": ts_str,
+            "session_date": s_date,
+            "iso_week": i_week,
+            "module": module_label,
+            "symbol": sym,
+            "side": side,
+            "entry_price": round(entry, 2),
+            "stop_loss": round(float(p["sl"]), 2),
+            "target_1": round(float(p["t1"]), 2),
+            "target_2": round(float(p["t2"]), 2),
+            "notes": str(p.get("notes", "")),
+        })
+    if not new_rows:
+        return 0
+    out = pd.concat([existing, pd.DataFrame(new_rows)], ignore_index=True).drop_duplicates(
+        subset=["pick_id"], keep="first"
+    )
+    out.to_csv(ledger_file, index=False)
+    return len(new_rows)
+
+
 st.title("🗺️ Sector Heatmap & Breadth Analysis (Beginner-Friendly Guide)")
 st.markdown(
     "Spot which market sectors are **stronger or weaker than Nifty 50** so you can "
     "build a focused watchlist instead of guessing blindly."
 )
 
-col_btn1, col_btn2 = st.columns([1.2, 4])
+col_btn1, col_btn2, col_btn3 = st.columns([1.2, 1.8, 2.5])
 with col_btn1:
     if st.button("🔄 Refresh Live Data", type="primary", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 with col_btn2:
+    sector_pick_mode = st.selectbox(
+        "🛡️ Sector Pick Quality:",
+        ["Strict (RVOL ≥ 1.15x & Strong RS)", "All Leaders / Laggards"],
+        index=0,
+    )
+with col_btn3:
+    st.write("")
     show_extra_tables = st.toggle("Show Detailed Data Tables", value=False)
 
 with st.expander("📘 New to Stock Markets? Read This 30-Second Guide First", expanded=False):
@@ -172,6 +268,17 @@ def fetch_drilldown_sector_data():
             )
             chg_rounded = round(s_chg, 2)
 
+            if s_rs >= 0:
+                ref_entry = round(s_close * 0.996, 2)
+                ref_sl = round(s_close * 0.982, 2)
+                ref_t1 = round(s_close * 1.021, 2)
+                ref_t2 = round(s_close * 1.038, 2)
+            else:
+                ref_entry = round(s_close * 1.003, 2)
+                ref_sl = round(s_close * 1.016, 2)
+                ref_t1 = round(s_close * 0.980, 2)
+                ref_t2 = round(s_close * 0.962, 2)
+
             stock_records.append({
                 "Sector": sector_name,
                 "Stock": sym.replace(".NS", ""),
@@ -182,6 +289,10 @@ def fetch_drilldown_sector_data():
                 "Close Strength %": round(s_close_pos, 1),
                 "RVOL": s_rvol,
                 "Stock Score": s_score,
+                "Ref_Entry": ref_entry,
+                "Ref_SL": ref_sl,
+                "Ref_T1": ref_t1,
+                "Ref_T2": ref_t2,
                 "BoxSize": max(s_score, 15.0),
             })
 
@@ -233,6 +344,8 @@ def fetch_drilldown_sector_data():
 df_sectors, df_stocks, nifty_day_chg = fetch_drilldown_sector_data()
 
 if df_sectors is not None and not df_sectors.empty and df_stocks is not None and not df_stocks.empty:
+    strict_sec_mode = sector_pick_mode.startswith("Strict")
+
     # ---------------------------------------------------------
     # 1. TOP SECTORS TO WATCH
     # ---------------------------------------------------------
@@ -270,6 +383,83 @@ if df_sectors is not None and not df_sectors.empty and df_stocks is not None and
                 f"• **Where It Closed:** {s2['Close Strength %']:.0f}% of day's range ({s2['RVOL']} Vol)\n"
                 f"• **Stocks to Study First:** **{top_s2_stocks}**"
             )
+
+    st.markdown("---")
+
+    # ---------------------------------------------------------
+    # 1B. DEDICATED TOP 2 GREEN & TOP 2 RED SECTOR PICKS
+    # ---------------------------------------------------------
+    st.subheader("⭐ Sector Rotation Top 2 Green (Outperformers) & Top 2 Red (Laggards)")
+    green_sec_pool = df_stocks[df_stocks["RS vs Nifty %"] > 0].copy()
+    red_sec_pool = df_stocks[df_stocks["RS vs Nifty %"] < 0].copy()
+
+    if strict_sec_mode:
+        g_strict = green_sec_pool[(green_sec_pool["RVOL"] >= 1.15) & (green_sec_pool["Close Strength %"] >= 55.0)]
+        if not g_strict.empty:
+            green_sec_pool = g_strict
+        r_strict = red_sec_pool[(red_sec_pool["RVOL"] >= 1.15) & (red_sec_pool["Close Strength %"] <= 45.0)]
+        if not r_strict.empty:
+            red_sec_pool = r_strict
+
+    top2_sec_green = green_sec_pool.sort_values(
+        by=["Stock Score", "RS vs Nifty %"], ascending=[False, False]
+    ).head(2).reset_index(drop=True)
+    top2_sec_red = red_sec_pool.sort_values(
+        by=["Stock Score", "RS vs Nifty %"], ascending=[True, True]
+    ).head(2).reset_index(drop=True)
+
+    sec_ledger_payload = []
+    sg_col, sr_col = st.columns(2)
+
+    with sg_col:
+        st.markdown("#### 🟢 Top 2 Green — Sector Leaders (Long Bias)")
+        if top2_sec_green.empty:
+            st.info("No positive relative-strength sector stocks matched.")
+        else:
+            for idx_sg, sg_row in top2_sec_green.iterrows():
+                st.success(
+                    f"**#{idx_sg + 1} GREEN: {sg_row['Stock']} ({sg_row['Sector']})** — LTP ₹{sg_row['LTP']:,.2f} ({sg_row['Day Change %']:+.2f}%)\n\n"
+                    f"• **RS vs Nifty:** {sg_row['RS vs Nifty %']:+.2f}% | **Score:** {sg_row['Stock Score']}/100 | **RVOL:** {sg_row['RVOL']}x\n\n"
+                    f"• **Watch Buy:** ₹{sg_row['Ref_Entry']:,.2f} | **SL:** ₹{sg_row['Ref_SL']:,.2f} | **T1:** ₹{sg_row['Ref_T1']:,.2f} | **T2:** ₹{sg_row['Ref_T2']:,.2f}"
+                )
+                sec_ledger_payload.append({
+                    "symbol": sg_row["Stock"],
+                    "side": "BUY",
+                    "entry": float(sg_row["Ref_Entry"]),
+                    "sl": float(sg_row["Ref_SL"]),
+                    "t1": float(sg_row["Ref_T1"]),
+                    "t2": float(sg_row["Ref_T2"]),
+                    "notes": f"Sector Rotation Green #{idx_sg + 1} ({sg_row['Sector']}) | RS {sg_row['RS vs Nifty %']:+.2f}%",
+                })
+
+    with sr_col:
+        st.markdown("#### 🔴 Top 2 Red — Sector Laggards (Short Bias)")
+        if top2_sec_red.empty:
+            st.info("No negative relative-strength sector stocks matched.")
+        else:
+            for idx_sr, sr_row in top2_sec_red.iterrows():
+                st.error(
+                    f"**#{idx_sr + 1} RED: {sr_row['Stock']} ({sr_row['Sector']})** — LTP ₹{sr_row['LTP']:,.2f} ({sr_row['Day Change %']:+.2f}%)\n\n"
+                    f"• **RS vs Nifty:** {sr_row['RS vs Nifty %']:+.2f}% | **Score:** {sr_row['Stock Score']}/100 | **RVOL:** {sr_row['RVOL']}x\n\n"
+                    f"• **Watch Short:** ₹{sr_row['Ref_Entry']:,.2f} | **SL:** ₹{sr_row['Ref_SL']:,.2f} | **T1:** ₹{sr_row['Ref_T1']:,.2f} | **T2:** ₹{sr_row['Ref_T2']:,.2f}"
+                )
+                sec_ledger_payload.append({
+                    "symbol": sr_row["Stock"],
+                    "side": "SHORT",
+                    "entry": float(sr_row["Ref_Entry"]),
+                    "sl": float(sr_row["Ref_SL"]),
+                    "t1": float(sr_row["Ref_T1"]),
+                    "t2": float(sr_row["Ref_T2"]),
+                    "notes": f"Sector Rotation Red #{idx_sr + 1} ({sr_row['Sector']}) | RS {sr_row['RS vs Nifty %']:+.2f}%",
+                })
+
+    if sec_ledger_payload and st.button(
+        "📌 Log Sector Rotation Top 2 Green & Red Picks to History Ledger", type="primary"
+    ):
+        saved_sec = _save_sector_picks_to_ledger(
+            sec_ledger_payload, "Sector Rotation Top 2 Green & Red"
+        )
+        st.success(f"Recorded {saved_sec} Sector Rotation Top 2 Green/Red pick(s) to history ledger.")
 
     st.markdown("---")
 
@@ -356,8 +546,9 @@ if df_sectors is not None and not df_sectors.empty and df_stocks is not None and
         index=0,
     )
 
+    clean_drop = ["Sector", "BoxSize", "ChangeLabel", "Ref_Entry", "Ref_SL", "Ref_T1", "Ref_T2"]
     sector_stocks_view = df_stocks[df_stocks["Sector"] == selected_sector].drop(
-        columns=["Sector", "BoxSize", "ChangeLabel"]
+        columns=clean_drop
     )
     st.dataframe(
         sector_stocks_view,
@@ -384,7 +575,7 @@ if df_sectors is not None and not df_sectors.empty and df_stocks is not None and
                 f"📋 Stocks in Selected Range ({color_band}) — {len(filtered_stocks)} Stocks"
             )
             st.dataframe(
-                filtered_stocks.drop(columns=["BoxSize", "ChangeLabel"]),
+                filtered_stocks.drop(columns=clean_drop),
                 use_container_width=True,
                 hide_index=True,
                 column_config={
