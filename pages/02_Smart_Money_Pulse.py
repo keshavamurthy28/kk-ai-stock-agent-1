@@ -103,9 +103,9 @@ def _save_smart_money_picks_to_ledger(
     return len(new_rows)
 
 
-st.title("⚡ Institutional Smart Money Flow & Pulse Terminal")
+st.title("⚡ Institutional Smart Money Flow & Reverse-Engineering Terminal")
 st.caption(
-    "Volume-Weighted Money Flow Estimates, Top 2 Green & Red Picks, Carry-Forward Watchlist Radar & Interactive 15m Charting."
+    "Decodes Where Capital Is Rotating From → Into, Intraday Accumulation vs. Distribution Footprints, Top 2 Green/Red Picks & 15m Charting."
 )
 
 c_ref1, c_ref2, c_ref3, c_ref4 = st.columns([1.4, 1.5, 1.1, 2.0])
@@ -125,11 +125,12 @@ with c_ref4:
     status_txt = "🟢 Live NSE Session" if is_market_open else "🟡 Pre-Market / Market Closed"
     st.caption(f"{status_txt} • Synced: **{now_ist.strftime('%I:%M:%S %p IST')}**")
 
-with st.expander("📘 Beginner Guide: How to Read Flow & Where Big Volume Goes", expanded=False):
+with st.expander("📘 Reverse-Engineering Secrets: How We Decode Who & How Money Moves", expanded=False):
     st.markdown(
-        "- **Where Big Money/Volume Clusters:** Thicker green streams/bars show stocks with strong upward moves + high volume (**Est. Flow**); thicker red shows heavy selling/downward volume pressure.\n"
-        "- **Not Official FII/DII Data:** This estimates heavy market participation from price and volume (`RVOL`)—not a real-time institutional trade book.\n"
-        "- **How to Use Safely:** Shortlist top flow stocks on your watchlist, wait for live confirmation after **9:15 AM IST**, and always use a stop-loss. Not financial advice."
+        "- **1. Sector Rotation Bridge (Outflow → Inflow):** When FIIs/DIIs rotate capital, they sell one heavy sector (e.g., IT) and deploy into another (e.g., Autos or Banks) simultaneously.\n"
+        "- **2. Opening Gap vs. Intraday Drive:** If most of the % move happened *after* the open (`Intraday Drive %`) with high `RVOL` and a close near the high (`Close Strength ≥ 75%`), institutions accumulated steadily all day rather than trapping retail on a morning gap.\n"
+        "- **3. Peak Session Window (First Hour vs. Closing Hour):** Heavy volume in `9:15–10:30 AM` signals overnight order execution; heavy volume in `2:30–3:30 PM` signals institutional closing-bell positioning.\n"
+        "- **Transparency Note:** Public market feeds show price and volume footprints—not broker client names. Always confirm live price action and use a stop-loss. Not financial advice."
     )
 
 SECTOR_STOCKS = {
@@ -151,37 +152,122 @@ def _extract_ticker_df(raw_df, ticker):
     return raw_df.dropna(how="all")
 
 
+def _reverse_engineer_footprint(
+    chg_pct: float,
+    gap_pct: float,
+    intraday_drive_pct: float,
+    rvol: float,
+    close_pos: float,
+    peak_window: str,
+) -> tuple[str, str]:
+    if chg_pct > 0.5:
+        if rvol >= 1.35 and close_pos >= 72 and intraday_drive_pct > 0.4:
+            return (
+                "🏦 Institutional Sweep Accumulation",
+                f"Steady intraday buying (+{intraday_drive_pct:.2f}% post-open) with {rvol}x RVOL & {close_pos:.0f}% high close; peak activity in {peak_window}.",
+            )
+        if gap_pct > 1.0 and intraday_drive_pct <= 0.1:
+            return (
+                "⚠️ Gap-Up Fade / Profit Booking",
+                f"Opened +{gap_pct:.2f}% higher on overnight cues, but intraday follow-through stalled ({intraday_drive_pct:+.2f}%).",
+            )
+        if rvol >= 1.15 and close_pos >= 60:
+            return (
+                "📈 Steady Rotational Inflow",
+                f"Gradual accumulation ({rvol}x RVOL) with buyers defending pullbacks into {peak_window}.",
+            )
+        return (
+            "🌿 Light Drift / Retail Follow-Through",
+            f"Positive price drift (+{chg_pct:.2f}%) on moderate volume ({rvol}x RVOL); watch for RVOL > 1.2x confirmation.",
+        )
+    elif chg_pct < -0.5:
+        if rvol >= 1.35 and close_pos <= 28 and intraday_drive_pct < -0.4:
+            return (
+                "🔻 Institutional Supply / Distribution",
+                f"Heavy selling pressure ({intraday_drive_pct:.2f}% post-open) with {rvol}x RVOL & weak {close_pos:.0f}% close; peak dump in {peak_window}.",
+            )
+        if gap_pct < -1.0 and intraday_drive_pct > 0.3:
+            return (
+                "🛡️ Gap-Down Absorption (Smart Dip Buy)",
+                f"Opened {gap_pct:.2f}% lower, but buyers absorbed supply intraday (+{intraday_drive_pct:.2f}% recovery).",
+            )
+        return (
+            "📉 Sector Outflow / Long Unwinding",
+            f"Capital rotating out ({chg_pct:.2f}%, close at {close_pos:.0f}% of range) with {rvol}x RVOL.",
+        )
+    return (
+        "⚖️ Two-Way Institutional Equilibrium",
+        f"Balanced buy/sell turnover ({rvol}x RVOL) without directional breakout yet.",
+    )
+
+
 @st.cache_data(ttl=60)
 def fetch_smart_money_pulse():
     all_syms = [s for stocks in SECTOR_STOCKS.values() for s in stocks]
-    raw = yf.download(
-        all_syms, period="5d", interval="1d", group_by="ticker", progress=False
+    raw_1d = yf.download(
+        all_syms, period="5d", interval="1d", group_by="ticker", progress=False, auto_adjust=True
+    )
+    raw_15m = yf.download(
+        all_syms, period="5d", interval="15m", group_by="ticker", progress=False, auto_adjust=True
     )
     rows = []
 
     for sector, syms in SECTOR_STOCKS.items():
         for sym in syms:
-            df = _extract_ticker_df(raw, sym).dropna(subset=["Close", "High", "Low"])
+            df = _extract_ticker_df(raw_1d, sym).dropna(subset=["Close", "High", "Low", "Open"])
             if len(df) < 2:
                 continue
 
             close_now = float(df["Close"].iloc[-1])
+            open_now = float(df["Open"].iloc[-1])
             close_prev = float(df["Close"].iloc[-2])
             high_now = float(df["High"].iloc[-1])
             low_now = float(df["Low"].iloc[-1])
 
-            if close_prev == 0 or any(np.isnan(x) for x in [close_now, close_prev, high_now, low_now]):
+            if close_prev == 0 or any(np.isnan(x) for x in [close_now, open_now, close_prev, high_now, low_now]):
                 continue
 
             vol_now = float(df["Volume"].iloc[-1]) if "Volume" in df and pd.notna(df["Volume"].iloc[-1]) else 0.0
             vol_hist = df["Volume"].iloc[:-1].dropna() if "Volume" in df and len(df) > 2 else pd.Series(dtype=float)
             vol_avg = float(vol_hist.mean()) if not vol_hist.empty else vol_now
 
-            chg_pct = ((close_now - close_prev) / close_prev) * 100
+            chg_pct = ((close_now - close_prev) / close_prev) * 100.0
+            gap_pct = ((open_now - close_prev) / close_prev) * 100.0
+            intraday_drive_pct = ((close_now - open_now) / max(open_now, 0.01)) * 100.0
             rvol = round(vol_now / vol_avg, 2) if vol_avg > 0 and vol_now > 0 else 1.0
             rng = high_now - low_now
-            close_pos = ((close_now - low_now) / rng) * 100 if rng > 0 else 50.0
+            close_pos = ((close_now - low_now) / rng) * 100.0 if rng > 0 else 50.0
 
+            # Intraday 15m reverse-engineering: Buy-Bar vs Sell-Bar turnover & Peak Session Window
+            df_intra = _extract_ticker_df(raw_15m, sym).dropna(subset=["Close", "Open"])
+            buy_cr = 0.0
+            sell_cr = 0.0
+            peak_window = "Opening Bell (9:15–10:30)"
+            if not df_intra.empty:
+                idx_ist = pd.to_datetime(df_intra.index)
+                if idx_ist.tz is None:
+                    idx_ist = idx_ist.tz_localize("Asia/Kolkata")
+                else:
+                    idx_ist = idx_ist.tz_convert("Asia/Kolkata")
+                df_intra = df_intra.copy()
+                df_intra.index = idx_ist
+                latest_session = df_intra.index.date[-1]
+                day_bars = df_intra[df_intra.index.date == latest_session]
+                if not day_bars.empty and "Volume" in day_bars.columns:
+                    bar_cr = (day_bars["Close"] * day_bars["Volume"]) / 1e7
+                    buy_cr = float(bar_cr[day_bars["Close"] >= day_bars["Open"]].sum())
+                    sell_cr = float(bar_cr[day_bars["Close"] < day_bars["Open"]].sum())
+
+                    peak_ts = bar_cr.idxmax()
+                    hr_min = peak_ts.hour * 60 + peak_ts.minute
+                    if hr_min < 10 * 60 + 30:
+                        peak_window = f"Opening Hour ({peak_ts.strftime('%H:%M')} IST)"
+                    elif hr_min < 14 * 60 + 15:
+                        peak_window = f"Mid-Session ({peak_ts.strftime('%H:%M')} IST)"
+                    else:
+                        peak_window = f"Closing Hour ({peak_ts.strftime('%H:%M')} IST)"
+
+            net_bar_delta_cr = round(buy_cr - sell_cr, 2)
             turnover_cr = (close_now * vol_now) / 1e7
             abnormal_ratio = max(rvol - 0.85, 0.1) if rvol > 1.0 else 0.15
             direction = 1 if chg_pct >= 0 else -1
@@ -194,7 +280,10 @@ def fetch_smart_money_pulse():
                 1,
             )
 
-            # Balanced intraday / carry reference levels
+            footprint_tag, mechanism_note = _reverse_engineer_footprint(
+                chg_pct, gap_pct, intraday_drive_pct, rvol, close_pos, peak_window
+            )
+
             if est_flow_cr >= 0:
                 ref_entry = round(close_now * 0.996, 2)
                 ref_sl = round(close_now * 0.982, 2)
@@ -211,23 +300,20 @@ def fetch_smart_money_pulse():
                 "Sector": sector,
                 "Price": round(close_now, 2),
                 "Change %": round(chg_pct, 2),
+                "Gap %": round(gap_pct, 2),
+                "Intraday Drive %": round(intraday_drive_pct, 2),
                 "Est. Flow (Cr)": est_flow_cr,
+                "Buy vs Sell Bar (Cr)": net_bar_delta_cr,
                 "RVOL": rvol,
                 "Close Strength %": round(close_pos, 1),
                 "Carry Score": carry_score,
+                "Peak Activity": peak_window,
+                "Who & How (Footprint)": footprint_tag,
+                "Reverse-Engineered Mechanism": mechanism_note,
                 "Ref_Entry": ref_entry,
                 "Ref_SL": ref_sl,
                 "Ref_T1": ref_t1,
                 "Ref_T2": ref_t2,
-                "Watchlist Signal": (
-                    "🔥 STRONG CARRY WATCH"
-                    if carry_score >= 65 and est_flow_cr > 0
-                    else (
-                        "🔴 WEAK / SHORT WATCH"
-                        if chg_pct < -1.0 and close_pos < 30
-                        else "⚪ NEUTRAL WATCH"
-                    )
-                ),
             })
 
     if not rows:
@@ -347,18 +433,45 @@ if not df_pulse.empty:
     top_in_row = df_pulse.iloc[0]
     top_out_row = df_pulse.sort_values(by="Est. Flow (Cr)", ascending=True).iloc[0]
 
-    m1, m2, m3 = st.columns(3)
+    # Sector-level net flow aggregation to reveal where capital is leaving vs entering
+    sec_flow = (
+        df_pulse.groupby("Sector", as_index=False)["Est. Flow (Cr)"]
+        .sum()
+        .sort_values(by="Est. Flow (Cr)", ascending=False)
+    )
+    donor_sectors = sec_flow[sec_flow["Est. Flow (Cr)"] < 0].sort_values(by="Est. Flow (Cr)", ascending=True)
+    receiver_sectors = sec_flow[sec_flow["Est. Flow (Cr)"] > 0].sort_values(by="Est. Flow (Cr)", ascending=False)
+
+    donor_txt = (
+        f"{donor_sectors.iloc[0]['Sector']} (₹{donor_sectors.iloc[0]['Est. Flow (Cr)']:+.0f} Cr)"
+        if not donor_sectors.empty
+        else "Broad Market Cash"
+    )
+    receiver_txt = (
+        f"{receiver_sectors.iloc[0]['Sector']} (₹{receiver_sectors.iloc[0]['Est. Flow (Cr)']:+.0f} Cr)"
+        if not receiver_sectors.empty
+        else "Defensive Cash"
+    )
+
+    m1, m2, m3, m4 = st.columns(4)
     m1.metric("🟢 Total Est. Inflow", f"₹{inflow:,.0f} Cr", f"Top: {top_in_row['Symbol']} (₹{top_in_row['Est. Flow (Cr)']:+.0f} Cr)")
     m2.metric("🔴 Total Est. Outflow", f"₹{outflow:,.0f} Cr", f"Heaviest: {top_out_row['Symbol']} (₹{top_out_row['Est. Flow (Cr)']:+.0f} Cr)")
-    m3.metric(
+    m3.metric("🔄 Rotation Source → Target", f"{receiver_txt.split(' (')[0]}", f"From: {donor_txt}")
+    m4.metric(
         "⚖️ Net Est. Bias",
         f"₹{net_bias:+,.0f} Cr",
         "Bullish Edge" if net_bias >= 0 else "Bearish Pressure",
     )
 
+    st.info(
+        f"🕵️ **Capital Rotation Decode:** Money is rotating **OUT OF {donor_txt}** (led by **{top_out_row['Symbol']}**, "
+        f"{top_out_row['Who & How (Footprint)']}) and **INTO {receiver_txt}** (led by **{top_in_row['Symbol']}**, "
+        f"{top_in_row['Who & How (Footprint)']})."
+    )
+
     st.markdown("---")
 
-    # DEDICATED TOP 2 GREEN (INFLOW) & TOP 2 RED (OUTFLOW) PICKS
+    # 1. DEDICATED TOP 2 GREEN (INFLOW) & TOP 2 RED (OUTFLOW) PICKS WITH MECHANISM
     st.subheader("⭐ Smart Money Top 2 Green (Inflow) & Top 2 Red (Outflow) Picks")
     green_pool = df_pulse[df_pulse["Est. Flow (Cr)"] > 0].copy()
     red_pool = df_pulse[df_pulse["Est. Flow (Cr)"] < 0].copy()
@@ -389,7 +502,8 @@ if not df_pulse.empty:
             for idx_g, g_row in top2_green.iterrows():
                 st.success(
                     f"**#{idx_g + 1} GREEN: {g_row['Symbol']} ({g_row['Sector']})** — LTP ₹{g_row['Price']:,.2f} ({g_row['Change %']:+.2f}%)\n\n"
-                    f"• **Est. Flow:** ₹{g_row['Est. Flow (Cr)']:+.2f} Cr | **RVOL:** {g_row['RVOL']}x | **Close Strength:** {g_row['Close Strength %']}%\n\n"
+                    f"• **Who & How:** {g_row['Who & How (Footprint)']} • **Peak:** {g_row['Peak Activity']}\n\n"
+                    f"• **Why:** {g_row['Reverse-Engineered Mechanism']}\n\n"
                     f"• **Watch Buy:** ₹{g_row['Ref_Entry']:,.2f} | **SL:** ₹{g_row['Ref_SL']:,.2f} | **T1:** ₹{g_row['Ref_T1']:,.2f} | **T2:** ₹{g_row['Ref_T2']:,.2f}"
                 )
                 sm_ledger_payload.append({
@@ -399,7 +513,7 @@ if not df_pulse.empty:
                     "sl": float(g_row["Ref_SL"]),
                     "t1": float(g_row["Ref_T1"]),
                     "t2": float(g_row["Ref_T2"]),
-                    "notes": f"Smart Money Green #{idx_g + 1} | Flow ₹{g_row['Est. Flow (Cr)']:+.2f} Cr | RVOL {g_row['RVOL']}x",
+                    "notes": f"Smart Money Green #{idx_g + 1} | {g_row['Who & How (Footprint)']} | Flow ₹{g_row['Est. Flow (Cr)']:+.2f} Cr",
                 })
 
     with col_r:
@@ -410,7 +524,8 @@ if not df_pulse.empty:
             for idx_r, r_row in top2_red.iterrows():
                 st.error(
                     f"**#{idx_r + 1} RED: {r_row['Symbol']} ({r_row['Sector']})** — LTP ₹{r_row['Price']:,.2f} ({r_row['Change %']:+.2f}%)\n\n"
-                    f"• **Est. Flow:** ₹{r_row['Est. Flow (Cr)']:+.2f} Cr | **RVOL:** {r_row['RVOL']}x | **Close Strength:** {r_row['Close Strength %']}%\n\n"
+                    f"• **Who & How:** {r_row['Who & How (Footprint)']} • **Peak:** {r_row['Peak Activity']}\n\n"
+                    f"• **Why:** {r_row['Reverse-Engineered Mechanism']}\n\n"
                     f"• **Watch Short:** ₹{r_row['Ref_Entry']:,.2f} | **SL:** ₹{r_row['Ref_SL']:,.2f} | **T1:** ₹{r_row['Ref_T1']:,.2f} | **T2:** ₹{r_row['Ref_T2']:,.2f}"
                 )
                 sm_ledger_payload.append({
@@ -420,7 +535,7 @@ if not df_pulse.empty:
                     "sl": float(r_row["Ref_SL"]),
                     "t1": float(r_row["Ref_T1"]),
                     "t2": float(r_row["Ref_T2"]),
-                    "notes": f"Smart Money Red #{idx_r + 1} | Flow ₹{r_row['Est. Flow (Cr)']:+.2f} Cr | RVOL {r_row['RVOL']}x",
+                    "notes": f"Smart Money Red #{idx_r + 1} | {r_row['Who & How (Footprint)']} | Flow ₹{r_row['Est. Flow (Cr)']:+.2f} Cr",
                 })
 
     if sm_ledger_payload and st.button(
@@ -433,62 +548,80 @@ if not df_pulse.empty:
 
     st.markdown("---")
 
-    # 1. CARRY-FORWARD WATCHLIST RADAR
-    st.subheader("🔮 Carry-Forward Watchlist Radar")
-    top_carry = df_pulse.sort_values(by="Carry Score", ascending=False).head(2)
-    c1, c2 = st.columns(2)
-    with c1:
-        r1 = top_carry.iloc[0]
-        st.success(
-            f"**#1 TOP WATCHLIST: {r1['Symbol']} ({r1['Sector']})**\n\n"
-            f"• **Est. Flow:** ₹{r1['Est. Flow (Cr)']:+.2f} Cr | **Score:** {r1['Carry Score']}/100\n"
-            f"• **Close Strength:** {r1['Close Strength %']}% | **RVOL:** {r1['RVOL']}x"
-        )
-    if len(top_carry) > 1:
-        with c2:
-            r2 = top_carry.iloc[1]
-            st.info(
-                f"**#2 RUNNER-UP WATCHLIST: {r2['Symbol']} ({r2['Sector']})**\n\n"
-                f"• **Est. Flow:** ₹{r2['Est. Flow (Cr)']:+.2f} Cr | **Score:** {r2['Carry Score']}/100\n"
-                f"• **Close Strength:** {r2['Close Strength %']}% | **RVOL:** {r2['RVOL']}x"
-            )
-
-    st.markdown("---")
-
-    # 2. WHERE BIG VOLUME / FLOW IS PILING UP (TOP MOVERS BAR + SANKEY STREAM)
-    st.subheader("🌊 Where Heavy Volume & Flow Are Clustering")
+    # 2. 3-TIER CAPITAL ROTATION SANKEY (WHERE MONEY LEAVES -> ROTATION BRIDGE -> WHERE IT GOES)
+    st.subheader("🌊 Capital Rotation Pipeline: Where Money Leaves → Where It Goes")
     st.caption(
-        f"Biggest estimated inflow is currently in **{top_in_row['Symbol']}** (₹{top_in_row['Est. Flow (Cr)']:+.1f} Cr), "
-        f"while heaviest outflow pressure is in **{top_out_row['Symbol']}** (₹{top_out_row['Est. Flow (Cr)']:+.1f} Cr)."
+        "Left nodes show sectors losing capital (Red), middle bridge shows active capital reallocation, and right nodes show sectors & top stocks absorbing the inflow (Green)."
     )
 
-    top_movers = pd.concat([
-        df_pulse.head(5),
-        df_pulse.sort_values(by="Est. Flow (Cr)", ascending=True).head(5),
-    ]).drop_duplicates(subset=["Symbol"]).sort_values(by="Est. Flow (Cr)", ascending=True)
+    outflow_stocks = df_pulse[df_pulse["Est. Flow (Cr)"] < 0].sort_values(by="Est. Flow (Cr)", ascending=True).head(6)
+    inflow_stocks = df_pulse[df_pulse["Est. Flow (Cr)"] > 0].sort_values(by="Est. Flow (Cr)", ascending=False).head(8)
 
-    fig_bar = go.Figure(
-        go.Bar(
-            x=top_movers["Est. Flow (Cr)"],
-            y=top_movers["Symbol"],
-            orientation="h",
-            marker_color=[
-                "#00E676" if v >= 0 else "#FF5252" for v in top_movers["Est. Flow (Cr)"]
-            ],
-            text=[f"₹{v:+.1f} Cr" for v in top_movers["Est. Flow (Cr)"]],
-            textposition="outside",
+    if not outflow_stocks.empty and not inflow_stocks.empty:
+        out_labels = [f"🔴 {r['Symbol']} ({r['Sector']})" for _, r in outflow_stocks.iterrows()]
+        bridge_label = ["🔄 Institutional Capital Reallocation"]
+        in_sec_list = sorted(inflow_stocks["Sector"].unique().tolist())
+        in_sec_labels = [f"📂 {s}" for s in in_sec_list]
+        in_stk_labels = [f"🟢 {r['Symbol']}" for _, r in inflow_stocks.iterrows()]
+
+        nodes_3tier = out_labels + bridge_label + in_sec_labels + in_stk_labels
+        idx_map = {name: i for i, name in enumerate(nodes_3tier)}
+
+        src_3, tgt_3, val_3, col_3 = [], [], [], []
+
+        # Outflow stocks -> Center Rotation Bridge
+        for _, r in outflow_stocks.iterrows():
+            lbl = f"🔴 {r['Symbol']} ({r['Sector']})"
+            src_3.append(idx_map[lbl])
+            tgt_3.append(idx_map[bridge_label[0]])
+            val_3.append(max(abs(float(r["Est. Flow (Cr)"])), 1.0))
+            col_3.append("rgba(255, 82, 82, 0.45)")
+
+        # Center Rotation Bridge -> Inflow Sectors
+        sec_in_sums = inflow_stocks.groupby("Sector")["Est. Flow (Cr)"].sum()
+        for sec_name, tot_v in sec_in_sums.items():
+            src_3.append(idx_map[bridge_label[0]])
+            tgt_3.append(idx_map[f"📂 {sec_name}"])
+            val_3.append(max(float(tot_v), 1.0))
+            col_3.append("rgba(41, 182, 246, 0.42)")
+
+        # Inflow Sectors -> Inflow Stocks
+        for _, r in inflow_stocks.iterrows():
+            src_3.append(idx_map[f"📂 {r['Sector']}"])
+            tgt_3.append(idx_map[f"🟢 {r['Symbol']}"])
+            val_3.append(max(float(r["Est. Flow (Cr)"]), 1.0))
+            col_3.append("rgba(0, 230, 118, 0.48)")
+
+        node_colors = (
+            ["#FF5252"] * len(out_labels)
+            + ["#FFD700"]
+            + ["#29B6F6"] * len(in_sec_labels)
+            + ["#00E676"] * len(in_stk_labels)
         )
-    )
-    fig_bar.update_layout(
-        title="Top Inflow vs. Outflow Concentration (Est. ₹ Cr)",
-        template="plotly_dark",
-        height=320,
-        margin=dict(l=10, r=60, t=40, b=20),
-        xaxis_title="Estimated Flow (₹ Cr)",
-    )
-    st.plotly_chart(fig_bar, use_container_width=True)
 
-    with st.expander("View Full Sector-to-Stock Sankey Stream", expanded=True):
+        fig_rot = go.Figure(
+            data=[
+                go.Sankey(
+                    node=dict(
+                        pad=16,
+                        thickness=18,
+                        line=dict(color="black", width=0.5),
+                        label=nodes_3tier,
+                        color=node_colors,
+                    ),
+                    link=dict(source=src_3, target=tgt_3, value=val_3, color=col_3),
+                )
+            ]
+        )
+        fig_rot.update_layout(
+            title="Reverse-Engineered Rotation: Selling Source (Left) → Absorbing Sectors & Stocks (Right)",
+            template="plotly_dark",
+            height=440,
+            margin=dict(l=10, r=10, t=40, b=15),
+        )
+        st.plotly_chart(fig_rot, use_container_width=True)
+
+    with st.expander("View Full Sector-to-Stock Sankey Stream (All Tracked Stocks)", expanded=False):
         sectors = list(df_pulse["Sector"].unique())
         symbols = list(df_pulse["Symbol"].unique())
         nodes = sectors + symbols
@@ -529,8 +662,8 @@ if not df_pulse.empty:
 
     st.markdown("---")
 
-    # 3. SECTOR FILTER + CLICKABLE LEDGER + INLINE SMC CHART LAUNCHER
-    st.subheader("📋 Flow & Momentum Ledger (Click Any Row for 15m Chart)")
+    # 3. SECTOR FILTER + REVERSE-ENGINEERED LEDGER + INLINE SMC CHART LAUNCHER
+    st.subheader("📋 Reverse-Engineered Flow & Mechanism Ledger (Click Any Row for 15m Chart)")
     sector_options = ["All Sectors"] + sorted(df_pulse["Sector"].unique().tolist())
     chosen_sector = st.selectbox("Filter Ledger by Sector:", sector_options, index=0)
 
@@ -545,14 +678,18 @@ if not df_pulse.empty:
         "Sector",
         "Price",
         "Change %",
+        "Gap %",
+        "Intraday Drive %",
         "Est. Flow (Cr)",
+        "Buy vs Sell Bar (Cr)",
         "RVOL",
         "Close Strength %",
-        "Carry Score",
-        "Watchlist Signal",
+        "Peak Activity",
+        "Who & How (Footprint)",
+        "Reverse-Engineered Mechanism",
     ]
 
-    st.caption("Select a stock row to inspect its 15-minute candlesticks, VWAP/anchor, and 20 EMA below.")
+    st.caption("Select any row to inspect its 15-minute candlesticks, VWAP/anchor, and 20 EMA below.")
 
     event = st.dataframe(
         df_view[display_cols],
@@ -561,12 +698,13 @@ if not df_pulse.empty:
         on_select="rerun",
         selection_mode="single-row",
         column_config={
-            "Carry Score": st.column_config.ProgressColumn(
-                "Carry Score", format="%.1f", min_value=0, max_value=100
-            ),
             "Change %": st.column_config.NumberColumn(format="%+.2f%%"),
+            "Gap %": st.column_config.NumberColumn(format="%+.2f%%"),
+            "Intraday Drive %": st.column_config.NumberColumn(format="%+.2f%%"),
             "Est. Flow (Cr)": st.column_config.NumberColumn(format="₹%+.2f Cr"),
+            "Buy vs Sell Bar (Cr)": st.column_config.NumberColumn(format="₹%+.2f Cr"),
             "RVOL": st.column_config.NumberColumn(format="%.2fx"),
+            "Close Strength %": st.column_config.NumberColumn(format="%.1f%%"),
         },
     )
 
