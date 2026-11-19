@@ -6,3 +6,4 @@ yfinance
 pytz
 xlsxwriter
 openpyxl
+nsepythonserver
