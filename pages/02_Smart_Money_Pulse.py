@@ -297,12 +297,21 @@ if not df_pulse.empty:
 
     st.markdown("---")
 
-    # 3. CLICKABLE LEDGER + INLINE SMC CHART LAUNCHER
+    # 3. SECTOR FILTER + CLICKABLE LEDGER + INLINE SMC CHART LAUNCHER
     st.subheader("📋 Flow & Momentum Ledger (Click Any Row for 15m Chart)")
+    sector_options = ["All Sectors"] + sorted(df_pulse["Sector"].unique().tolist())
+    chosen_sector = st.selectbox("Filter Ledger by Sector:", sector_options, index=0)
+
+    df_view = (
+        df_pulse
+        if chosen_sector == "All Sectors"
+        else df_pulse[df_pulse["Sector"] == chosen_sector].reset_index(drop=True)
+    )
+
     st.caption("Select a stock row to inspect its 15-minute candlesticks, VWAP/anchor, and 20 EMA below.")
 
     event = st.dataframe(
-        df_pulse,
+        df_view,
         use_container_width=True,
         hide_index=True,
         on_select="rerun",
@@ -319,9 +328,9 @@ if not df_pulse.empty:
 
     selected_rows = event.selection.rows if event and event.selection else []
     active_symbol = (
-        df_pulse.iloc[selected_rows[0]]["Symbol"]
+        df_view.iloc[selected_rows[0]]["Symbol"]
         if selected_rows
-        else df_pulse.iloc[0]["Symbol"]
+        else df_view.iloc[0]["Symbol"]
     )
 
     st.markdown("---")
