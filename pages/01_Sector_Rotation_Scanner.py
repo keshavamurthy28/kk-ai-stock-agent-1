@@ -15,11 +15,15 @@ st.markdown(
     "build a focused watchlist instead of guessing blindly."
 )
 
-if st.button("🔄 Refresh Live Data", type="primary"):
-    st.cache_data.clear()
-    st.rerun()
+col_btn1, col_btn2 = st.columns([1.2, 4])
+with col_btn1:
+    if st.button("🔄 Refresh Live Data", type="primary", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+with col_btn2:
+    show_extra_tables = st.toggle("Show Detailed Data Tables", value=False)
 
-with st.expander("📘 New to Stock Markets? Read This 30-Second Guide First", expanded=True):
+with st.expander("📘 New to Stock Markets? Read This 30-Second Guide First", expanded=False):
     st.markdown(
         "- **Why Sectors Matter:** Stocks in strong sectors often get more buyer support; weak sectors can drag prices down.\n"
         "- **RS vs Nifty % (Relative Strength):** Positive (`+`) means the sector/stock performed **better** than Nifty 50; negative (`-`) means **worse**.\n"
@@ -166,12 +170,14 @@ def fetch_drilldown_sector_data():
                 + float(np.clip(s_rvol * 10, 0, 20)),
                 1,
             )
+            chg_rounded = round(s_chg, 2)
 
             stock_records.append({
                 "Sector": sector_name,
                 "Stock": sym.replace(".NS", ""),
                 "LTP": round(s_close, 2),
-                "Day Change %": round(s_chg, 2),
+                "Day Change %": chg_rounded,
+                "ChangeLabel": f"{chg_rounded:+.2f}%",
                 "RS vs Nifty %": round(s_rs, 2),
                 "Close Strength %": round(s_close_pos, 1),
                 "RVOL": s_rvol,
@@ -228,7 +234,7 @@ df_sectors, df_stocks, nifty_day_chg = fetch_drilldown_sector_data()
 
 if df_sectors is not None and not df_sectors.empty and df_stocks is not None and not df_stocks.empty:
     # ---------------------------------------------------------
-    # 1. TOMORROW'S ADVANCE SECTOR RADAR
+    # 1. TOP SECTORS TO WATCH
     # ---------------------------------------------------------
     st.markdown("---")
     st.subheader("🔮 Top Sectors to Watch Next (Strength vs. Nifty)")
@@ -268,7 +274,7 @@ if df_sectors is not None and not df_sectors.empty and df_stocks is not None and
     st.markdown("---")
 
     # ---------------------------------------------------------
-    # 2. HEATMAP WITH RIGHT-SIDE CLICKABLE DAY CHANGE % COLOR SCALE
+    # 2. HEATMAP WITH RIGHT-SIDE FILTER
     # ---------------------------------------------------------
     st.subheader("🗺️ Interactive Sector → Stock Drill-Down Heatmap")
     st.caption(
@@ -317,13 +323,14 @@ if df_sectors is not None and not df_sectors.empty and df_stocks is not None and
                 path=[px.Constant("ALL NSE SECTORS"), "Sector", "Stock"],
                 values="BoxSize",
                 color="Day Change %",
+                custom_data=["ChangeLabel"],
                 color_continuous_scale=["#B71C1C", "#EF5350", "#263238", "#66BB6A", "#1B5E20"],
                 color_continuous_midpoint=0,
                 range_color=[-3.0, 3.0],
                 hover_data=["LTP", "RS vs Nifty %", "Close Strength %", "RVOL", "Stock Score"],
             )
             fig.update_traces(
-                texttemplate="<b>%{label}</b><br>%{color:+.2f}%",
+                texttemplate="<b>%{label}</b><br>%{customdata[0]}",
                 textfont=dict(size=13),
                 maxdepth=3,
             )
@@ -337,29 +344,10 @@ if df_sectors is not None and not df_sectors.empty and df_stocks is not None and
         else:
             st.info(f"No stocks currently in {color_band}. Try 'All' or another range on the right.")
 
-    if not filtered_stocks.empty:
-        st.subheader(
-            f"📋 Stocks in Selected Range ({color_band}) — {len(filtered_stocks)} Stocks"
-        )
-        st.dataframe(
-            filtered_stocks.drop(columns=["BoxSize"]),
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Stock Score": st.column_config.ProgressColumn(
-                    "Stock Score", format="%.1f", min_value=0, max_value=100
-                ),
-                "Day Change %": st.column_config.NumberColumn(format="%+.2f%%"),
-                "RS vs Nifty %": st.column_config.NumberColumn(format="%+.2f%%"),
-                "Close Strength %": st.column_config.NumberColumn(format="%.1f%%"),
-                "RVOL": st.column_config.NumberColumn(format="%.2fx"),
-            },
-        )
-
     st.markdown("---")
 
     # ---------------------------------------------------------
-    # 3. INTERACTIVE SECTOR INSPECTOR & FULL RANKING
+    # 3. FOCUSED SECTOR INSPECTOR
     # ---------------------------------------------------------
     st.subheader("🔍 Inspect Stocks Inside One Sector")
     selected_sector = st.selectbox(
@@ -369,7 +357,7 @@ if df_sectors is not None and not df_sectors.empty and df_stocks is not None and
     )
 
     sector_stocks_view = df_stocks[df_stocks["Sector"] == selected_sector].drop(
-        columns=["Sector", "BoxSize"]
+        columns=["Sector", "BoxSize", "ChangeLabel"]
     )
     st.dataframe(
         sector_stocks_view,
@@ -386,20 +374,43 @@ if df_sectors is not None and not df_sectors.empty and df_stocks is not None and
         },
     )
 
-    st.markdown("---")
-    st.subheader("📊 Full Sector Ranking Table")
-    st.dataframe(
-        df_sectors,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Momentum Score": st.column_config.ProgressColumn(
-                "Momentum Score", format="%.1f", min_value=0, max_value=100
-            ),
-            "Day Change %": st.column_config.NumberColumn(format="%+.2f%%"),
-            "RS vs Nifty %": st.column_config.NumberColumn(format="%+.2f%%"),
-            "Close Strength %": st.column_config.NumberColumn(format="%.1f%%"),
-        },
-    )
+    # ---------------------------------------------------------
+    # 4. OPTIONAL DETAILED TABLES
+    # ---------------------------------------------------------
+    if show_extra_tables:
+        st.markdown("---")
+        if not filtered_stocks.empty:
+            st.subheader(
+                f"📋 Stocks in Selected Range ({color_band}) — {len(filtered_stocks)} Stocks"
+            )
+            st.dataframe(
+                filtered_stocks.drop(columns=["BoxSize", "ChangeLabel"]),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Stock Score": st.column_config.ProgressColumn(
+                        "Stock Score", format="%.1f", min_value=0, max_value=100
+                    ),
+                    "Day Change %": st.column_config.NumberColumn(format="%+.2f%%"),
+                    "RS vs Nifty %": st.column_config.NumberColumn(format="%+.2f%%"),
+                    "Close Strength %": st.column_config.NumberColumn(format="%.1f%%"),
+                    "RVOL": st.column_config.NumberColumn(format="%.2fx"),
+                },
+            )
+
+        st.subheader("📊 Full Sector Ranking Table")
+        st.dataframe(
+            df_sectors,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Momentum Score": st.column_config.ProgressColumn(
+                    "Momentum Score", format="%.1f", min_value=0, max_value=100
+                ),
+                "Day Change %": st.column_config.NumberColumn(format="%+.2f%%"),
+                "RS vs Nifty %": st.column_config.NumberColumn(format="%+.2f%%"),
+                "Close Strength %": st.column_config.NumberColumn(format="%.1f%%"),
+            },
+        )
 else:
     st.warning("⚠️ Unable to fetch sectoral index data right now. Please click **Refresh Live Data**.")
