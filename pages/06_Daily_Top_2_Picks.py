@@ -17,6 +17,7 @@ is_market_open = (
     now_ist.weekday() < 5
     and dt_time(9, 15) <= now_ist.time() <= dt_time(15, 30)
 )
+is_late_session = is_market_open and now_ist.time() >= dt_time(14, 45)
 
 st.title("⚡ Pure Same-Day Intraday Setups + Separate Long-Term Table")
 st.markdown(
@@ -31,6 +32,11 @@ session_txt = (
     else "🟡 Pre-Market / Market Closed"
 )
 st.caption(f"{session_txt} • Synced: **{now_ist.strftime('%d %b %Y, %I:%M:%S %p IST')}**")
+
+if is_late_session:
+    st.warning(
+        "⏰ **Late Session Reminder (After 2:45 PM IST):** Avoid chasing fresh intraday entries late in the day and review open intraday trades before **3:30 PM IST**."
+    )
 
 with st.expander("📘 Beginner Rulebook: Same-Day Profit Booking & Risk Guardrails", expanded=True):
     st.markdown(
@@ -60,14 +66,32 @@ UNIVERSE = [
     "HINDALCO.NS",
 ]
 
-col_f1, col_r1 = st.columns([3.5, 1.5])
+col_f1, col_f2, col_f3, col_r1 = st.columns([2.4, 1.3, 1.3, 1.4])
 with col_f1:
     intraday_bias = st.selectbox(
         "🎯 Same-Day Intraday Direction:",
-        ["Bullish Intraday (Buy Today / Sell Today)", "Bearish Intraday (Weakness / Breakdown Watch)"],
+        [
+            "Bullish Intraday (Buy Today / Sell Today)",
+            "Bearish Intraday (Short / Cover Today)",
+        ],
+        index=0,
+    )
+with col_f2:
+    max_risk_inr = st.number_input(
+        "💰 Max Risk / Trade (₹)",
+        min_value=100.0,
+        max_value=100000.0,
+        value=500.0,
+        step=100.0,
+    )
+with col_f3:
+    lt_filter = st.selectbox(
+        "🏦 Long-Term Filter:",
+        ["All Stocks", "Strong Uptrend Only", "Pullback Above 50 EMA"],
         index=0,
     )
 with col_r1:
+    st.write("")
     if st.button("🔄 Refresh Intraday & Long-Term", type="primary", use_container_width=True):
         st.cache_data.clear()
         st.toast("Refreshing live 5m intraday & daily long-term tables...", icon="⚡")
@@ -78,14 +102,18 @@ def _extract_ticker_df(raw_df, sym):
     if raw_df is None or raw_df.empty:
         return pd.DataFrame()
     if isinstance(raw_df.columns, pd.MultiIndex):
-        if sym in raw_df.columns.get_level_values(0):
+        lvl0 = raw_df.columns.get_level_values(0)
+        lvl1 = raw_df.columns.get_level_values(1)
+        if sym in lvl0:
             return raw_df[sym].dropna(how="all")
+        if sym in lvl1:
+            return raw_df.xs(sym, axis=1, level=1).dropna(how="all")
         return pd.DataFrame()
     return raw_df.dropna(how="all")
 
 
 @st.cache_data(ttl=60)
-def fetch_intraday_and_longterm_tables(direction_choice):
+def fetch_intraday_and_longterm_tables(direction_choice, risk_budget_inr):
     bullish_mode = "Bullish Intraday" in direction_choice
     intraday_rows = []
     longterm_rows = []
@@ -115,9 +143,11 @@ def fetch_intraday_and_longterm_tables(direction_choice):
     for symbol in UNIVERSE:
         clean_sym = symbol.replace(".NS", "")
 
-        # --- 1. PURE SAME-DAY INTRADAY (5m + VWAP) ---
+        # --- 1. PURE SAME-DAY INTRADAY (5m + VWAP + Volatility-Adjusted Targets) ---
         try:
-            df_5m = _extract_ticker_df(raw_5m, symbol).dropna(subset=["Open", "High", "Low", "Close"])
+            df_5m = _extract_ticker_df(raw_5m, symbol).dropna(
+                subset=["Open", "High", "Low", "Close"]
+            )
             if df_5m is not None and len(df_5m) >= 20:
                 df_5m = df_5m.copy()
                 df_5m.index = pd.to_datetime(df_5m.index)
@@ -136,53 +166,113 @@ def fetch_intraday_and_longterm_tables(direction_choice):
                     else float(df_today["Open"].iloc[0])
                 )
 
-                vol_s = df_today["Volume"] if "Volume" in df_today and df_today["Volume"].sum() > 0 else None
+                vol_s = (
+                    df_today["Volume"]
+                    if "Volume" in df_today and df_today["Volume"].sum() > 0
+                    else None
+                )
                 if vol_s is not None:
                     tp = (df_today["High"] + df_today["Low"] + df_today["Close"]) / 3.0
-                    vwap_val = float((tp * vol_s).cumsum().iloc[-1] / vol_s.cumsum().iloc[-1])
+                    vwap_val = float(
+                        (tp * vol_s).cumsum().iloc[-1] / vol_s.cumsum().iloc[-1]
+                    )
                     avg_bar_vol = float(df_5m["Volume"].tail(40).mean())
                     last_bar_vol = float(df_5m["Volume"].iloc[-1])
-                    vol_ratio = round(last_bar_vol / avg_bar_vol, 2) if avg_bar_vol > 0 else 1.0
+                    vol_ratio = (
+                        round(last_bar_vol / avg_bar_vol, 2)
+                        if avg_bar_vol > 0
+                        else 1.0
+                    )
                 else:
                     vwap_val = float(df_today["Close"].mean())
                     vol_ratio = 1.0
 
+                bar_range_pct = (
+                    ((df_5m["High"] - df_5m["Low"]) / df_5m["Close"].replace(0, np.nan))
+                    .tail(30)
+                    .mean()
+                    * 100.0
+                )
+                avg_5m_move_pct = (
+                    float(bar_range_pct)
+                    if not np.isnan(bar_range_pct) and bar_range_pct > 0
+                    else 0.25
+                )
+                # Scale quick profit booking target to recent 5m bar noise (clamped 0.7% to 1.8%)
+                t1_pct = float(np.clip(avg_5m_move_pct * 4.5, 0.7, 1.8)) / 100.0
+                t2_pct = float(np.clip(avg_5m_move_pct * 8.5, 1.4, 3.0)) / 100.0
+
                 if prev_close_ref > 0 and not np.isnan(ltp_5m):
-                    intra_chg = round(((ltp_5m - prev_close_ref) / prev_close_ref) * 100, 2)
+                    intra_chg = round(
+                        ((ltp_5m - prev_close_ref) / prev_close_ref) * 100, 2
+                    )
+                    vwap_dist_pct = round(
+                        ((ltp_5m - vwap_val) / max(vwap_val, 0.01)) * 100, 2
+                    )
 
                     if bullish_mode and intra_chg > 0.25 and ltp_5m >= vwap_val * 0.998:
-                        sl_intra = round(min(vwap_val * 0.994, ltp_5m * 0.990), 2)
-                        t1_intra = round(ltp_5m * 1.012, 2)  # Quick same-day profit booking (+1.2%)
-                        t2_intra = round(ltp_5m * 1.022, 2)  # Stretch intraday target (+2.2%)
+                        sl_intra = round(min(vwap_val * 0.995, ltp_5m * 0.992), 2)
+                        sl_intra = min(sl_intra, round(ltp_5m * 0.995, 2))
+                        t1_intra = round(ltp_5m * (1.0 + t1_pct), 2)
+                        t2_intra = round(ltp_5m * (1.0 + t2_pct), 2)
+                        per_share_risk = max(ltp_5m - sl_intra, ltp_5m * 0.004)
+                        per_share_t1 = max(t1_intra - ltp_5m, 0.01)
+                        rr_t1 = round(per_share_t1 / per_share_risk, 2)
+                        qty_est = max(1, int(risk_budget_inr // per_share_risk))
+                        est_t1_profit = round(qty_est * per_share_t1, 0)
+                        stretch_tag = "Extended (>1.5% VWAP)" if vwap_dist_pct > 1.5 else "Near VWAP"
                         score_intra = round(intra_chg * max(vol_ratio, 0.8), 2)
+
                         intraday_rows.append({
                             "Stock": clean_sym,
                             "Plan": "BUY & EXIT TODAY",
                             "LTP": round(ltp_5m, 2),
                             "Chg_%": intra_chg,
                             "VWAP": round(vwap_val, 2),
+                            "VWAP_Gap_%": vwap_dist_pct,
                             "Vol_Pace": f"{vol_ratio:.2f}x",
                             "Stop_Loss": sl_intra,
                             "Target_1_Book": t1_intra,
                             "Target_2_Stretch": t2_intra,
+                            "RR_T1": rr_t1,
+                            "Est_Qty": qty_est,
+                            "Est_T1_₹": est_t1_profit,
+                            "Entry_Zone": stretch_tag,
                             "Exit_Rule": "Sell before 3:30 PM IST",
                             "Score": score_intra,
                         })
-                    elif (not bullish_mode) and intra_chg < -0.25 and ltp_5m <= vwap_val * 1.002:
-                        sl_intra = round(max(vwap_val * 1.006, ltp_5m * 1.010), 2)
-                        t1_intra = round(ltp_5m * 0.988, 2)
-                        t2_intra = round(ltp_5m * 0.978, 2)
+                    elif (
+                        (not bullish_mode)
+                        and intra_chg < -0.25
+                        and ltp_5m <= vwap_val * 1.002
+                    ):
+                        sl_intra = round(max(vwap_val * 1.005, ltp_5m * 1.008), 2)
+                        sl_intra = max(sl_intra, round(ltp_5m * 1.005, 2))
+                        t1_intra = round(ltp_5m * (1.0 - t1_pct), 2)
+                        t2_intra = round(ltp_5m * (1.0 - t2_pct), 2)
+                        per_share_risk = max(sl_intra - ltp_5m, ltp_5m * 0.004)
+                        per_share_t1 = max(ltp_5m - t1_intra, 0.01)
+                        rr_t1 = round(per_share_t1 / per_share_risk, 2)
+                        qty_est = max(1, int(risk_budget_inr // per_share_risk))
+                        est_t1_profit = round(qty_est * per_share_t1, 0)
+                        stretch_tag = "Extended (<-1.5% VWAP)" if vwap_dist_pct < -1.5 else "Near VWAP"
                         score_intra = round(abs(intra_chg) * max(vol_ratio, 0.8), 2)
+
                         intraday_rows.append({
                             "Stock": clean_sym,
                             "Plan": "SHORT / EXIT TODAY",
                             "LTP": round(ltp_5m, 2),
                             "Chg_%": intra_chg,
                             "VWAP": round(vwap_val, 2),
+                            "VWAP_Gap_%": vwap_dist_pct,
                             "Vol_Pace": f"{vol_ratio:.2f}x",
                             "Stop_Loss": sl_intra,
                             "Target_1_Book": t1_intra,
                             "Target_2_Stretch": t2_intra,
+                            "RR_T1": rr_t1,
+                            "Est_Qty": qty_est,
+                            "Est_T1_₹": est_t1_profit,
+                            "Entry_Zone": stretch_tag,
                             "Exit_Rule": "Cover before 3:30 PM IST",
                             "Score": score_intra,
                         })
@@ -195,18 +285,25 @@ def fetch_intraday_and_longterm_tables(direction_choice):
             if df_1d is not None and len(df_1d) >= 50:
                 close_1d = float(df_1d["Close"].iloc[-1])
                 prev_1d = float(df_1d["Close"].iloc[-2])
-                ema20_1d = float(df_1d["Close"].ewm(span=20, adjust=False).mean().iloc[-1])
-                ema50_1d = float(df_1d["Close"].ewm(span=50, adjust=False).mean().iloc[-1])
+                ema20_1d = float(
+                    df_1d["Close"].ewm(span=20, adjust=False).mean().iloc[-1]
+                )
+                ema50_1d = float(
+                    df_1d["Close"].ewm(span=50, adjust=False).mean().iloc[-1]
+                )
 
                 if prev_1d > 0 and not np.isnan(close_1d):
                     day_chg_1d = round(((close_1d - prev_1d) / prev_1d) * 100, 2)
-                    trend_tag = (
-                        "🟢 Uptrend (Above 20 & 50 EMA)"
-                        if close_1d > ema20_1d > ema50_1d
-                        else ("🟡 Pullback / Mixed Trend" if close_1d >= ema50_1d else "🔴 Below 50 EMA")
-                    )
+                    if close_1d > ema20_1d > ema50_1d:
+                        trend_tag = "🟢 Uptrend (Above 20 & 50 EMA)"
+                    elif close_1d >= ema50_1d:
+                        trend_tag = "🟡 Pullback / Mixed Trend"
+                    else:
+                        trend_tag = "🔴 Below 50 EMA"
+
                     lt_score = round(
-                        ((close_1d - ema50_1d) / max(ema50_1d, 0.01)) * 100 + day_chg_1d,
+                        ((close_1d - ema50_1d) / max(ema50_1d, 0.01)) * 100
+                        + day_chg_1d,
                         2,
                     )
                     longterm_rows.append({
@@ -243,7 +340,9 @@ def fetch_intraday_and_longterm_tables(direction_choice):
 
 
 with st.spinner("Scanning live 5m intraday setups & daily long-term trends..."):
-    df_intraday, df_longterm = fetch_intraday_and_longterm_tables(intraday_bias)
+    df_intraday, df_longterm = fetch_intraday_and_longterm_tables(
+        intraday_bias, max_risk_inr
+    )
 
 # ---------------------------------------------------------
 # TABLE 1: PURE SAME-DAY INTRADAY WATCHLIST
@@ -260,9 +359,12 @@ else:
             "LTP": "₹{:,.2f}",
             "Chg_%": "{:+.2f}%",
             "VWAP": "₹{:,.2f}",
+            "VWAP_Gap_%": "{:+.2f}%",
             "Stop_Loss": "₹{:,.2f}",
             "Target_1_Book": "₹{:,.2f}",
             "Target_2_Stretch": "₹{:,.2f}",
+            "RR_T1": "{:.2f}x",
+            "Est_T1_₹": "₹{:,.0f}",
         }),
         use_container_width=True,
         hide_index=True,
@@ -270,11 +372,27 @@ else:
 
     st.markdown("#### Quick Same-Day Execution Cards (Top 2)")
     for idx, row in df_intraday.head(2).iterrows():
-        c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
-        c1.metric(f"#{idx+1} {row['Stock']}", f"₹{row['LTP']:,.2f}", f"{row['Chg_%']:+.2f}% | VWAP ₹{row['VWAP']:,.2f}")
-        c2.metric("🛑 Same-Day Stop-Loss", f"₹{row['Stop_Loss']:,.2f}", "Strict Intraday Exit")
-        c3.metric("🎯 Target 1 (Book Profit)", f"₹{row['Target_1_Book']:,.2f}", "Lock Gains First")
-        c4.metric("🚀 Target 2 (Stretch)", f"₹{row['Target_2_Stretch']:,.2f}", row["Exit_Rule"])
+        c1, c2, c3, c4 = st.columns([2.1, 1.9, 2.0, 2.0])
+        c1.metric(
+            f"#{idx+1} {row['Stock']}",
+            f"₹{row['LTP']:,.2f}",
+            f"{row['Chg_%']:+.2f}% | {row['Entry_Zone']}",
+        )
+        c2.metric(
+            "🛑 Same-Day Stop-Loss",
+            f"₹{row['Stop_Loss']:,.2f}",
+            f"Qty ~{row['Est_Qty']} (Max ₹{max_risk_inr:,.0f} risk)",
+        )
+        c3.metric(
+            "🎯 Target 1 (Book Profit)",
+            f"₹{row['Target_1_Book']:,.2f}",
+            f"Est. +₹{row['Est_T1_₹']:,.0f} ({row['RR_T1']:.2f}R)",
+        )
+        c4.metric(
+            "🚀 Target 2 (Stretch)",
+            f"₹{row['Target_2_Stretch']:,.2f}",
+            row["Exit_Rule"],
+        )
 
 st.markdown("---")
 
@@ -282,18 +400,30 @@ st.markdown("---")
 # TABLE 2: SEPARATE LONG-TERM WATCHLIST
 # ---------------------------------------------------------
 st.subheader("🏦 Table 2: Separate Long-Term Watchlist (Multi-Week / Positional Study)")
-st.caption("Kept separate from same-day intraday trades so longer-term trend stocks aren't confused with intraday entries.")
+st.caption(
+    "Kept separate from same-day intraday trades so longer-term trend stocks aren't confused with intraday entries."
+)
+
 if df_longterm.empty:
     st.info("ℹ️ Long-term daily trend data is currently unavailable.")
 else:
-    st.dataframe(
-        df_longterm.style.format({
-            "Close": "₹{:,.2f}",
-            "Day_%": "{:+.2f}%",
-            "EMA_20": "₹{:,.2f}",
-            "EMA_50": "₹{:,.2f}",
-            "Long_Term_SL_Zone": "₹{:,.2f}",
-        }),
-        use_container_width=True,
-        hide_index=True,
-    )
+    df_lt_view = df_longterm.copy()
+    if lt_filter == "Strong Uptrend Only":
+        df_lt_view = df_lt_view[df_lt_view["Trend_Status"].str.startswith("🟢")]
+    elif lt_filter == "Pullback Above 50 EMA":
+        df_lt_view = df_lt_view[df_lt_view["Trend_Status"].str.startswith("🟡")]
+
+    if df_lt_view.empty:
+        st.info(f"ℹ️ No long-term stocks match '{lt_filter}' right now.")
+    else:
+        st.dataframe(
+            df_lt_view.style.format({
+                "Close": "₹{:,.2f}",
+                "Day_%": "{:+.2f}%",
+                "EMA_20": "₹{:,.2f}",
+                "EMA_50": "₹{:,.2f}",
+                "Long_Term_SL_Zone": "₹{:,.2f}",
+            }),
+            use_container_width=True,
+            hide_index=True,
+        )
