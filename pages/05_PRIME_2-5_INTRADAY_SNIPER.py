@@ -1,4 +1,5 @@
-from datetime import datetime, time
+from datetime import datetime, time as dt_time
+import time
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -13,15 +14,48 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("🎯 Institutional Alpha Intraday Sniper Terminal (Anti-Trap)")
-st.markdown(
-    "**Expert Analyst Engine:** Market-wide scanning combining **Fundamental"
-    " Quality Filters** (Positive earnings & profit margins) with VWAP support,"
-    " volume expansion, and ATR-managed risk boundaries for reliable 2%–5%"
-    " intraday gains."
+ist = pytz.timezone("Asia/Kolkata")
+now_ist = datetime.now(ist)
+is_market_open = (
+    now_ist.weekday() < 5
+    and dt_time(9, 15) <= now_ist.time() <= dt_time(15, 30)
 )
 
-# Comprehensive Stock-to-Sector Mapping (Unified with Sector Rotation & Smart Money Pulse)
+st.title("🎯 Institutional Alpha Intraday Sniper Terminal (Anti-Trap)")
+st.markdown(
+    "**Beginner-Friendly Sniper Guide:** Scans NSE stocks for intraday trend alignment "
+    "(above VWAP & 20 EMA), volume surge (`RVOL`), and volatility-based targets/stop-loss "
+    "to help you plan disciplined setups—not guaranteed profits."
+)
+
+# ---------------------------------------------------------
+# 1. TOP CONTROLS & LIVE REFRESH
+# ---------------------------------------------------------
+col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([2.6, 1.4, 1.0])
+with col_ctrl1:
+    session_badge = (
+        "🟢 NSE Live Session (9:15 AM – 3:30 PM IST)"
+        if is_market_open
+        else "🟡 Pre-Market / Market Closed"
+    )
+    st.caption(f"{session_badge} • Synced: **{now_ist.strftime('%d %b %Y, %I:%M:%S %p IST')}**")
+with col_ctrl2:
+    auto_refresh = st.toggle("Auto-Refresh (60s)", value=False)
+with col_ctrl3:
+    if st.button("🔄 Force Refresh Sniper Scans", type="primary", use_container_width=True):
+        st.cache_data.clear()
+        st.toast("Cleared cache and running fresh sniper scan...", icon="⚡")
+        st.rerun()
+
+with st.expander("📘 Beginner Guide: How to Read Sniper Levels & Book Profit", expanded=False):
+    st.markdown(
+        "- **VWAP & 20 EMA:** Price holding above VWAP and 20 EMA shows intraday buyer strength; dropping below suggests weakness.\n"
+        "- **RVOL (Relative Volume):** Above **1.1x–1.3x+** shows stronger activity than usual.\n"
+        "- **When to Buy:** Wait until active market hours (**9:15 AM IST**) and look for orderly strength rather than chasing sudden spikes blindly.\n"
+        "- **When to Book Profit:** Consider booking partial or full profit near **Target 1** first rather than holding out blindly for **Target 2**, and honor your **Stop-Loss** if momentum fails. Not financial advice."
+    )
+
+# Clean Stock-to-Sector Mapping (Standardized without .NS suffixes)
 STOCK_SECTOR_MAP = {
     "RELIANCE": "Energy & Oil",
     "TCS": "Software & Services",
@@ -63,362 +97,357 @@ STOCK_SECTOR_MAP = {
     "SUPREMEIND": "Capital Goods",
     "ETERNAL": "Retailing",
     "BELRISE": "Automobiles",
-    "TATACOMM.NS": "Telecommunications",
-    "PIDILITEIND": "Chemicals",
+    "TATACOMM": "Telecommunications",
+    "PIDILITIND": "Chemicals",
     "SRF": "Chemicals",
     "HAL": "Defense & Aerospace",
     "BEL": "Defense & Aerospace",
 }
 
-# ---------------------------------------------------------
-# 1. TOP CONTROLS & LIVE REFRESH
-# ---------------------------------------------------------
-col_ctrl1, col_ctrl2 = st.columns([3, 1])
-with col_ctrl2:
-  if st.button("🔄 Force Refresh Sniper Scans"):
-    st.cache_data.clear()
-    st.toast("Cleared cache and executed market-wide sniper scan!")
-    st.rerun()
 
-ist = pytz.timezone("Asia/Kolkata")
-current_time_ist = datetime.now(ist).time()
+def _extract_ticker_df(raw_df, sym, total_tickers):
+    if raw_df is None or raw_df.empty:
+        return pd.DataFrame()
+    if total_tickers > 1 and isinstance(raw_df.columns, pd.MultiIndex):
+        if sym in raw_df.columns.get_level_values(0):
+            return raw_df[sym].dropna(how="all")
+        return pd.DataFrame()
+    return raw_df.dropna(how="all")
 
 
 # ---------------------------------------------------------
-# 2. MARKET-WIDE INSTITUTIONAL SNIPER SCANNER
+# 2. FAST BATCH SNIPER SCANNER (5m INTRADAY + 14d DAILY ATR)
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def fetch_institutional_sniper_picks():
-  market_universe = list(STOCK_SECTOR_MAP.keys())
-  sniper_rows = []
-
-  for sym_base in market_universe:
-    symbol = f"{sym_base}.NS" if not sym_base.endswith(".NS") else sym_base
-    clean_sym = symbol.replace(".NS", "")
-    sector_name = STOCK_SECTOR_MAP.get(clean_sym, "General")
+    market_universe = list(STOCK_SECTOR_MAP.keys())
+    symbols = [f"{s}.NS" for s in market_universe]
+    sniper_rows = []
 
     try:
-      ticker = yf.Ticker(symbol)
-
-      # --- FUNDAMENTAL FILTER (Anti-Trap Protection) ---
-      info = ticker.info
-      net_income = info.get("netIncomeToCommon", 1)
-      profit_margins = info.get("profitMargins", 0)
-
-      if (
-          net_income is not None
-          and net_income <= 0
-          or profit_margins is not None
-          and profit_margins < 0.02
-      ):
-        continue  # Skip fundamentally weak or cash-burning stocks
-
-      df = ticker.history(period="5d", interval="5m", auto_adjust=True)
-      if df is None or df.empty or len(df) < 20:
-        continue
-
-      df = df.reset_index()
-      df.rename(columns={df.columns[0]: "Time"}, inplace=True)
-      df["Time"] = pd.to_datetime(df["Time"])
-      if df["Time"].dt.tz is not None:
-        df["Time"] = (
-            df["Time"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
+        raw_5m = yf.download(
+            symbols,
+            period="5d",
+            interval="5m",
+            group_by="ticker",
+            progress=False,
+            threads=True,
+            auto_adjust=True,
         )
-
-      # Axis Formatting
-      is_new_day = df["Time"].dt.date != df["Time"].dt.date.shift(1)
-      df["Axis_Str"] = np.where(
-          is_new_day,
-          df["Time"].dt.strftime("%d %b '%y  %H:%M"),
-          df["Time"].dt.strftime("%H:%M  (%d %b)"),
-      )
-
-      # Indicators
-      df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
-      df["VWAP"] = (
-          (((df["High"] + df["Low"] + df["Close"]) / 3.0) * df["Volume"])
-          .groupby(df["Time"].dt.date)
-          .cumsum()
-          / df["Volume"].groupby(df["Time"].dt.date).cumsum().replace(0, np.nan)
-      )
-
-      ltp = float(df["Close"].iloc[-1])
-
-      df["Date"] = df["Time"].dt.date
-      unique_dates = df["Date"].unique()
-      if len(unique_dates) >= 2:
-        prev_close = float(
-            df[df["Date"] == unique_dates[-2]]["Close"].iloc[-1]
+        raw_1d = yf.download(
+            symbols,
+            period="20d",
+            interval="1d",
+            group_by="ticker",
+            progress=False,
+            threads=True,
+            auto_adjust=True,
         )
-      else:
-        prev_close = float(df["Open"].iloc[0])
-
-      change_pct = ((ltp - prev_close) / prev_close) * 100
-
-      # Relative Volume (RVOL) Check using last COMPLETED candle
-      avg_vol = df["Volume"].iloc[-20:-2].mean()
-      curr_vol = df["Volume"].iloc[-2]
-      rvol = round(curr_vol / avg_vol, 2) if avg_vol > 0 else 1.0
-
-      latest_vwap = float(df["VWAP"].iloc[-1])
-      latest_ema = float(df["EMA20"].iloc[-1])
-
-      # 14-Day ATR Calculation
-      df_daily = ticker.history(period="14d", interval="1d")
-      if not df_daily.empty and len(df_daily) >= 5:
-        tr = np.maximum(
-            df_daily["High"] - df_daily["Low"],
-            np.maximum(
-                abs(df_daily["High"] - df_daily["Close"].shift(1)),
-                abs(df_daily["Low"] - df_daily["Close"].shift(1)),
-            ),
-        )
-        atr_14 = float(tr.mean())
-      else:
-        atr_14 = ltp * 0.03
-
-      # Institutional Sniper Filter: Positive momentum + VWAP/EMA Trend Validation + RVOL
-      if (
-          0.4 <= change_pct <= 6.5
-          and ltp >= latest_vwap
-          and ltp >= latest_ema
-          and rvol >= 1.1
-      ):
-        v_avg = df["Volume"].rolling(20, min_periods=1).mean()
-        v_col = [
-            (
-                "#00E676"
-                if (c >= o and v >= 1.3 * va)
-                else (
-                    "#FF5252"
-                    if (c < o and v >= 1.3 * va)
-                    else (
-                        "rgba(0,230,118,0.38)"
-                        if c >= o
-                        else "rgba(255,82,82,0.38)"
-                    )
-                )
-            )
-            for o, c, v, va in zip(df["Open"], df["Close"], df["Volume"], v_avg)
-        ]
-
-        vwap_buy = round(latest_vwap * 0.995, 2)
-        stop_loss = round(latest_vwap * 0.990, 2)
-        t1 = round(ltp + (atr_14 * 0.8), 2)
-        t2 = round(ltp + (atr_14 * 1.3), 2)
-
-        alpha_score = round(change_pct * rvol * (ltp / latest_vwap), 2)
-
-        sniper_rows.append({
-            "Symbol": clean_sym,
-            "Sector": sector_name,
-            "LTP": round(ltp, 2),
-            "Change": round(change_pct, 2),
-            "RVOL": rvol,
-            "Alpha_Score": alpha_score,
-            "ATR": round(atr_14, 2),
-            "VWAP_Buy": vwap_buy,
-            "Stop_Loss": stop_loss,
-            "Target_1": t1,
-            "Target_2": t2,
-            "DataFrame": df,
-            "Volume_Colors": v_col,
-        })
     except Exception:
-      continue
+        return pd.DataFrame()
 
-  df_res = pd.DataFrame(sniper_rows)
-  if not df_res.empty:
-    df_res = df_res.sort_values(by="Alpha_Score", ascending=False).reset_index(
-        drop=True
+    for clean_sym in market_universe:
+        symbol = f"{clean_sym}.NS"
+        sector_name = STOCK_SECTOR_MAP.get(clean_sym, "General")
+        try:
+            df = _extract_ticker_df(raw_5m, symbol, len(symbols)).dropna(
+                subset=["Close", "Open", "High", "Low"]
+            )
+            if df is None or df.empty or len(df) < 20:
+                continue
+
+            df = df.reset_index()
+            df.rename(columns={df.columns[0]: "Time"}, inplace=True)
+            df["Time"] = pd.to_datetime(df["Time"])
+            if df["Time"].dt.tz is not None:
+                df["Time"] = df["Time"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
+
+            is_new_day = df["Time"].dt.date != df["Time"].dt.date.shift(1)
+            df["Axis_Str"] = np.where(
+                is_new_day,
+                df["Time"].dt.strftime("%d %b '%y  %H:%M"),
+                df["Time"].dt.strftime("%H:%M  (%d %b)"),
+            )
+
+            df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
+            vol_series = df["Volume"] if "Volume" in df else pd.Series(0.0, index=df.index)
+            typical_price = (df["High"] + df["Low"] + df["Close"]) / 3.0
+
+            if vol_series.sum() > 0:
+                df["VWAP"] = (
+                    (typical_price * vol_series)
+                    .groupby(df["Time"].dt.date)
+                    .cumsum()
+                    / vol_series.groupby(df["Time"].dt.date).cumsum().replace(0, np.nan)
+                ).fillna(df["EMA20"])
+            else:
+                df["VWAP"] = typical_price.rolling(20, min_periods=1).mean()
+
+            ltp = float(df["Close"].iloc[-1])
+            df["Date"] = df["Time"].dt.date
+            unique_dates = df["Date"].unique()
+            if len(unique_dates) >= 2:
+                prev_close = float(df[df["Date"] == unique_dates[-2]]["Close"].iloc[-1])
+            else:
+                prev_close = float(df["Open"].iloc[0])
+
+            if prev_close <= 0 or np.isnan(ltp) or np.isnan(prev_close):
+                continue
+
+            change_pct = ((ltp - prev_close) / prev_close) * 100.0
+
+            avg_vol = float(vol_series.iloc[-20:-2].mean()) if len(vol_series) >= 22 else 0.0
+            curr_vol = float(vol_series.iloc[-2]) if len(vol_series) >= 2 and pd.notna(vol_series.iloc[-2]) else 0.0
+            rvol = round(curr_vol / avg_vol, 2) if avg_vol > 0 and curr_vol > 0 else 1.0
+
+            latest_vwap = float(df["VWAP"].iloc[-1])
+            latest_ema = float(df["EMA20"].iloc[-1])
+
+            df_daily = _extract_ticker_df(raw_1d, symbol, len(symbols)).dropna(
+                subset=["High", "Low", "Close"]
+            )
+            if df_daily is not None and not df_daily.empty and len(df_daily) >= 5:
+                d_tail = df_daily.tail(14)
+                tr = np.maximum(
+                    d_tail["High"] - d_tail["Low"],
+                    np.maximum(
+                        abs(d_tail["High"] - d_tail["Close"].shift(1)),
+                        abs(d_tail["Low"] - d_tail["Close"].shift(1)),
+                    ),
+                )
+                atr_14 = float(tr.dropna().mean()) if not tr.dropna().empty else (ltp * 0.03)
+            else:
+                atr_14 = ltp * 0.03
+
+            if (
+                0.4 <= change_pct <= 6.5
+                and ltp >= latest_vwap
+                and ltp >= latest_ema
+                and rvol >= 1.1
+            ):
+                v_avg = vol_series.rolling(20, min_periods=1).mean()
+                v_col = [
+                    (
+                        "#00E676"
+                        if (c >= o and v >= 1.3 * va)
+                        else (
+                            "#FF5252"
+                            if (c < o and v >= 1.3 * va)
+                            else (
+                                "rgba(0,230,118,0.38)" if c >= o else "rgba(255,82,82,0.38)"
+                            )
+                        )
+                    )
+                    for o, c, v, va in zip(df["Open"], df["Close"], vol_series, v_avg)
+                ]
+
+                vwap_buy = round(latest_vwap * 0.995, 2)
+                stop_loss = round(latest_vwap * 0.990, 2)
+                t1 = round(ltp + (atr_14 * 0.8), 2)
+                t2 = round(ltp + (atr_14 * 1.3), 2)
+                alpha_score = round(change_pct * rvol * (ltp / max(latest_vwap, 0.01)), 2)
+
+                sniper_rows.append({
+                    "Symbol": clean_sym,
+                    "Sector": sector_name,
+                    "LTP": round(ltp, 2),
+                    "Change": round(change_pct, 2),
+                    "RVOL": rvol,
+                    "Alpha_Score": alpha_score,
+                    "ATR": round(atr_14, 2),
+                    "VWAP_Buy": vwap_buy,
+                    "Stop_Loss": stop_loss,
+                    "Target_1": t1,
+                    "Target_2": t2,
+                    "DataFrame": df,
+                    "Volume_Colors": v_col,
+                })
+        except Exception:
+            continue
+
+    if not sniper_rows:
+        return pd.DataFrame()
+
+    return (
+        pd.DataFrame(sniper_rows)
+        .sort_values(by="Alpha_Score", ascending=False)
+        .reset_index(drop=True)
     )
-  return df_res
 
 
 # ---------------------------------------------------------
 # 3. PLOTTING FUNCTION
 # ---------------------------------------------------------
 def render_sniper_chart(symbol, df, v_col, entry, sl, t1, t2, atr):
-  fig = make_subplots(
-      rows=2,
-      cols=1,
-      shared_xaxes=True,
-      vertical_spacing=0.02,
-      row_heights=[0.78, 0.22],
-  )
-  fig.add_trace(
-      go.Candlestick(
-          x=df["Axis_Str"],
-          open=df["Open"],
-          high=df["High"],
-          low=df["Low"],
-          close=df["Close"],
-          name=symbol,
-          increasing_line_color="#00E676",
-          decreasing_line_color="#FF5252",
-      ),
-      row=1,
-      col=1,
-  )
-  fig.add_trace(
-      go.Scatter(
-          x=df["Axis_Str"],
-          y=df["VWAP"],
-          mode="lines",
-          name="VWAP",
-          line=dict(color="#FFD700", width=1.5),
-      ),
-      row=1,
-      col=1,
-  )
-  fig.add_trace(
-      go.Scatter(
-          x=df["Axis_Str"],
-          y=df["EMA20"],
-          mode="lines",
-          name="20 EMA",
-          line=dict(color="#29B6F6", width=1.2),
-      ),
-      row=1,
-      col=1,
-  )
-  fig.add_trace(
-      go.Bar(
-          x=df["Axis_Str"],
-          y=df["Volume"],
-          name="Volume",
-          marker_color=v_col,
-      ),
-      row=2,
-      col=1,
-  )
-
-  fig.add_hline(
-      y=entry,
-      line_color="#FFD700",
-      line_width=1.6,
-      annotation_text=f"🟡 VWAP BUY: ₹{entry:,.2f}",
-      annotation_position="bottom left",
-      row=1,
-      col=1,
-  )
-  fig.add_hline(
-      y=sl,
-      line_color="#FF5252",
-      line_width=1.6,
-      annotation_text=f"🛑 SL: ₹{sl:,.2f}",
-      annotation_position="bottom right",
-      row=1,
-      col=1,
-  )
-  fig.add_hline(
-      y=t1,
-      line_dash="dash",
-      line_color="#29B6F6",
-      line_width=1.4,
-      annotation_text=f"🎯 TARGET 1 (+2.5%): ₹{t1:,.2f}",
-      annotation_position="top left",
-      row=1,
-      col=1,
-  )
-  fig.add_hline(
-      y=t2,
-      line_dash="dash",
-      line_color="#00E676",
-      line_width=1.4,
-      annotation_text=f"🚀 TARGET 2 (+5.0%): ₹{t2:,.2f}",
-      annotation_position="top right",
-      row=1,
-      col=1,
-  )
-
-  fig.update_layout(
-      title=f"📊 {symbol} (5m) | 14D ATR: ₹{atr}",
-      template="plotly_dark",
-      height=520,
-      dragmode="pan",
-      hovermode="x unified",
-      showlegend=False,
-      margin=dict(l=10, r=65, t=40, b=30),
-      yaxis=dict(side="right", title="Price (₹)", showgrid=True),
-      yaxis2=dict(side="right", title="Volume", showgrid=False),
-      xaxis=dict(type="category", rangeslider_visible=False),
-      xaxis2=dict(
-          type="category", rangeslider_visible=False, tickmode="auto", nticks=12
-      ),
-  )
-  return fig
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.02,
+        row_heights=[0.78, 0.22],
+    )
+    fig.add_trace(
+        go.Candlestick(
+            x=df["Axis_Str"],
+            open=df["Open"],
+            high=df["High"],
+            low=df["Low"],
+            close=df["Close"],
+            name=symbol,
+            increasing_line_color="#00E676",
+            decreasing_line_color="#FF5252",
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["Axis_Str"],
+            y=df["VWAP"],
+            mode="lines",
+            name="VWAP",
+            line=dict(color="#FFD700", width=1.5),
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["Axis_Str"],
+            y=df["EMA20"],
+            mode="lines",
+            name="20 EMA",
+            line=dict(color="#29B6F6", width=1.2),
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Bar(
+            x=df["Axis_Str"],
+            y=df["Volume"],
+            name="Volume",
+            marker_color=v_col,
+        ),
+        row=2,
+        col=1,
+    )
+    fig.add_hline(
+        y=entry,
+        line_color="#FFD700",
+        line_width=1.6,
+        annotation_text=f"🟡 VWAP BUY: ₹{entry:,.2f}",
+        annotation_position="bottom left",
+        row=1,
+        col=1,
+    )
+    fig.add_hline(
+        y=sl,
+        line_color="#FF5252",
+        line_width=1.6,
+        annotation_text=f"🛑 SL: ₹{sl:,.2f}",
+        annotation_position="bottom right",
+        row=1,
+        col=1,
+    )
+    fig.add_hline(
+        y=t1,
+        line_dash="dash",
+        line_color="#29B6F6",
+        line_width=1.4,
+        annotation_text=f"🎯 TARGET 1: ₹{t1:,.2f}",
+        annotation_position="top left",
+        row=1,
+        col=1,
+    )
+    fig.add_hline(
+        y=t2,
+        line_dash="dash",
+        line_color="#00E676",
+        line_width=1.4,
+        annotation_text=f"🚀 TARGET 2: ₹{t2:,.2f}",
+        annotation_position="top right",
+        row=1,
+        col=1,
+    )
+    fig.update_layout(
+        title=f"📊 {symbol} (5m) | 14D ATR: ₹{atr}",
+        template="plotly_dark",
+        height=520,
+        dragmode="pan",
+        hovermode="x unified",
+        showlegend=False,
+        margin=dict(l=10, r=65, t=40, b=30),
+        yaxis=dict(side="right", title="Price (₹)", showgrid=True),
+        yaxis2=dict(side="right", title="Volume", showgrid=False),
+        xaxis=dict(type="category", rangeslider_visible=False),
+        xaxis2=dict(type="category", rangeslider_visible=False, tickmode="auto", nticks=12),
+    )
+    return fig
 
 
 # ---------------------------------------------------------
 # 4. MAIN RENDER BLOCK
 # ---------------------------------------------------------
-with st.spinner(
-    "🎯 Scanning market-wide institutional alpha & anti-trap sniper bands..."
-):
-  df_sniper = fetch_institutional_sniper_picks()
+with st.spinner("🎯 Scanning market-wide intraday sniper setups..."):
+    df_sniper = fetch_institutional_sniper_picks()
 
 if df_sniper is None or df_sniper.empty:
-  st.warning(
-      "⚠️ No stocks currently meeting sniper confluence or fundamental quality"
-      " filters. Click 'Force Refresh Sniper Scans' above."
-  )
+    st.warning(
+        "⚠️ No stocks currently meet the sniper confluence filters. "
+        "Click **Force Refresh Sniper Scans** above."
+    )
 else:
-  st.subheader(
-      "🏆 Institutional Alpha Intraday Sniper Ranking (Quality Verified)"
-  )
+    st.subheader("🏆 Intraday Sniper Ranking (VWAP, 20 EMA & RVOL Filtered)")
+    for idx, row in df_sniper.head(3).iterrows():
+        with st.container():
+            c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
+            with c1:
+                st.markdown(f"### **#{idx+1} {row['Symbol']}**")
+                st.caption(f"📂 **Sector:** {row['Sector']}")
+                st.metric(
+                    label="Price",
+                    value=f"₹{row['LTP']:,.2f}",
+                    delta=f"+{row['Change']}% (Alpha: {row['Alpha_Score']} | RVOL: {row['RVOL']}x)",
+                )
+            with c2:
+                st.markdown("**Sniper Reference Levels**")
+                st.write(f"🟡 **VWAP Buy Zone:** ₹{row['VWAP_Buy']:,.2f}")
+                st.write(f"🛑 **Stop-Loss:** ₹{row['Stop_Loss']:,.2f}")
+            with c3:
+                st.markdown("**ATR Target Matrix**")
+                st.write(f"🎯 **Target 1:** ₹{row['Target_1']:,.2f}")
+                st.write(f"🚀 **Target 2:** ₹{row['Target_2']:,.2f}")
+            with c4:
+                st.markdown("**Plan Status**")
+                st.success("✅ **SNIPER BUY WATCH**")
+                if st.button(
+                    f"📋 Copy Sniper Payload ({row['Symbol']})", key=f"snip_{row['Symbol']}"
+                ):
+                    st.toast(
+                        f"Copied {row['Symbol']} ({row['Sector']})! VWAP Buy: "
+                        f"₹{row['VWAP_Buy']:,.2f} | T1: ₹{row['Target_1']:,.2f}"
+                    )
 
-  for idx, row in df_sniper.head(3).iterrows():
-    with st.container():
-      c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
+            with st.expander(
+                f"📈 Expand 5m Intraday Sniper Chart & Levels for #{idx+1} "
+                f"{row['Symbol']} ({row['Sector']})"
+            ):
+                fig = render_sniper_chart(
+                    row["Symbol"],
+                    row["DataFrame"],
+                    row["Volume_Colors"],
+                    row["VWAP_Buy"],
+                    row["Stop_Loss"],
+                    row["Target_1"],
+                    row["Target_2"],
+                    row["ATR"],
+                )
+                st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
-      with c1:
-        st.markdown(f"### **#{idx+1} {row['Symbol']}**")
-        st.caption(f"📂 **Sector:** {row['Sector']}")
-        st.metric(
-            label="Live LTP",
-            value=f"₹{row['LTP']}",
-            delta=(
-                f"+{row['Change']}% (Alpha: {row['Alpha_Score']} | RVOL:"
-                f" {row['RVOL']}x)"
-            ),
-        )
+            st.markdown("---")
 
-      with c2:
-        st.markdown("**Sniper Entry Levels**")
-        st.write(f"🟡 **VWAP Buy:** ₹{row['VWAP_Buy']}")
-        st.write(f"🛑 **Stop-Loss:** ₹{row['Stop_Loss']}")
-
-      with c3:
-        st.markdown("**ATR Target Matrix**")
-        st.write(f"🎯 **Target 1:** ₹{row['Target_1']}")
-        st.write(f"🚀 **Target 2:** ₹{row['Target_2']}")
-
-      with c4:
-        st.markdown("**Execution Status**")
-        st.success("✅ **VERIFIED NON-TRAP SNIPER BUY**")
-        if st.button(
-            f"📋 Copy Sniper Payload ({row['Symbol']})", key=f"snip_{row['Symbol']}"
-        ):
-          st.toast(
-              f"Copied {row['Symbol']} ({row['Sector']})! VWAP Buy:"
-              f" ₹{row['VWAP_Buy']} | T1: ₹{row['Target_1']}"
-          )
-
-      with st.expander(
-          f"📈 Expand 5m Intraday Sniper Chart & Levels for #{idx+1}"
-          f" {row['Symbol']} ({row['Sector']})"
-      ):
-        fig = render_sniper_chart(
-            row["Symbol"],
-            row["DataFrame"],
-            row["Volume_Colors"],
-            row["VWAP_Buy"],
-            row["Stop_Loss"],
-            row["Target_1"],
-            row["Target_2"],
-            row["ATR"],
-        )
-        st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
-
-    st.markdown("---")
+if auto_refresh:
+    time.sleep(60)
+    st.cache_data.clear()
+    st.rerun()
