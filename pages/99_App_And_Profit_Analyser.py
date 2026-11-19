@@ -82,6 +82,15 @@ CAP_BY_MODULE = {
 }
 
 
+def _color_outcome_row(row):
+    outcome = str(row.get("Outcome", ""))
+    if outcome == "Target_1_Hit":
+        return ["background-color: rgba(0, 200, 83, 0.22); color: #A5F3C5"] * len(row)
+    if outcome == "Stop_Loss_Hit":
+        return ["background-color: rgba(255, 82, 82, 0.24); color: #FFB4B4"] * len(row)
+    return ["background-color: rgba(255, 193, 7, 0.14); color: #FFE599"] * len(row)
+
+
 def audit_repo_files() -> pd.DataFrame:
     py_files = sorted(
         [p for p in REPO_ROOT.rglob("*.py") if ".git" not in p.parts and "__pycache__" not in p.parts]
@@ -221,6 +230,7 @@ def run_completeness_and_target_audit(t1_p: float, sl_p: float, min_move_p: floa
                         outcome = "Time_Exit"
 
                     sim_trades.append({
+                        "Source_Page": "App And Profit Analyser (99_App_And_Profit_Analyser.py)",
                         "Stock": clean,
                         "Outcome": outcome,
                         "R_Multiple": r_val,
@@ -357,6 +367,7 @@ with c4:
         st.rerun()
 
 st.subheader("⭐ Top Picks by View (Top 2 Highlighted + Exact Top-N Caps)")
+st.caption("Source Screen: App And Profit Analyser (`MODULE_PICKS` preset setups per view)")
 chosen_module = st.selectbox("Select View / Scanner", list(MODULE_PICKS.keys()), index=0)
 capped_picks = top_n_picks(MODULE_PICKS[chosen_module], CAP_BY_MODULE[chosen_module])
 top2_highlight = top_n_picks(capped_picks, 2)
@@ -466,6 +477,7 @@ else:
         )
 
 st.subheader("1️⃣ GitHub Repository & Page Health Audit")
+st.caption("Source Screen: App And Profit Analyser (`audit_repo_files` scanning repository `.py` files)")
 df_repo = audit_repo_files()
 if not df_repo.empty:
     st.dataframe(df_repo, use_container_width=True, hide_index=True)
@@ -474,6 +486,7 @@ with st.spinner("Checking live data completeness & simulating Target-1 vs. Stop-
     df_comp, df_sim = run_completeness_and_target_audit(t1_pct, sl_pct, min_chg_pct)
 
 st.subheader("2️⃣ Live Market Data Completeness Check")
+st.caption("Source Screen: App And Profit Analyser (`run_completeness_and_target_audit` on 5m `yfinance` bars)")
 if not df_comp.empty:
     ok_cnt = int((df_comp["Status"] == "✅ Complete").sum())
     st.metric("Complete Feeds", f"{ok_cnt} / {len(df_comp)} Stocks")
@@ -484,6 +497,7 @@ if not df_comp.empty:
     )
 
 st.subheader("3️⃣ Historical Target-1 vs. Stop-Loss Outcome Audit (Sample 5m Windows)")
+st.caption("Source Screen: App And Profit Analyser (`run_completeness_and_target_audit` 5m window simulation)")
 if not df_sim.empty:
     tot_s = len(df_sim)
     t1_h = int((df_sim["Outcome"] == "Target_1_Hit").sum())
@@ -497,3 +511,10 @@ if not df_sim.empty:
     k3.metric("Stop-Loss Hits", f"{sl_h} ({(sl_h / tot_s) * 100:.1f}%)")
     k4.metric("Time / Mixed Exits", f"{other_h}")
     k5.metric("Avg R-Multiple", f"{avg_r_all:+.2f}R")
+
+    st.markdown("**Color-Coded Sampled Outcome Breakdown**")
+    st.dataframe(
+        df_sim.style.apply(_color_outcome_row, axis=1).format({"R_Multiple": "{:+.2f}R"}),
+        use_container_width=True,
+        hide_index=True,
+    )
