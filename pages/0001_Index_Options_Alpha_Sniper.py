@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, time as dt_time
 import time
 import numpy as np
 import pandas as pd
@@ -16,6 +16,11 @@ st.set_page_config(
 
 ist = pytz.timezone("Asia/Kolkata")
 now_ist = datetime.now(ist)
+current_time = now_ist.time()
+is_market_open = (
+    now_ist.weekday() < 5
+    and dt_time(9, 15) <= current_time <= dt_time(15, 30)
+)
 
 # ---------------------------------------------------------
 # HEADER & TOP REFRESH BAR
@@ -24,9 +29,9 @@ head_col1, head_col2 = st.columns([3, 1])
 with head_col1:
     st.title("⚡ Index Options Alpha Sniper: Predictive Trend & Expiry Engine")
     st.markdown(
-        "**Expert Derivatives AI:** Combines multi-timeframe EMA structure, RSI momentum slope, "
-        "MACD acceleration, breakout trigger zones, and live NSE option chain OI to anticipate "
-        "Nifty trend shifts in advance."
+        "**Expert Derivatives Analyst Guide:** Combines multi-timeframe EMA structure, RSI momentum slope, "
+        "MACD acceleration, breakout trigger zones, and NSE option chain data to guide entries, "
+        "profit-booking, and risk control."
     )
 
 with head_col2:
@@ -39,7 +44,8 @@ with head_col2:
             st.rerun()
     with r_col2:
         auto_refresh = st.toggle("Auto (60s)", value=False)
-    st.caption(f"🕒 Last Sync: **{now_ist.strftime('%d %b %Y, %I:%M:%S %p IST')}**")
+    market_badge = "🟢 NSE Live Hours" if is_market_open else "🟡 Pre-Market / Closed"
+    st.caption(f"{market_badge} • Last Sync: **{now_ist.strftime('%d %b %Y, %I:%M:%S %p IST')}**")
 
 st.markdown("---")
 
@@ -335,6 +341,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
     if score >= 35:
         outlook = "STRONG UPTREND (HIGH CONVICTION)"
         action = "BUY CE (CALL OPTION)"
+        opt_type = "CE"
         trigger_note = (
             f"Breakout Confirmed above ₹{resistance_level:,.2f}"
             if spot_ltp >= resistance_level
@@ -344,6 +351,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
     elif 10 <= score < 35:
         outlook = "EARLY UPTREND / ACCUMULATION"
         action = "BUY CE ON DIPS (CALL OPTION)"
+        opt_type = "CE"
         trigger_note = (
             f"Watch Breakout Trigger: ₹{resistance_level:,.2f} "
             f"(Invalidated below ₹{support_level:,.2f})"
@@ -352,6 +360,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
     elif -35 < score <= -10:
         outlook = "EARLY DOWNTREND / DISTRIBUTION"
         action = "BUY PE ON RALLIES (PUT OPTION)"
+        opt_type = "PE"
         trigger_note = (
             f"Watch Breakdown Trigger: ₹{support_level:,.2f} "
             f"(Invalidated above ₹{resistance_level:,.2f})"
@@ -360,6 +369,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
     elif score <= -35:
         outlook = "STRONG DOWNTREND (HIGH CONVICTION)"
         action = "BUY PE (PUT OPTION)"
+        opt_type = "PE"
         trigger_note = (
             f"Breakdown Confirmed below ₹{support_level:,.2f}"
             if spot_ltp <= support_level
@@ -369,6 +379,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
     else:
         outlook = "SIDEWAYS / CHOPPY CONSOLIDATION"
         action = "WAIT FOR BREAKOUT (NO TRADE)"
+        opt_type = "WAIT"
         trigger_note = (
             f"Range-Bound: Buy CE > ₹{resistance_level:,.2f} | "
             f"Buy PE < ₹{support_level:,.2f}"
@@ -398,6 +409,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         "Signals": signals,
         "Outlook": outlook,
         "Action": action,
+        "OptType": opt_type,
         "Strike": rec_strike,
         "Resistance": resistance_level,
         "Support": support_level,
@@ -452,7 +464,64 @@ else:
     )
 
     # ---------------------------------------------------------
-    # 5. POSITION SIZING & EXECUTION LEVELS
+    # 5. EXPERT ANALYST PLAYBOOK (WHEN TO BUY & BOOK PROFIT)
+    # ---------------------------------------------------------
+    st.markdown("### 👨‍🏫 Expert Analyst Action Plan (Beginner Rules)")
+    pb1, pb2, pb3 = st.columns(3)
+
+    with pb1:
+        st.markdown("#### 1️⃣ When to Buy (Entry Rule)")
+        if not is_market_open:
+            st.write(
+                "• **Market is currently closed/pre-market.** Treat this as a **watch-only plan**, "
+                "not an instant buy at 9:15 AM.\n"
+                "• Wait for live candles after **9:15 AM IST** and click **🔄 Refresh Now**."
+            )
+        elif intel["OptType"] == "WAIT":
+            st.write(
+                "• **Do NOT buy yet.** Momentum score is neutral/choppy.\n"
+                f"• Wait for a clean spot move above **₹{intel['Resistance']:,.2f}** (for CE) "
+                f"or below **₹{intel['Support']:,.2f}** (for PE)."
+            )
+        elif intel["OptType"] == "PE":
+            st.write(
+                f"• Consider **{intel['Strike']} PE** only when spot shows weakness/rejection "
+                f"toward breakdown support **₹{intel['Support']:,.2f}**.\n"
+                f"• **Cancel/Invalidate** if Nifty breaks and holds above **₹{intel['Resistance']:,.2f}**.\n"
+                f"• **Hard Stop-Loss:** Exit immediately if premium drops to **₹{intel['SL']:,.2f}**."
+            )
+        else:
+            st.write(
+                f"• Consider **{intel['Strike']} CE** on pullbacks/strength while holding above "
+                f"support and moving toward resistance **₹{intel['Resistance']:,.2f}**.\n"
+                f"• **Cancel/Invalidate** if Nifty drops below **₹{intel['Support']:,.2f}**.\n"
+                f"• **Hard Stop-Loss:** Exit immediately if premium drops to **₹{intel['SL']:,.2f}**."
+            )
+
+    with pb2:
+        st.markdown("#### 2️⃣ When to Book Profit (Exit Rule)")
+        st.write(
+            f"• **Target 1 (+35% @ ₹{intel['T1']:,.2f}):** Book partial or full profit first—don't get greedy.\n"
+            f"• **Target 2 (+80% @ ₹{intel['T2']:,.2f}):** Only hold a small runner if momentum stays strong.\n"
+            "• **Early Profit Lock:** Book profit early if Nifty reaches a major resistance/support level, "
+            "if **RSI** turns sharply against your trade, or if **MACD** loses steam.\n"
+            "• **Time Rule:** Avoid holding risky weekly option buys into late-day time decay."
+        )
+
+    with pb3:
+        st.markdown("#### 3️⃣ Beginner Safety Guardrails")
+        st.write(
+            "• **1 Lot Discipline:** Start with **1 Lot (25 Qty)** while learning.\n"
+            "• **Never Average Down:** If a buy hits stop-loss, take the small loss and step back.\n"
+            "• **Check Data Source:** If PCR/Max Pain says *Fallback Est.*, verify live option chain "
+            "prices before placing real orders.\n"
+            "• **Not Financial Advice:** Use for education and disciplined risk planning."
+        )
+
+    st.markdown("---")
+
+    # ---------------------------------------------------------
+    # 6. POSITION SIZING & EXECUTION LEVELS
     # ---------------------------------------------------------
     total_investment = round(intel["Entry"] * selected_qty, 2)
     total_risk_amt = round((intel["Entry"] - intel["SL"]) * selected_qty, 2)
@@ -468,7 +537,7 @@ else:
     st.markdown("---")
 
     # ---------------------------------------------------------
-    # 6. PREDICTIVE MULTI-PANE CHART (PRICE + EMA RIBBON + RSI)
+    # 7. PREDICTIVE MULTI-PANE CHART (PRICE + EMA RIBBON + RSI)
     # ---------------------------------------------------------
     st.subheader(f"📊 Predictive Trend & Trigger Chart ({timeframe_choice})")
 
