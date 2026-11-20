@@ -1,4 +1,7 @@
 from datetime import datetime, time as dt_time
+import hashlib
+from pathlib import Path
+import sys
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -16,6 +19,87 @@ is_market_open = (
     now_ist.weekday() < 5
     and dt_time(9, 15) <= now_ist.time() <= dt_time(15, 30)
 )
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from utils.pick_ledger import record_picks as _ledger_record_picks
+except Exception:
+    _ledger_record_picks = None
+
+
+def _save_cnbc_picks_to_ledger(
+    picks: list[dict], module_label: str = "CNBC Top 20 Momentum"
+) -> int:
+    if not picks:
+        return 0
+    if callable(_ledger_record_picks):
+        try:
+            return int(_ledger_record_picks(module_label, picks))
+        except Exception:
+            pass
+
+    ledger_dir = REPO_ROOT / "data_ledger"
+    ledger_dir.mkdir(parents=True, exist_ok=True)
+    ledger_file = ledger_dir / "pick_click_ledger.csv"
+    cols = [
+        "pick_id",
+        "logged_at_ist",
+        "session_date",
+        "iso_week",
+        "module",
+        "symbol",
+        "side",
+        "entry_price",
+        "stop_loss",
+        "target_1",
+        "target_2",
+        "notes",
+    ]
+    ts_str = now_ist.strftime("%Y-%m-%d %H:%M:%S IST")
+    s_date = now_ist.strftime("%Y-%m-%d")
+    i_week = f"{now_ist.isocalendar().year}-W{now_ist.isocalendar().week:02d}"
+    bucket = now_ist.strftime("%Y-%m-%d %H:%M")
+
+    existing = pd.read_csv(ledger_file) if ledger_file.exists() else pd.DataFrame(columns=cols)
+    seen = set(existing["pick_id"].dropna().astype(str)) if not existing.empty else set()
+    new_rows = []
+    for p in picks:
+        sym = str(p["symbol"]).strip().upper()
+        if not sym.endswith(".NS"):
+            sym = f"{sym}.NS"
+        side = str(p.get("side", "BUY")).upper()
+        entry = float(p["entry"])
+        pid = hashlib.sha1(
+            f"{bucket}|{module_label}|{sym}|{side}|{entry:.4f}".encode("utf-8")
+        ).hexdigest()[:12]
+        if pid in seen:
+            continue
+        seen.add(pid)
+        new_rows.append({
+            "pick_id": pid,
+            "logged_at_ist": ts_str,
+            "session_date": s_date,
+            "iso_week": i_week,
+            "module": module_label,
+            "symbol": sym,
+            "side": side,
+            "entry_price": round(entry, 2),
+            "stop_loss": round(float(p["sl"]), 2),
+            "target_1": round(float(p["t1"]), 2),
+            "target_2": round(float(p["t2"]), 2),
+            "notes": str(p.get("notes", "")),
+        })
+    if not new_rows:
+        return 0
+    out = pd.concat([existing, pd.DataFrame(new_rows)], ignore_index=True).drop_duplicates(
+        subset=["pick_id"], keep="first"
+    )
+    out.to_csv(ledger_file, index=False)
+    return len(new_rows)
+
 
 st.title("📺 CNBC-Style 'Top 20' & Institutional Momentum Desk")
 st.markdown(
@@ -92,9 +176,12 @@ def _match_news_catalyst(symbol, change_pct, headlines):
     sym_upper = symbol.upper()
     for h in headlines:
         h_upper = h.upper()
-        if sym_upper in h_upper or (sym_upper == "SBIN" and "SBI" in h_upper) or (
-            sym_upper == "COALINDIA" and "COAL INDIA" in h_upper
-        ) or (sym_upper == "APOLLOHOSP" and "APOLLO" in h_upper):
+        if (
+            sym_upper in h_upper
+            or (sym_upper == "SBIN" and "SBI" in h_upper)
+            or (sym_upper == "COALINDIA" and "COAL INDIA" in h_upper)
+            or (sym_upper == "APOLLOHOSP" and "APOLLO" in h_upper)
+        ):
             short_h = h if len(h) <= 75 else h[:72] + "..."
             return f"📰 {short_h}"
     return "📈 Positive Momentum / Volume Surge" if change_pct >= 0 else "📉 Weak / Pullback Watch"
@@ -223,8 +310,32 @@ st.caption(
 )
 
 if df_cnbc.empty:
+    st.session_state.setdefault("live_scanner_picks", {})["CNBC Top 20 Momentum"] = []
     st.warning("No stocks matched the current filter criteria. Try lowering **Min Volume Surge Multiplier** in the sidebar.")
 else:
+    top3_cnbc = df_cnbc.head(3)
+    cnbc_payload = [
+        {
+            "symbol": r["Stock"],
+            "side": "BUY" if float(r["Change_%"]) >= 0 else "SHORT",
+            "entry": float(r["LTP"]),
+            "sl": float(r["Stop_Loss"]),
+            "t1": float(r["Target_1"]),
+            "t2": float(r["Target_2"]),
+            "notes": f"{scanning_universe} | Vol {r['Vol_Mult']}x | {r['Change_%']:+.2f}%",
+        }
+        for _, r in top3_cnbc.iterrows()
+    ]
+
+    # --- PUSH TOP 3 MOMENTUM PICKS TO ANALYSER SESSION STATE ---
+    st.session_state.setdefault("live_scanner_picks", {})[
+        "CNBC Top 20 Momentum"
+    ] = cnbc_payload
+
+    if st.button("📌 Log Top 3 Momentum Picks to History Ledger", type="primary"):
+        saved_c = _save_cnbc_picks_to_ledger(cnbc_payload, "CNBC Top 20 Momentum")
+        st.success(f"Recorded {saved_c} Top 3 momentum pick(s) to history ledger.")
+
     for _, row in df_cnbc.iterrows():
         stock_symbol = row["Stock"]
         chg = row["Change_%"]
