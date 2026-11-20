@@ -538,6 +538,11 @@ if not df_pulse.empty:
                     "notes": f"Smart Money Red #{idx_r + 1} | {r_row['Who & How (Footprint)']} | Flow ₹{r_row['Est. Flow (Cr)']:+.2f} Cr",
                 })
 
+    # --- PUSH SMART MONEY PICKS TO ANALYSER SESSION STATE ---
+    st.session_state.setdefault("live_scanner_picks", {})[
+        "Smart Money Top 2 Green & Red"
+    ] = sm_ledger_payload
+
     if sm_ledger_payload and st.button(
         "📌 Log Smart Money Top 2 Green & Red Picks to History Ledger", type="primary"
     ):
