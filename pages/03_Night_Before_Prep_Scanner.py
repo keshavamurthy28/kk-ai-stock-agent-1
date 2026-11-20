@@ -342,6 +342,11 @@ else:
                 "notes": f"{m_row['Smart Signal']} | Coil {m_row['Range_Ratio']:.2f}x | Flow ₹{m_row['Net Flow (Cr)']:+.2f} Cr",
             })
 
+        # --- PUSH TOP 2 MORNING PICKS TO ANALYSER SESSION STATE ---
+        st.session_state.setdefault("live_scanner_picks", {})[
+            "Night Before -> Morning Top 2"
+        ] = morning_payload
+
         if st.button("📌 Log Top 2 Morning Picks to History Ledger", type="primary"):
             saved_m = _save_morning_picks_to_ledger(morning_payload, "Night Before -> Morning Top 2")
             st.success(f"Recorded {saved_m} Top 2 morning pick(s) to history ledger.")
