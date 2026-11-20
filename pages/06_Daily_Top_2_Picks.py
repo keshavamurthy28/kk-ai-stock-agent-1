@@ -465,6 +465,7 @@ with st.spinner("Scanning live 5m intraday setups & daily long-term trends..."):
 # ---------------------------------------------------------
 st.subheader("🎯 Table 1: Same-Day Intraday Setups (Buy & Exit Today)")
 if df_intraday.empty:
+    st.session_state.setdefault("live_scanner_picks", {})["Daily Top 2"] = []
     st.info(
         "ℹ️ No stocks matched the same-day intraday filter right now. Try **Balanced** mode, "
         "click **Refresh Intraday & Long-Term**, or switch direction above."
@@ -519,6 +520,9 @@ else:
             "t2": float(row["Target_2_Stretch"]),
             "notes": f"{row['Entry_Zone']} | Vol {row['Vol_Pace']} | R:R {row['RR_T1']:.2f}x",
         })
+
+    # --- PUSH TOP 2 INTRADAY PICKS TO ANALYSER SESSION STATE ---
+    st.session_state.setdefault("live_scanner_picks", {})["Daily Top 2"] = top2_records
 
     if top2_records and st.button("📌 Log Top 2 Intraday Picks to History Ledger", type="primary"):
         saved_n = _save_top2_to_ledger(top2_records)
