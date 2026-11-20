@@ -8,7 +8,6 @@ import pytz
 import streamlit as st
 import yfinance as yf
 
-# Page Configuration
 st.set_page_config(
     page_title="Advance Night-Before Institutional Prep Scanner", layout="wide"
 )
@@ -43,18 +42,8 @@ def _save_morning_picks_to_ledger(picks: list[dict], module_label: str = "Night 
     ledger_dir.mkdir(parents=True, exist_ok=True)
     ledger_file = ledger_dir / "pick_click_ledger.csv"
     cols = [
-        "pick_id",
-        "logged_at_ist",
-        "session_date",
-        "iso_week",
-        "module",
-        "symbol",
-        "side",
-        "entry_price",
-        "stop_loss",
-        "target_1",
-        "target_2",
-        "notes",
+        "pick_id", "logged_at_ist", "session_date", "iso_week", "module",
+        "symbol", "side", "entry_price", "stop_loss", "target_1", "target_2", "notes",
     ]
     ts_str = now_ist.strftime("%Y-%m-%d %H:%M:%S IST")
     s_date = now_ist.strftime("%Y-%m-%d")
@@ -75,18 +64,10 @@ def _save_morning_picks_to_ledger(picks: list[dict], module_label: str = "Night 
             continue
         seen.add(pid)
         new_rows.append({
-            "pick_id": pid,
-            "logged_at_ist": ts_str,
-            "session_date": s_date,
-            "iso_week": i_week,
-            "module": module_label,
-            "symbol": sym,
-            "side": side,
-            "entry_price": round(entry, 2),
-            "stop_loss": round(float(p["sl"]), 2),
-            "target_1": round(float(p["t1"]), 2),
-            "target_2": round(float(p["t2"]), 2),
-            "notes": str(p.get("notes", "")),
+            "pick_id": pid, "logged_at_ist": ts_str, "session_date": s_date, "iso_week": i_week,
+            "module": module_label, "symbol": sym, "side": side, "entry_price": round(entry, 2),
+            "stop_loss": round(float(p["sl"]), 2), "target_1": round(float(p["t1"]), 2),
+            "target_2": round(float(p["t2"]), 2), "notes": str(p.get("notes", "")),
         })
     if not new_rows:
         return 0
@@ -99,14 +80,10 @@ def _save_morning_picks_to_ledger(picks: list[dict], module_label: str = "Night 
 
 st.title("🌙 Advance Night-Before Institutional Prep & Smart Money Coiling Watchlist")
 st.markdown(
-    "**Night-Before Prep Guide:** Scans daily candles for **tight price coiling** and "
-    "**estimated volume-weighted flow** after market hours so you can build a focused "
-    "watchlist for the next session."
+    "**Night-Before Prep Guide:** Scans daily candles for **trend-aligned price coiling** "
+    "(above 20 & 50 EMA) and **estimated volume-weighted flow** after market hours."
 )
 
-# ---------------------------------------------------------
-# 1. SCANNER CONTROLS & BEGINNER GUIDE
-# ---------------------------------------------------------
 col_c1, col_c2 = st.columns([3.5, 1.5])
 with col_c1:
     session_note = (
@@ -118,52 +95,32 @@ with col_c1:
 with col_c2:
     if st.button("🔄 Run Advance Smart Money Prep Scan", type="primary", use_container_width=True):
         st.cache_data.clear()
-        st.toast("Scanning Indian market for smart money accumulation & coiling...")
+        st.toast("Scanning Indian market for smart money accumulation & coiling...", icon="⚡")
         st.rerun()
 
-with st.expander("📘 Beginner Guide: How to Use Night-Before Prep Safely", expanded=False):
+with st.expander("📘 Advisor Guide: Using Night-Before Prep Without Over-Expectation", expanded=False):
     st.markdown(
-        "- **Tight Coiling (`Range_Ratio` ≤ 1.3x):** Price has been moving in a relatively narrow range compared to its recent 10-day average—often a sign of calm before a bigger move.\n"
-        "- **Net Flow (Cr):** An **estimate** from price change and volume—not an official exchange institutional report.\n"
-        "- **Advance Buy / SL / Targets:** Starter reference levels for learning and planning only. Always wait to see live price action after **9:15 AM IST**, start small, and use a stop-loss. Not financial advice."
+        "- **No 100% Guarantee:** Coiling setups help you prepare a clean list, not predict guaranteed wins.\n"
+        "- **Trend Filter:** In Strict mode, stocks must hold above their **20 EMA** and **50 EMA** with tight range coiling (`≤ 1.15x`).\n"
+        "- **Profit Booking:** Treat **Target 1 (+1.8%)** as your primary profit-booking milestone after live market confirmation."
     )
 
 SECTOR_MAPPING = {
     "Banking & Finance": [
-        "HDFCBANK.NS",
-        "ICICIBANK.NS",
-        "SBIN.NS",
-        "AXISBANK.NS",
-        "KOTAKBANK.NS",
-        "INDUSINDBK.NS",
-        "PNB.NS",
-        "CANBK.NS",
-        "MUTHOOTFIN.NS",
+        "HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "AXISBANK.NS", "KOTAKBANK.NS",
+        "INDUSINDBK.NS", "PNB.NS", "CANBK.NS", "MUTHOOTFIN.NS",
     ],
     "IT & Software": ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "TECHM.NS"],
     "Automobiles": ["MARUTI.NS", "BAJAJFINSV.NS", "M&M.NS"],
     "Energy & Oil": [
-        "RELIANCE.NS",
-        "ONGC.NS",
-        "NTPC.NS",
-        "POWERGRID.NS",
-        "COALINDIA.NS",
-        "ATGL.NS",
+        "RELIANCE.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS", "COALINDIA.NS", "ATGL.NS",
     ],
     "Metals & Mining": ["TATASTEEL.NS", "ADANIENT.NS"],
     "Consumer & Retail": [
-        "ITC.NS",
-        "HINDUNILVR.NS",
-        "TITAN.NS",
-        "ASIANPAINT.NS",
-        "ETERNAL.NS",
-        "HONASA.NS",
+        "ITC.NS", "HINDUNILVR.NS", "TITAN.NS", "ASIANPAINT.NS", "ETERNAL.NS", "HONASA.NS",
     ],
     "Infrastructure & Industrials": [
-        "LT.NS",
-        "ADANIPORTS.NS",
-        "GRASIM.NS",
-        "SUPREMEIND.NS",
+        "LT.NS", "ADANIPORTS.NS", "GRASIM.NS", "SUPREMEIND.NS",
     ],
     "Healthcare & Pharma": ["SUNPHARMA.NS", "MAXHEALTH.NS", "DEEPAKFERT.NS"],
     "Financial Services": ["BAJFINANCE.NS", "LICI.NS", "ANGELONE.NS"],
@@ -180,9 +137,6 @@ def _extract_ticker_df(raw_df, ticker):
     return raw_df.dropna(how="all")
 
 
-# ---------------------------------------------------------
-# 2. MARKET-WIDE PRE-BREAKOUT + SECTOR SCANNER
-# ---------------------------------------------------------
 @st.cache_data(ttl=3600)
 def run_advance_night_prep(strict_coil_mode=True):
     watchlist_rows = []
@@ -192,16 +146,16 @@ def run_advance_night_prep(strict_coil_mode=True):
     all_symbols = sorted(list(universe_map.keys()))
 
     raw = yf.download(
-        all_symbols, period="30d", interval="1d", group_by="ticker", progress=False
+        all_symbols, period="3mo", interval="1d", group_by="ticker", progress=False, auto_adjust=True
     )
 
     max_coil = 1.15 if strict_coil_mode else 1.30
-    min_vol_ratio = 0.80 if strict_coil_mode else 0.60
+    min_vol_ratio = 0.85 if strict_coil_mode else 0.60
 
     for symbol, sector in universe_map.items():
         try:
             df = _extract_ticker_df(raw, symbol).dropna(subset=["Close", "High", "Low"])
-            if df is None or df.empty or len(df) < 20:
+            if df is None or df.empty or len(df) < 50:
                 continue
 
             df = df.copy()
@@ -215,11 +169,13 @@ def run_advance_night_prep(strict_coil_mode=True):
 
             close_price = float(df["Close"].iloc[-1])
             prev_close = float(df["Close"].iloc[-2])
+            ema20 = float(df["Close"].ewm(span=20, adjust=False).mean().iloc[-1])
+            ema50 = float(df["Close"].ewm(span=50, adjust=False).mean().iloc[-1])
 
             if (
                 prev_close == 0
                 or avg_range <= 0
-                or any(np.isnan(x) for x in [close_price, prev_close, avg_range, recent_range])
+                or any(np.isnan(x) for x in [close_price, prev_close, avg_range, recent_range, ema20, ema50])
             ):
                 continue
 
@@ -229,21 +185,22 @@ def run_advance_night_prep(strict_coil_mode=True):
             net_flow_cr = round(turnover_cr * (change_pct / 100) * vol_ratio, 2)
 
             range_ratio = round(recent_range / avg_range, 2)
+            trend_ok = (close_price > ema20 > ema50) if strict_coil_mode else (close_price >= ema50 * 0.98)
             is_tight_coil = range_ratio <= max_coil
             is_volume_steady = vol_ratio >= min_vol_ratio
             flow_ok = (net_flow_cr > 0) if strict_coil_mode else True
 
-            if is_tight_coil and is_volume_steady and flow_ok:
+            if is_tight_coil and is_volume_steady and flow_ok and trend_ok:
                 smart_signal = (
-                    "🟢 Smart Inflow (Accumulation)"
+                    "🟢 Smart Inflow + Trend Aligned"
                     if net_flow_cr > 0
                     else "🟡 Coiling / Neutral"
                 )
 
-                advance_buy = round(close_price * 0.996, 2)
-                stop_loss = round(close_price * 0.980, 2)
-                target_1 = round(close_price * 1.022, 2)
-                target_2 = round(close_price * 1.042, 2)
+                advance_buy = round(close_price * 0.994, 2)
+                stop_loss = round(close_price * 0.982, 2)
+                target_1 = round(close_price * 1.018, 2)
+                target_2 = round(close_price * 1.035, 2)
 
                 watchlist_rows.append({
                     "Symbol": symbol.replace(".NS", ""),
@@ -265,29 +222,17 @@ def run_advance_night_prep(strict_coil_mode=True):
     if not df_res.empty:
         df_res = df_res.sort_values(by="Net Flow (Cr)", ascending=False).reset_index(drop=True)
         df_res = df_res[[
-            "Symbol",
-            "Sector",
-            "Close",
-            "Change_%",
-            "Net Flow (Cr)",
-            "Smart Signal",
-            "Advance_Buy",
-            "Stop_Loss",
-            "Target_1",
-            "Target_2",
-            "Range_Ratio",
+            "Symbol", "Sector", "Close", "Change_%", "Net Flow (Cr)",
+            "Smart Signal", "Advance_Buy", "Stop_Loss", "Target_1", "Target_2", "Range_Ratio",
         ]]
     return df_res
 
 
-# ---------------------------------------------------------
-# 3. RENDER ADVANCE PREP TABLE WITH TOP 2 MORNING PICKS & FILTERS
-# ---------------------------------------------------------
 f_col1, f_col2, f_col3 = st.columns([1.4, 1.3, 1.3])
 with f_col1:
     prep_mode = st.selectbox(
         "🛡️ Coil Quality Mode:",
-        ["Strict (Coil ≤ 1.15x & +Flow)", "Standard (Coil ≤ 1.30x)"],
+        ["Strict (EMA Stack, Coil ≤ 1.15x & +Flow)", "Standard (Coil ≤ 1.30x)"],
         index=0,
     )
 
@@ -297,7 +242,8 @@ if df_prep is not None and not df_prep.empty:
     st.session_state["night_before_watchlist"] = df_prep["Symbol"].tolist()
 
 if df_prep is None or df_prep.empty:
-    st.warning("⚠️ No tight accumulation coils detected under current mode. Try **Standard** or click **Run Advance Smart Money Prep Scan**.")
+    st.session_state.setdefault("live_scanner_picks", {})["Night Before -> Morning Top 2"] = []
+    st.warning("⚠️ No trend-aligned accumulation coils detected under current mode. Try **Standard** or click **Run Advance Smart Money Prep Scan**.")
 else:
     with f_col2:
         all_sectors = ["All Sectors"] + sorted(df_prep["Sector"].unique().tolist())
@@ -318,8 +264,8 @@ else:
 
     if df_filtered.empty:
         st.info("No matching stocks for this filter combination. Try switching back to **All Setups** or **All Sectors**.")
+        st.session_state.setdefault("live_scanner_picks", {})["Night Before -> Morning Top 2"] = []
     else:
-        # Dedicated Top 2 Morning Picks Highlight Strip at the Top
         st.subheader("🌅 Top 2 Morning Picks (Highlighted Separately for Next Session)")
         top2_morning = df_filtered.head(2)
         m_cols = st.columns(len(top2_morning))
@@ -342,10 +288,7 @@ else:
                 "notes": f"{m_row['Smart Signal']} | Coil {m_row['Range_Ratio']:.2f}x | Flow ₹{m_row['Net Flow (Cr)']:+.2f} Cr",
             })
 
-        # --- PUSH TOP 2 MORNING PICKS TO ANALYSER SESSION STATE ---
-        st.session_state.setdefault("live_scanner_picks", {})[
-            "Night Before -> Morning Top 2"
-        ] = morning_payload
+        st.session_state.setdefault("live_scanner_picks", {})["Night Before -> Morning Top 2"] = morning_payload
 
         if st.button("📌 Log Top 2 Morning Picks to History Ledger", type="primary"):
             saved_m = _save_morning_picks_to_ledger(morning_payload, "Night Before -> Morning Top 2")
@@ -355,14 +298,9 @@ else:
         st.subheader("🎯 Smart Money Pre-Market Setups Connected with Sector Flows")
         st.dataframe(
             df_filtered.style.format({
-                "Close": "₹{:,.2f}",
-                "Change_%": "{:+.2f}%",
-                "Net Flow (Cr)": "₹{:,.2f} Cr",
-                "Advance_Buy": "₹{:,.2f}",
-                "Stop_Loss": "₹{:,.2f}",
-                "Target_1": "₹{:,.2f}",
-                "Target_2": "₹{:,.2f}",
-                "Range_Ratio": "{:.2f}x",
+                "Close": "₹{:,.2f}", "Change_%": "{:+.2f}%", "Net Flow (Cr)": "₹{:,.2f} Cr",
+                "Advance_Buy": "₹{:,.2f}", "Stop_Loss": "₹{:,.2f}", "Target_1": "₹{:,.2f}",
+                "Target_2": "₹{:,.2f}", "Range_Ratio": "{:.2f}x",
             }),
             use_container_width=True,
             hide_index=True,
@@ -370,11 +308,9 @@ else:
 
         st.markdown("---")
         st.subheader("📋 Detailed Sector-Connected Execution Blueprints (Top 5)")
-
         for _, row in df_filtered.head(5).iterrows():
             with st.container():
                 c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
-
                 with c1:
                     st.markdown(f"### **{row['Symbol']}**")
                     st.caption(f"📂 **Sector:** {row['Sector']}")
@@ -383,26 +319,20 @@ else:
                         value=f"₹{row['Close']:,.2f}",
                         delta=f"Net Flow: ₹{row['Net Flow (Cr)']:+.2f} Cr",
                     )
-
                 with c2:
                     st.markdown("**Reference Entry & Risk**")
                     st.write(f"🔹 **Watch Buy Near:** ₹{row['Advance_Buy']:,.2f}")
                     st.write(f"🛑 **Stop-Loss:** ₹{row['Stop_Loss']:,.2f}")
-
                 with c3:
                     st.markdown("**Reference Targets**")
-                    st.write(f"🎯 **Target 1 (+2.2%):** ₹{row['Target_1']:,.2f}")
-                    st.write(f"🚀 **Target 2 (+4.2%):** ₹{row['Target_2']:,.2f}")
-
+                    st.write(f"🎯 **Target 1 (+1.8%):** ₹{row['Target_1']:,.2f}")
+                    st.write(f"🚀 **Target 2 (+3.5%):** ₹{row['Target_2']:,.2f}")
                 with c4:
                     st.markdown("**Action Plan**")
                     st.success(f"✅ **{row['Smart Signal']}**")
-                    if st.button(
-                        f"📋 Copy Payload ({row['Symbol']})", key=f"adv_{row['Symbol']}"
-                    ):
+                    if st.button(f"📋 Copy Payload ({row['Symbol']})", key=f"adv_{row['Symbol']}"):
                         st.toast(
                             f"Copied {row['Symbol']} ({row['Sector']}) plan! Watch: "
                             f"₹{row['Advance_Buy']:,.2f} | SL: ₹{row['Stop_Loss']:,.2f} | T1: ₹{row['Target_1']:,.2f}"
                         )
-
             st.markdown("---")
