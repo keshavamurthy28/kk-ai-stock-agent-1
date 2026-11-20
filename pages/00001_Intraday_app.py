@@ -299,6 +299,32 @@ if df_scans.empty:
 
 filtered_df = df_scans[df_scans["Score"] >= min_score].copy()
 
+# --- PUSH TOP LIVE PICKS TO ANALYSER SESSION STATE ---
+live_candidates = (
+    df_scans[df_scans["Signal"] == "BUY"]
+    .sort_values(by=["Score", "Vol x"], ascending=False)
+    .head(5)
+)
+pushed_picks = []
+for _, r in live_candidates.iterrows():
+  entry_px = float(r["LTP (₹)"])
+  sl_px = float(r["Stoploss"])
+  t1_px = float(r["Target"])
+  t2_px = round(entry_px + ((t1_px - entry_px) * 1.5), 2)
+  pushed_picks.append({
+      "symbol": f"{r['Symbol']}.NS",
+      "side": "BUY",
+      "entry": entry_px,
+      "sl": sl_px,
+      "t1": t1_px,
+      "t2": t2_px,
+      "notes": f"Score {int(r['Score'])}/5 | Vol {r['Vol x']}x | {candle_duration}",
+  })
+
+st.session_state.setdefault("live_scanner_picks", {})[
+    "Intraday NSE Engine Top Picks"
+] = pushed_picks
+
 # --- TABS LAYOUT ---
 tab_scan, tab_top3, tab_chart = st.tabs([
     "🔍 Live Instant Scanner",
