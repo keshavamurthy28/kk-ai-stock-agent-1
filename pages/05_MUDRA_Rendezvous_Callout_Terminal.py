@@ -307,6 +307,11 @@ if not rank_df.empty:
             "notes": f"MUDRA #{r5['Rank']} | {r5['Catalyst_Reason']}",
         })
 
+    # --- PUSH MUDRA TOP 5 PICKS TO ANALYSER SESSION STATE ---
+    st.session_state.setdefault("live_scanner_picks", {})[
+        "MUDRA Top 5"
+    ] = mudra_payload
+
     if st.button("📌 Log MUDRA Top 5 Picks to History Ledger", type="primary"):
         saved_5 = _save_mudra_picks_to_ledger(mudra_payload, "MUDRA Top 5")
         st.success(f"Recorded {saved_5} MUDRA Top 5 pick(s) to history ledger.")
@@ -349,6 +354,7 @@ if not rank_df.empty:
     else:
         selected_sym = rank_df.iloc[0]["Stock"]
 else:
+    st.session_state.setdefault("live_scanner_picks", {})["MUDRA Top 5"] = []
     st.warning("No stocks matched the current filter. Try **Standard (All Universe)** or click **Refresh Live Scans**.")
 
 st.markdown("---")
