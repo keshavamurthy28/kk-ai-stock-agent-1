@@ -453,6 +453,11 @@ if df_sectors is not None and not df_sectors.empty and df_stocks is not None and
                     "notes": f"Sector Rotation Red #{idx_sr + 1} ({sr_row['Sector']}) | RS {sr_row['RS vs Nifty %']:+.2f}%",
                 })
 
+    # --- PUSH SECTOR ROTATION PICKS TO ANALYSER SESSION STATE ---
+    st.session_state.setdefault("live_scanner_picks", {})[
+        "Sector Rotation Top 2 Green & Red"
+    ] = sec_ledger_payload
+
     if sec_ledger_payload and st.button(
         "📌 Log Sector Rotation Top 2 Green & Red Picks to History Ledger", type="primary"
     ):
