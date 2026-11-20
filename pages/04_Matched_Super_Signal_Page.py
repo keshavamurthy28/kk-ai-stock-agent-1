@@ -100,9 +100,8 @@ def _save_super_picks_to_ledger(
 
 st.title("🎯 Live Intraday Super-Signal & Night-Before Trigger Engine")
 st.markdown(
-    "Cross-checks NSE breakouts against your **Night Before Prep Watchlist**. "
-    "🟢 **Emerald Green** rows were lined up beforehand and have **triggered**; "
-    "🔵 **Electric Blue** rows are **fresh breakouts**."
+    "Filters NSE momentum setups for **trend alignment**, **anti-chase entry zones**, "
+    "and **realistic profit-booking targets (T1 & T2)**—plus cross-checks your **Night Before Prep Watchlist**."
 )
 
 status_label = (
@@ -112,135 +111,52 @@ status_label = (
 )
 st.caption(f"{status_label} • Synced: **{now_ist.strftime('%d %b %Y, %I:%M:%S %p IST')}**")
 
-with st.expander("📘 Beginner Guide: How to Read Breakout Signals & Book Profit Safely", expanded=False):
+with st.expander("📘 Advisor Profit-Booking & Risk Discipline", expanded=False):
     st.markdown(
-        "- **🟢 Night-Before Triggered vs. 🔵 Fresh Breakout:** Night-before matched stocks had cleaner trend alignment beforehand; fresh breakouts are sudden momentum moves.\n"
-        "- **When to Buy:** Only after market hours begin (**9:15 AM IST**) when price holds constructively near **Watch Buy / LTP** and volume (`RVOL`) is active—never chase blindly at the open.\n"
-        "- **When to Book Profit:** Consider booking partial or full profit near **Target 1 (1.5R)** first rather than waiting blindly for **Target 2 (2.8R)**, and book early if momentum stalls.\n"
-        "- **Strict Stop-Loss:** If price drops to **Stop-Loss**, exit and accept the small planned loss—never average down. Not financial advice."
+        "- **No 100% Guarantee:** Even high-score breakouts can fail; treat every signal as a probability setup with a defined exit.\n"
+        "- **Avoid Chasing:** `Watch_Buy` sits slightly below/near LTP (`~0.8%` pullback buffer) and filters out stocks already extended > 4.5%.\n"
+        "- **Profit Booking Plan:** Book **50%–70% at Target 1 (1.5R)** to lock gains, move SL to breakeven/cost once 1.0R is cleared, and trail the rest toward **Target 2 (2.2R)**."
     )
 
-# Clean Stock-to-Sector Mapping Dictionary (no duplicate keys)
 STOCK_SECTOR_MAP = {
-    "BELRISE": "Automobiles",
-    "DEEPAKFERT": "Chemicals",
-    "ATHERENERG": "Automobiles",
-    "ITC": "FMCG",
-    "BHARTIARTL": "Telecommunications",
-    "PNB": "Banking & Finance",
-    "KALYANKJIL": "Consumer Durables",
-    "SBIN": "Banking & Finance",
-    "HDFCBANK": "Banking & Finance",
-    "ICICIBANK": "Banking & Finance",
-    "EICHERMOT": "Automobiles",
-    "BSE": "Financial Services",
-    "HINDALCO": "Metals & Mining",
-    "TDPOWERSYS": "Capital Goods",
-    "ABB": "General Industrials",
-    "V2RETAIL": "Retailing",
-    "KAYNES": "Hardware Technology",
-    "RELIANCE": "Energy & Oil",
-    "TCS": "Software & Services",
-    "INFY": "Software & Services",
-    "AXISBANK": "Banking & Finance",
-    "BAJFINANCE": "Banking & Finance",
-    "TATAMOTORS": "Automobiles",
-    "SUNPHARMA": "Healthcare",
-    "MARUTI": "Automobiles",
-    "NTPC": "Energy & Oil",
-    "POWERGRID": "Energy & Oil",
-    "M&M": "Automobiles",
-    "TATASTEEL": "Metals & Mining",
-    "HAL": "Defense & Aerospace",
-    "BEL": "Defense & Aerospace",
-    "TRENT": "Retailing",
-    "ZOMATO": "Retailing",
-    "BANKBARODA": "Banking & Finance",
-    "CANBK": "Banking & Finance",
-    "JINDALPOLY": "Packaging",
-    "FINCABLES": "Hardware Technology",
-    "AMBER": "Consumer Durables",
-    "MSTCLTD": "Commercial Services",
-    "POWERINDIA": "Utilities",
-    "HONASA": "FMCG",
-    "GLAND": "Healthcare",
-    "MANKIND": "Healthcare",
-    "DIVISLAB": "Healthcare",
-    "WOCKPHARMA": "Healthcare",
-    "INDUSTOWER": "Telecom Services",
-    "HINDCOPPER": "Metals & Mining",
-    "DATAPATTNS": "Defense & Aerospace",
-    "DIXON": "Consumer Durables",
-    "POLYCAB": "Hardware Technology",
-    "KEI": "Hardware Technology",
-    "PFC": "Financial Services",
-    "RECLTD": "Financial Services",
-    "IRFC": "Financial Services",
-    "RVNL": "Transportation",
-    "MAZDOCK": "Defense & Aerospace",
-    "COCHINSHIP": "Defense & Aerospace",
-    "GRSE": "Defense & Aerospace",
-    "BDL": "Defense & Aerospace",
-    "SUZLON": "Utilities",
-    "IREDA": "Utilities",
-    "HUDCO": "Realty",
-    "NBCC": "Cement & Construction",
-    "SJVN": "Utilities",
-    "NHPC": "Utilities",
-    "BHEL": "Capital Goods",
-    "SAIL": "Metals & Mining",
-    "NMDC": "Metals & Mining",
-    "VEDL": "Metals & Mining",
-    "JSWSTEEL": "Metals & Mining",
-    "JINDALSTEL": "Metals & Mining",
-    "ADANIENT": "Diversified",
-    "ADANIPORTS": "Transportation",
-    "ADANIPOWER": "Utilities",
-    "TATAPOWER": "Utilities",
-    "JSWENERGY": "Utilities",
-    "CGPOWER": "Capital Goods",
-    "SIEMENS": "General Industrials",
-    "CUMMINSIND": "General Industrials",
-    "THERMAX": "Capital Goods",
-    "TRITURBINE": "Capital Goods",
-    "KPITTECH": "Software & Services",
-    "PERSISTENT": "Software & Services",
-    "COFORGE": "Software & Services",
-    "LTIM": "Software & Services",
-    "TECHM": "Software & Services",
-    "WIPRO": "Software & Services",
-    "HCLTECH": "Software & Services",
-    "NAUKRI": "Software & Services",
-    "PAYTM": "Financial Services",
-    "POLICYBZR": "Financial Services",
-    "ANGELONE": "Financial Services",
-    "CDSL": "Financial Services",
-    "MCX": "Financial Services",
-    "IEX": "Financial Services",
-    "TITAN": "Consumer Durables",
-    "DMART": "Retailing",
-    "VBL": "Food Beverages",
-    "GODREJCP": "FMCG",
-    "BRITANNIA": "FMCG",
-    "NESTLEIND": "FMCG",
-    "DABUR": "FMCG",
-    "MARICO": "FMCG",
-    "COLPAL": "FMCG",
-    "PIDILITIND": "Chemicals",
-    "ASIANPAINT": "Consumer Durables",
-    "BERGEPAINT": "Chemicals",
-    "ULTRACEMCO": "Cement & Construction",
-    "AMBUJACEM": "Cement & Construction",
-    "SHREECEM": "Cement & Construction",
-    "DLF": "Realty",
-    "GODREJPROP": "Realty",
-    "OBEROIRLTY": "Realty",
-    "PRESTIGE": "Realty",
-    "LODHA": "Realty",
-    "INDIGO": "Transportation",
-    "IRCTC": "Transportation",
-    "CONCOR": "Transportation",
-    "APOLLOHOSP": "Healthcare",
+    "BELRISE": "Automobiles", "DEEPAKFERT": "Chemicals", "ATHERENERG": "Automobiles",
+    "ITC": "FMCG", "BHARTIARTL": "Telecommunications", "PNB": "Banking & Finance",
+    "KALYANKJIL": "Consumer Durables", "SBIN": "Banking & Finance", "HDFCBANK": "Banking & Finance",
+    "ICICIBANK": "Banking & Finance", "EICHERMOT": "Automobiles", "BSE": "Financial Services",
+    "HINDALCO": "Metals & Mining", "TDPOWERSYS": "Capital Goods", "ABB": "General Industrials",
+    "V2RETAIL": "Retailing", "KAYNES": "Hardware Technology", "RELIANCE": "Energy & Oil",
+    "TCS": "Software & Services", "INFY": "Software & Services", "AXISBANK": "Banking & Finance",
+    "BAJFINANCE": "Banking & Finance", "TATAMOTORS": "Automobiles", "SUNPHARMA": "Healthcare",
+    "MARUTI": "Automobiles", "NTPC": "Energy & Oil", "POWERGRID": "Energy & Oil",
+    "M&M": "Automobiles", "TATASTEEL": "Metals & Mining", "HAL": "Defense & Aerospace",
+    "BEL": "Defense & Aerospace", "TRENT": "Retailing", "ZOMATO": "Retailing",
+    "BANKBARODA": "Banking & Finance", "CANBK": "Banking & Finance", "JINDALPOLY": "Packaging",
+    "FINCABLES": "Hardware Technology", "AMBER": "Consumer Durables", "MSTCLTD": "Commercial Services",
+    "POWERINDIA": "Utilities", "HONASA": "FMCG", "GLAND": "Healthcare", "MANKIND": "Healthcare",
+    "DIVISLAB": "Healthcare", "WOCKPHARMA": "Healthcare", "INDUSTOWER": "Telecom Services",
+    "HINDCOPPER": "Metals & Mining", "DATAPATTNS": "Defense & Aerospace", "DIXON": "Consumer Durables",
+    "POLYCAB": "Hardware Technology", "KEI": "Hardware Technology", "PFC": "Financial Services",
+    "RECLTD": "Financial Services", "IRFC": "Financial Services", "RVNL": "Transportation",
+    "MAZDOCK": "Defense & Aerospace", "COCHINSHIP": "Defense & Aerospace", "GRSE": "Defense & Aerospace",
+    "BDL": "Defense & Aerospace", "SUZLON": "Utilities", "IREDA": "Utilities", "HUDCO": "Realty",
+    "NBCC": "Cement & Construction", "SJVN": "Utilities", "NHPC": "Utilities", "BHEL": "Capital Goods",
+    "SAIL": "Metals & Mining", "NMDC": "Metals & Mining", "VEDL": "Metals & Mining",
+    "JSWSTEEL": "Metals & Mining", "JINDALSTEL": "Metals & Mining", "ADANIENT": "Diversified",
+    "ADANIPORTS": "Transportation", "ADANIPOWER": "Utilities", "TATAPOWER": "Utilities",
+    "JSWENERGY": "Utilities", "CGPOWER": "Capital Goods", "SIEMENS": "General Industrials",
+    "CUMMINSIND": "General Industrials", "THERMAX": "Capital Goods", "TRITURBINE": "Capital Goods",
+    "KPITTECH": "Software & Services", "PERSISTENT": "Software & Services", "COFORGE": "Software & Services",
+    "LTIM": "Software & Services", "TECHM": "Software & Services", "WIPRO": "Software & Services",
+    "HCLTECH": "Software & Services", "NAUKRI": "Software & Services", "PAYTM": "Financial Services",
+    "POLICYBZR": "Financial Services", "ANGELONE": "Financial Services", "CDSL": "Financial Services",
+    "MCX": "Financial Services", "IEX": "Financial Services", "TITAN": "Consumer Durables",
+    "DMART": "Retailing", "VBL": "Food Beverages", "GODREJCP": "FMCG", "BRITANNIA": "FMCG",
+    "NESTLEIND": "FMCG", "DABUR": "FMCG", "MARICO": "FMCG", "COLPAL": "FMCG",
+    "PIDILITIND": "Chemicals", "ASIANPAINT": "Consumer Durables", "BERGEPAINT": "Chemicals",
+    "ULTRACEMCO": "Cement & Construction", "AMBUJACEM": "Cement & Construction",
+    "SHREECEM": "Cement & Construction", "DLF": "Realty", "GODREJPROP": "Realty",
+    "OBEROIRLTY": "Realty", "PRESTIGE": "Realty", "LODHA": "Realty", "INDIGO": "Transportation",
+    "IRCTC": "Transportation", "CONCOR": "Transportation", "APOLLOHOSP": "Healthcare",
     "MAXHEALTH": "Healthcare",
 }
 
@@ -290,7 +206,7 @@ def scan_matched_super_signals(tickers, strict_mode=True):
         sym = f"{t}.NS"
         try:
             df = _extract_ticker_df(raw, sym, len(tickers)).dropna(subset=["Close", "Open", "High", "Low"])
-            if len(df) < 25:
+            if len(df) < 50:
                 continue
 
             ltp = float(df["Close"].iloc[-1])
@@ -316,17 +232,18 @@ def scan_matched_super_signals(tickers, strict_mode=True):
             if prev_c > ema20 > ema50 and -2.5 <= dist_prev <= 4.0:
                 auto_night_before.append(t)
 
-            near_day_high = (high_p - ltp) / max(high_p - low_p, 0.01) <= 0.35
-            min_pct = 1.4 if strict_mode else 1.2
-            min_rvol = 1.5 if strict_mode else 1.3
-            max_pct_cap = 6.5 if strict_mode else 15.0
+            near_day_high = (high_p - ltp) / max(high_p - low_p, 0.01) <= 0.38
+            trend_aligned = (ema20 >= ema50 * 0.995) if strict_mode else True
+            min_pct = 1.2 if strict_mode else 0.8
+            max_pct_cap = 4.5 if strict_mode else 12.0
+            min_rvol = 1.4 if strict_mode else 1.1
 
             if (
-                pct_chg >= min_pct
-                and pct_chg <= max_pct_cap
+                min_pct <= pct_chg <= max_pct_cap
                 and rvol >= min_rvol
                 and ltp > open_p
                 and ltp > ema20
+                and trend_aligned
                 and (not strict_mode or near_day_high)
             ):
                 broke_20d = ltp >= res_20d
@@ -334,17 +251,16 @@ def scan_matched_super_signals(tickers, strict_mode=True):
                     (pct_chg * 6)
                     + (min(rvol, 20.0) * 6)
                     + (20 if broke_20d else 0)
+                    + (12 if trend_aligned else 0)
                     + (10 if near_day_high else 0)
                 )
 
-                watch_buy = round(ltp * 0.996, 2)
-                raw_sl = round(max(low_p, prev_c * 0.99) * 0.995, 2)
-                # Cap max stop distance at ~2.8% below Watch Buy to avoid oversized stops on wide candles
-                sl = round(max(raw_sl, watch_buy * 0.972), 2)
-                sl = min(sl, round(watch_buy * 0.988, 2))
+                # Pullback-aware Watch Buy (avoids chasing top-of-candle spikes)
+                watch_buy = round(ltp * 0.992, 2)
+                sl = round(max(watch_buy * 0.978, min(watch_buy * 0.988, ema20 * 0.994)), 2)
                 risk = max(watch_buy - sl, watch_buy * 0.01)
                 t1 = round(watch_buy + (risk * 1.5), 2)
-                t2 = round(watch_buy + (risk * 2.8), 2)
+                t2 = round(watch_buy + (risk * 2.2), 2)
 
                 signals.append({
                     "Stock": t,
@@ -358,9 +274,9 @@ def scan_matched_super_signals(tickers, strict_mode=True):
                     "Target_1": t1,
                     "Target_2": t2,
                     "Catalyst_Reason": (
-                        f"20D Breakout + {rvol}x RVOL"
+                        f"20D Breakout + EMA20/50 Stack + {rvol}x RVOL"
                         if broke_20d
-                        else f"Intraday Drive (+{pct_chg}%) + {rvol}x RVOL"
+                        else f"Controlled Momentum (+{pct_chg}%) + {rvol}x RVOL"
                     ),
                     "Score": score,
                 })
@@ -376,7 +292,7 @@ ctrl1, ctrl2, ctrl3, ctrl4 = st.columns([1.9, 1.8, 1.2, 1.3])
 with ctrl1:
     filter_quality = st.selectbox(
         "🛡️ Signal Quality Mode:",
-        ["Strict (Near High, RVOL ≥ 1.5x, ≤6.5% Move)", "Standard Breakout"],
+        ["Strict (EMA Stack, RVOL ≥ 1.4x, ≤4.5% Move)", "Standard Breakout"],
         index=0,
     )
 with ctrl2:
@@ -403,12 +319,11 @@ session_nb = st.session_state.get("night_before_watchlist", [])
 nb_watchlist = set(session_nb) | set(computed_nb)
 
 if df_live.empty:
-    st.warning("No stocks currently meet the breakout + RVOL threshold. Try switching to **Standard Breakout** or clicking **Force Refresh Live Data**.")
+    st.session_state.setdefault("live_scanner_picks", {})["Matched Super Signal (Top 2)"] = []
+    st.warning("No stocks currently meet the refined trend + anti-chase threshold. Try **Standard Breakout** or click **Force Refresh Live Data**.")
 else:
     df_live["Night_Before_Match"] = df_live["Stock"].isin(nb_watchlist)
-    df_live["Final_Score"] = df_live["Score"] + np.where(
-        df_live["Night_Before_Match"], 40, 0
-    )
+    df_live["Final_Score"] = df_live["Score"] + np.where(df_live["Night_Before_Match"], 40, 0)
     df_live["Signal_Source"] = np.where(
         df_live["Night_Before_Match"],
         "🟢 NIGHT-BEFORE TRIGGERED",
@@ -417,10 +332,7 @@ else:
 
     df_live = df_live.sort_values(by="Final_Score", ascending=False).reset_index(drop=True)
     df_live.insert(0, "Rank", df_live.index + 1)
-
-    st.session_state["super_signal_confirmed"] = df_live[
-        df_live["Night_Before_Match"]
-    ]["Stock"].tolist()
+    st.session_state["super_signal_confirmed"] = df_live[df_live["Night_Before_Match"]]["Stock"].tolist()
 
     if source_filter == "🟢 Night-Before Triggered Only":
         df_shown = df_live[df_live["Night_Before_Match"]].reset_index(drop=True)
@@ -429,14 +341,11 @@ else:
     else:
         df_shown = df_live.copy()
 
-    # Dedicated Top 2 Highlight Strip at the Top
     st.subheader("⭐ Top 2 Highlighted Super Signals")
     top2_df = df_shown.head(2)
     if top2_df.empty:
         st.info("No signals in this filter slice.")
-        st.session_state.setdefault("live_scanner_picks", {})[
-            "Matched Super Signal (Top 2)"
-        ] = []
+        st.session_state.setdefault("live_scanner_picks", {})["Matched Super Signal (Top 2)"] = []
     else:
         st.session_state["matched_super_top2"] = top2_df["Stock"].tolist()
         t2_cols = st.columns(len(top2_df))
@@ -461,11 +370,7 @@ else:
             }
             for _, r in top2_df.iterrows()
         ]
-
-        # --- PUSH TOP 2 SUPER SIGNALS TO ANALYSER SESSION STATE ---
-        st.session_state.setdefault("live_scanner_picks", {})[
-            "Matched Super Signal (Top 2)"
-        ] = top2_payload
+        st.session_state.setdefault("live_scanner_picks", {})["Matched Super Signal (Top 2)"] = top2_payload
 
         if auto_log_top2:
             auto_saved = _save_super_picks_to_ledger(top2_payload, "Matched Super Signal (Top 2)")
@@ -478,43 +383,24 @@ else:
 
     def highlight_signal_source(row):
         if "NIGHT-BEFORE TRIGGERED" in str(row["Signal_Source"]):
-            return [
-                "background-color: rgba(0, 230, 118, 0.22); color: #E8F5E9; font-weight: 600"
-            ] * len(row)
+            return ["background-color: rgba(0, 230, 118, 0.22); color: #E8F5E9; font-weight: 600"] * len(row)
         return ["background-color: rgba(41, 182, 246, 0.14); color: #E1F5FE"] * len(row)
 
     display_cols = [
-        "Rank",
-        "Stock",
-        "Sector",
-        "Signal_Source",
-        "Action",
-        "LTP",
-        "Watch_Buy",
-        "Change_%",
-        "Volume_Surge",
-        "Stop_Loss",
-        "Target_1",
-        "Target_2",
-        "Catalyst_Reason",
+        "Rank", "Stock", "Sector", "Signal_Source", "Action", "LTP",
+        "Watch_Buy", "Change_%", "Volume_Surge", "Stop_Loss", "Target_1",
+        "Target_2", "Catalyst_Reason",
     ]
     styled_df = (
         df_shown[display_cols]
         .style.apply(highlight_signal_source, axis=1)
         .format({
-            "LTP": "₹{:.2f}",
-            "Watch_Buy": "₹{:.2f}",
-            "Change_%": "+{:.2f}%",
-            "Stop_Loss": "₹{:.2f}",
-            "Target_1": "₹{:.2f}",
-            "Target_2": "₹{:.2f}",
+            "LTP": "₹{:.2f}", "Watch_Buy": "₹{:.2f}", "Change_%": "+{:.2f}%",
+            "Stop_Loss": "₹{:.2f}", "Target_1": "₹{:.2f}", "Target_2": "₹{:.2f}",
         })
     )
 
-    st.markdown(
-        "🟢 **Emerald Green:** Night Before Prep Stock That Triggered  | "
-        " 🔵 **Electric Blue:** Fresh Breakout"
-    )
+    st.markdown("🟢 **Emerald Green:** Night Before Prep Stock That Triggered  |  🔵 **Electric Blue:** Fresh Breakout")
     st.subheader("🏆 Execution Ranking Table")
     st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
@@ -526,10 +412,10 @@ else:
             f"+{row['Change_%']}% — {row['Signal_Source']}"
         )
         c1, c2, c3, c4, c5 = st.columns([1.5, 1.5, 1.5, 1.5, 1.2])
-        c1.metric("Watch Buy (LTP)", f"₹{row['Watch_Buy']:,.2f}", f"LTP ₹{row['LTP']:,.2f}")
+        c1.metric("Watch Buy", f"₹{row['Watch_Buy']:,.2f}", f"LTP ₹{row['LTP']:,.2f}")
         c2.metric("Strict Stop-Loss", f"₹{row['Stop_Loss']:,.2f}")
         c3.metric("Target 1 (1.5R)", f"₹{row['Target_1']:,.2f}")
-        c4.metric("Target 2 (2.8R)", f"₹{row['Target_2']:,.2f}")
+        c4.metric("Target 2 (2.2R)", f"₹{row['Target_2']:,.2f}")
         with c5:
             st.write("")
             if st.button(f"📋 Copy {row['Stock']}", key=f"copy_ms_{row['Stock']}", use_container_width=True):
