@@ -433,6 +433,7 @@ with st.spinner("🔍 Scanning market for institutional bearish breakdown setups
     )
 
 if df_bearish is None or df_bearish.empty:
+    st.session_state.setdefault("live_scanner_picks", {})["Bearish Top 2"] = []
     st.warning(
         "⚠️ No stocks currently match bearish breakdown criteria. Try **Standard Bearish** "
         "or click **Force Refresh Bearish Scan** above."
@@ -462,6 +463,11 @@ else:
             "t2": float(b_row["Target_2"]),
             "notes": f"Bearish Top #{idx_b + 1} | Alpha {b_row['Alpha_Score']} | RVOL {b_row['RVOL']}x",
         })
+
+    # --- PUSH BEARISH TOP 2 PICKS TO ANALYSER SESSION STATE ---
+    st.session_state.setdefault("live_scanner_picks", {})[
+        "Bearish Top 2"
+    ] = bearish_payload
 
     if st.button("📌 Log Bearish Top 2 Picks to History Ledger", type="primary"):
         saved_2 = _save_bearish_picks_to_ledger(bearish_payload, "Bearish Top 2")
