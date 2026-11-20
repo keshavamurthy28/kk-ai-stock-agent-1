@@ -10,7 +10,6 @@ import pytz
 import streamlit as st
 import yfinance as yf
 
-# Page Configuration
 st.set_page_config(
     page_title="Bearish Alpha & SMC Short Terminal | Institutional Breakdown",
     layout="wide",
@@ -47,18 +46,8 @@ def _save_bearish_picks_to_ledger(picks: list[dict], module_label: str = "Bearis
     ledger_dir.mkdir(parents=True, exist_ok=True)
     ledger_file = ledger_dir / "pick_click_ledger.csv"
     cols = [
-        "pick_id",
-        "logged_at_ist",
-        "session_date",
-        "iso_week",
-        "module",
-        "symbol",
-        "side",
-        "entry_price",
-        "stop_loss",
-        "target_1",
-        "target_2",
-        "notes",
+        "pick_id", "logged_at_ist", "session_date", "iso_week", "module",
+        "symbol", "side", "entry_price", "stop_loss", "target_1", "target_2", "notes",
     ]
     ts_str = now_ist.strftime("%Y-%m-%d %H:%M:%S IST")
     s_date = now_ist.strftime("%Y-%m-%d")
@@ -79,18 +68,10 @@ def _save_bearish_picks_to_ledger(picks: list[dict], module_label: str = "Bearis
             continue
         seen.add(pid)
         new_rows.append({
-            "pick_id": pid,
-            "logged_at_ist": ts_str,
-            "session_date": s_date,
-            "iso_week": i_week,
-            "module": module_label,
-            "symbol": sym,
-            "side": side,
-            "entry_price": round(entry, 2),
-            "stop_loss": round(float(p["sl"]), 2),
-            "target_1": round(float(p["t1"]), 2),
-            "target_2": round(float(p["t2"]), 2),
-            "notes": str(p.get("notes", "")),
+            "pick_id": pid, "logged_at_ist": ts_str, "session_date": s_date, "iso_week": i_week,
+            "module": module_label, "symbol": sym, "side": side, "entry_price": round(entry, 2),
+            "stop_loss": round(float(p["sl"]), 2), "target_1": round(float(p["t1"]), 2),
+            "target_2": round(float(p["t2"]), 2), "notes": str(p.get("notes", "")),
         })
     if not new_rows:
         return 0
@@ -103,9 +84,9 @@ def _save_bearish_picks_to_ledger(picks: list[dict], module_label: str = "Bearis
 
 st.title("🎯 Institutional Alpha: Daily Top Bearish Intraday Setups (Shorts)")
 st.markdown(
-    "**Pure Same-Day Short Scanner:** Scans liquid NSE stocks for downward momentum, "
-    "price trading below **VWAP** and **20 EMA**, and volume participation (`RVOL`) so you "
-    "can plan intraday shorts and **square off (buy back) before 3:30 PM IST**."
+    "**Disciplined Same-Day Short Scanner:** Filters for bearish **VWAP & 20 EMA alignment**, "
+    "avoids chasing overextended drops, uses realistic short-squeeze stops, and sets **1.25R / 2.0R** "
+    "profit-booking targets before **3:30 PM IST**."
 )
 
 session_txt = (
@@ -115,21 +96,18 @@ session_txt = (
 )
 st.caption(f"{session_txt} • Synced: **{now_ist.strftime('%d %b %Y, %I:%M:%S %p IST')}**")
 
-with st.expander("📘 Beginner Rulebook: Intraday Shorting, Profit Booking & Square-Off", expanded=False):
+with st.expander("📘 Advisor Rulebook: Shorting, Squeeze Protection & Profit Booking", expanded=False):
     st.markdown(
-        "- **How Intraday Shorting Works:** You sell first and buy back later the **same day** before **3:30 PM IST**—if price rises instead of falling, a short loses money.\n"
-        "- **No Guaranteed Profit:** Even when a stock is below VWAP and 20 EMA, sudden reversals or short squeezes happen—always honor your **Stop Loss**.\n"
-        "- **Book Profit Early:** Consider booking partial or full profit near **Target 1** rather than waiting blindly for **Target 2**. Not financial advice."
+        "- **No 100% Guarantee:** Sharp bounces and short squeezes can reverse any intraday drop—always honor your **Stop Loss**.\n"
+        "- **Avoid Late Shorts:** Skipping drops already past `-3.2%` in Strict mode helps avoid selling right into a dead-cat bounce.\n"
+        "- **Book Profit Early:** Shorts get squeezed quickly—consider taking profits near **Target 1 (1.25R)** first."
     )
 
-# ---------------------------------------------------------
-# 1. LIVE CONTROL PANEL & REFRESH
-# ---------------------------------------------------------
 col_r1, col_r2, col_r3 = st.columns([2.4, 1.6, 1.0])
 with col_r2:
     bear_mode = st.selectbox(
         "🛡️ Short Anti-Squeeze Filter:",
-        ["Strict (RVOL ≥ 1.3x, -0.7% to -4.2% & R:R ≥ 1.25x)", "Standard Bearish"],
+        ["Strict (RVOL ≥ 1.3x, -0.8% to -3.2% & R:R ≥ 1.25x)", "Standard Bearish"],
         index=0,
     )
 with col_r3:
@@ -150,9 +128,6 @@ def _extract_ticker_df(raw_df, sym):
     return raw_df.dropna(how="all")
 
 
-# ---------------------------------------------------------
-# 2. WHOLE-MARKET BEARISH INSTITUTIONAL ALPHA SCANNER
-# ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def fetch_bearish_institutional_picks(strict_mode=True):
     market_universe = [
@@ -180,8 +155,8 @@ def fetch_bearish_institutional_picks(strict_mode=True):
         return pd.DataFrame()
 
     bearish_scored_stocks = []
-    min_drop = -4.2 if strict_mode else -5.5
-    max_drop = -0.7 if strict_mode else -0.5
+    min_drop = -3.2 if strict_mode else -5.5
+    max_drop = -0.8 if strict_mode else -0.5
     min_rvol_req = 1.30 if strict_mode else 1.10
 
     for symbol in market_universe:
@@ -189,16 +164,14 @@ def fetch_bearish_institutional_picks(strict_mode=True):
             df = _extract_ticker_df(raw, symbol).dropna(
                 subset=["Open", "High", "Low", "Close"]
             )
-            if df is None or df.empty or len(df) < 15:
+            if df is None or df.empty or len(df) < 20:
                 continue
 
             df = df.reset_index()
             df.rename(columns={df.columns[0]: "Time"}, inplace=True)
             df["Time"] = pd.to_datetime(df["Time"])
             if df["Time"].dt.tz is not None:
-                df["Time"] = (
-                    df["Time"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
-                )
+                df["Time"] = df["Time"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
 
             is_new_day = df["Time"].dt.date != df["Time"].dt.date.shift(1)
             df["Axis_Str"] = np.where(
@@ -223,9 +196,7 @@ def fetch_bearish_institutional_picks(strict_mode=True):
             df["Date"] = df["Time"].dt.date
             unique_dates = df["Date"].unique()
             if len(unique_dates) >= 2:
-                prev_close = float(
-                    df[df["Date"] == unique_dates[-2]]["Close"].iloc[-1]
-                )
+                prev_close = float(df[df["Date"] == unique_dates[-2]]["Close"].iloc[-1])
             else:
                 prev_close = float(df["Open"].iloc[0])
 
@@ -233,18 +204,19 @@ def fetch_bearish_institutional_picks(strict_mode=True):
                 continue
 
             change_pct = ((ltp - prev_close) / prev_close) * 100.0
-
             avg_vol = float(vol_series.iloc[-17:-2].mean()) if len(vol_series) >= 17 else 0.0
             curr_vol = float(vol_series.iloc[-2]) if len(vol_series) >= 2 and pd.notna(vol_series.iloc[-2]) else 0.0
             rvol = round(curr_vol / avg_vol, 2) if avg_vol > 0 and curr_vol > 0 else 1.0
 
             latest_vwap = float(df["VWAP"].iloc[-1])
             latest_ema = float(df["EMA20"].iloc[-1])
+            bear_stack = (latest_vwap <= latest_ema * 1.005) if strict_mode else True
 
             if (
                 min_drop <= change_pct <= max_drop
                 and ltp <= latest_vwap
                 and ltp <= latest_ema
+                and bear_stack
                 and rvol >= min_rvol_req
             ):
                 v_avg = vol_series.rolling(20, min_periods=1).mean()
@@ -265,19 +237,11 @@ def fetch_bearish_institutional_picks(strict_mode=True):
                     for o, c, v, va in zip(df["Open"], df["Close"], vol_series, v_avg)
                 ]
 
-                recent_swing_high = float(df["High"].tail(6).max())
-                limit_short = round(ltp * 1.003, 2)
-                stop_loss = round(
-                    min(
-                        max(latest_vwap * 1.005, recent_swing_high * 1.002),
-                        limit_short * 1.014,
-                    ),
-                    2,
-                )
-                stop_loss = max(stop_loss, round(limit_short * 1.006, 2))
-                risk_pts = max(stop_loss - limit_short, limit_short * 0.005)
-                target_1 = round(limit_short - (risk_pts * 1.5), 2)
-                target_2 = round(limit_short - (risk_pts * 2.5), 2)
+                limit_short = round(ltp * 1.004, 2)
+                stop_loss = round(min(limit_short * 1.015, max(limit_short * 1.008, latest_ema * 1.004)), 2)
+                risk_pts = max(stop_loss - limit_short, limit_short * 0.006)
+                target_1 = round(limit_short - (risk_pts * 1.25), 2)
+                target_2 = round(limit_short - (risk_pts * 2.0), 2)
 
                 rr_t1 = (limit_short - target_1) / max(stop_loss - limit_short, 1e-6)
                 if strict_mode and rr_t1 < 1.25:
@@ -303,145 +267,57 @@ def fetch_bearish_institutional_picks(strict_mode=True):
 
     df_res = pd.DataFrame(bearish_scored_stocks)
     if not df_res.empty:
-        df_res = df_res.sort_values(by="Alpha_Score", ascending=False).reset_index(
-            drop=True
-        )
+        df_res = df_res.sort_values(by="Alpha_Score", ascending=False).reset_index(drop=True)
     return df_res
 
 
-# ---------------------------------------------------------
-# 3. ADVANCED INSTITUTIONAL BEARISH PLOTTING ENGINE
-# ---------------------------------------------------------
 def render_bearish_chart(symbol, df, v_col, entry, sl, t1, t2):
     fig = make_subplots(
-        rows=2,
-        cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.02,
-        row_heights=[0.78, 0.22],
+        rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.02, row_heights=[0.78, 0.22]
     )
     fig.add_trace(
         go.Candlestick(
-            x=df["Axis_Str"],
-            open=df["Open"],
-            high=df["High"],
-            low=df["Low"],
-            close=df["Close"],
-            name=symbol,
-            increasing_line_color="#00E676",
-            decreasing_line_color="#FF5252",
+            x=df["Axis_Str"], open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
+            name=symbol, increasing_line_color="#00E676", decreasing_line_color="#FF5252",
         ),
-        row=1,
-        col=1,
+        row=1, col=1,
     )
     fig.add_trace(
-        go.Scatter(
-            x=df["Axis_Str"],
-            y=df["VWAP"],
-            mode="lines",
-            name="VWAP",
-            line=dict(color="#FFD700", width=1.5),
-        ),
-        row=1,
-        col=1,
+        go.Scatter(x=df["Axis_Str"], y=df["VWAP"], mode="lines", name="VWAP", line=dict(color="#FFD700", width=1.5)),
+        row=1, col=1,
     )
     fig.add_trace(
-        go.Scatter(
-            x=df["Axis_Str"],
-            y=df["EMA20"],
-            mode="lines",
-            name="20 EMA",
-            line=dict(color="#29B6F6", width=1.2),
-        ),
-        row=1,
-        col=1,
+        go.Scatter(x=df["Axis_Str"], y=df["EMA20"], mode="lines", name="20 EMA", line=dict(color="#29B6F6", width=1.2)),
+        row=1, col=1,
     )
     fig.add_trace(
-        go.Bar(
-            x=df["Axis_Str"],
-            y=df["Volume"],
-            name="Volume",
-            marker_color=v_col,
-        ),
-        row=2,
-        col=1,
+        go.Bar(x=df["Axis_Str"], y=df["Volume"], name="Volume", marker_color=v_col),
+        row=2, col=1,
     )
-
-    fig.add_hline(
-        y=entry,
-        line_color="#FFD700",
-        line_width=1.6,
-        annotation_text=f"🔻 SHORT ENTRY: ₹{entry:,.2f}",
-        annotation_position="bottom left",
-        row=1,
-        col=1,
-    )
-    fig.add_hline(
-        y=sl,
-        line_color="#FF5252",
-        line_width=1.6,
-        annotation_text=f"🛑 SL: ₹{sl:,.2f}",
-        annotation_position="top right",
-        row=1,
-        col=1,
-    )
-    fig.add_hline(
-        y=t1,
-        line_dash="dash",
-        line_color="#29B6F6",
-        line_width=1.4,
-        annotation_text=f"🎯 T1 (1.5R): ₹{t1:,.2f}",
-        annotation_position="bottom left",
-        row=1,
-        col=1,
-    )
-    fig.add_hline(
-        y=t2,
-        line_dash="dash",
-        line_color="#00E676",
-        line_width=1.4,
-        annotation_text=f"🚀 T2 (2.5R): ₹{t2:,.2f}",
-        annotation_position="bottom right",
-        row=1,
-        col=1,
-    )
-
+    fig.add_hline(y=entry, line_color="#FFD700", line_width=1.6, annotation_text=f"🔻 SHORT ENTRY: ₹{entry:,.2f}", annotation_position="bottom left", row=1, col=1)
+    fig.add_hline(y=sl, line_color="#FF5252", line_width=1.6, annotation_text=f"🛑 SL: ₹{sl:,.2f}", annotation_position="top right", row=1, col=1)
+    fig.add_hline(y=t1, line_dash="dash", line_color="#29B6F6", line_width=1.4, annotation_text=f"🎯 T1 (1.25R): ₹{t1:,.2f}", annotation_position="bottom left", row=1, col=1)
+    fig.add_hline(y=t2, line_dash="dash", line_color="#00E676", line_width=1.4, annotation_text=f"🚀 T2 (2.0R): ₹{t2:,.2f}", annotation_position="bottom right", row=1, col=1)
     fig.update_layout(
         title=f"📊 {symbol} (15m) | Institutional Bearish Breakdown Blueprint",
-        template="plotly_dark",
-        height=520,
-        dragmode="pan",
-        hovermode="x unified",
-        showlegend=False,
-        margin=dict(l=10, r=65, t=40, b=30),
+        template="plotly_dark", height=520, dragmode="pan", hovermode="x unified",
+        showlegend=False, margin=dict(l=10, r=65, t=40, b=30),
         yaxis=dict(side="right", title="Price (₹)", showgrid=True),
         yaxis2=dict(side="right", title="Volume", showgrid=False),
         xaxis=dict(type="category", rangeslider_visible=False),
-        xaxis2=dict(
-            type="category", rangeslider_visible=False, tickmode="auto", nticks=12
-        ),
+        xaxis2=dict(type="category", rangeslider_visible=False, tickmode="auto", nticks=12),
     )
     return fig
 
 
-# ---------------------------------------------------------
-# 4. MAIN EXECUTION RENDER BLOCK
-# ---------------------------------------------------------
 with st.spinner("🔍 Scanning market for institutional bearish breakdown setups..."):
-    df_bearish = fetch_bearish_institutional_picks(
-        strict_mode=bear_mode.startswith("Strict")
-    )
+    df_bearish = fetch_bearish_institutional_picks(strict_mode=bear_mode.startswith("Strict"))
 
 if df_bearish is None or df_bearish.empty:
     st.session_state.setdefault("live_scanner_picks", {})["Bearish Top 2"] = []
-    st.warning(
-        "⚠️ No stocks currently match bearish breakdown criteria. Try **Standard Bearish** "
-        "or click **Force Refresh Bearish Scan** above."
-    )
+    st.warning("⚠️ No stocks currently match refined bearish breakdown criteria. Try **Standard Bearish** or click **Force Refresh Bearish Scan**.")
 else:
     top2_bearish = df_bearish.head(2)
-
-    # Dedicated Bearish Top 2 Strip
     st.subheader("⭐ Bearish Top 2 Short Picks (Highlighted Separately)")
     b2_cols = st.columns(len(top2_bearish))
     bearish_payload = []
@@ -464,10 +340,7 @@ else:
             "notes": f"Bearish Top #{idx_b + 1} | Alpha {b_row['Alpha_Score']} | RVOL {b_row['RVOL']}x",
         })
 
-    # --- PUSH BEARISH TOP 2 PICKS TO ANALYSER SESSION STATE ---
-    st.session_state.setdefault("live_scanner_picks", {})[
-        "Bearish Top 2"
-    ] = bearish_payload
+    st.session_state.setdefault("live_scanner_picks", {})["Bearish Top 2"] = bearish_payload
 
     if st.button("📌 Log Bearish Top 2 Picks to History Ledger", type="primary"):
         saved_2 = _save_bearish_picks_to_ledger(bearish_payload, "Bearish Top 2")
@@ -475,57 +348,34 @@ else:
 
     st.markdown("---")
     st.subheader("🔥 Top Verified Bearish Institutional Picks (Same-Day Short Before 3:30 PM IST)")
-
     for idx, row in top2_bearish.iterrows():
         with st.container():
             c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
-
             with c1:
                 st.markdown(f"### **#{idx+1} {row['Symbol']}**")
                 st.metric(
                     label="Live LTP",
                     value=f"₹{row['LTP']:,.2f}",
-                    delta=(
-                        f"{row['Change']}% (Bearish Alpha: {row['Alpha_Score']} | RVOL:"
-                        f" {row['RVOL']}x)"
-                    ),
+                    delta=f"{row['Change']}% (Alpha: {row['Alpha_Score']} | RVOL: {row['RVOL']}x)",
                     delta_color="inverse",
                 )
-
             with c2:
                 st.markdown("**Precision Short Levels**")
                 st.write(f"🔻 **Short Entry:** ₹{row['Limit_Short']:,.2f}")
                 st.write(f"🛑 **Stop Loss:** ₹{row['Stop_Loss']:,.2f}")
-
             with c3:
                 st.markdown("**Profit Targets (Downside)**")
-                st.write(f"🎯 **Target 1 (1.5R):** ₹{row['Target_1']:,.2f}")
-                st.write(f"🚀 **Target 2 (2.5R):** ₹{row['Target_2']:,.2f}")
-
+                st.write(f"🎯 **Target 1 (1.25R):** ₹{row['Target_1']:,.2f}")
+                st.write(f"🚀 **Target 2 (2.0R):** ₹{row['Target_2']:,.2f}")
             with c4:
                 st.markdown("**Execution Status**")
                 st.error("🔴 **BEARISH INTRADAY — COVER BY 3:30 PM IST**")
-                if st.button(
-                    f"📋 Copy Short Payload ({row['Symbol']})",
-                    key=f"bear_{row['Symbol']}",
-                ):
-                    st.toast(
-                        f"Copied {row['Symbol']}! Short: ₹{row['Limit_Short']:,.2f} | T1:"
-                        f" ₹{row['Target_1']:,.2f}"
-                    )
-
-            with st.expander(
-                f"📈 Expand Chart & VWAP Breakdown Structure for #{idx+1} {row['Symbol']}"
-            ):
+                if st.button(f"📋 Copy Short Payload ({row['Symbol']})", key=f"bear_{row['Symbol']}"):
+                    st.toast(f"Copied {row['Symbol']}! Short: ₹{row['Limit_Short']:,.2f} | T1: ₹{row['Target_1']:,.2f}")
+            with st.expander(f"📈 Expand Chart & VWAP Breakdown Structure for #{idx+1} {row['Symbol']}"):
                 fig = render_bearish_chart(
-                    row["Symbol"],
-                    row["DataFrame"],
-                    row["Volume_Colors"],
-                    row["Limit_Short"],
-                    row["Stop_Loss"],
-                    row["Target_1"],
-                    row["Target_2"],
+                    row["Symbol"], row["DataFrame"], row["Volume_Colors"],
+                    row["Limit_Short"], row["Stop_Loss"], row["Target_1"], row["Target_2"],
                 )
                 st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
-
             st.markdown("---")
