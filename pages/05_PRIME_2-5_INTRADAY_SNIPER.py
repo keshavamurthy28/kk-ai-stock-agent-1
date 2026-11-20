@@ -494,6 +494,7 @@ with st.spinner("🎯 Scanning market-wide intraday sniper setups..."):
     )
 
 if df_sniper is None or df_sniper.empty:
+    st.session_state.setdefault("live_scanner_picks", {})["PRIME Top 3"] = []
     st.warning(
         "⚠️ No stocks currently meet the sniper confluence filters. "
         "Try **Standard Sniper** or click **Force Refresh Sniper Scans** above."
@@ -522,6 +523,11 @@ else:
             "t2": float(p_row["Target_2"]),
             "notes": f"PRIME #{idx_p + 1} | Alpha {p_row['Alpha_Score']} | RVOL {p_row['RVOL']}x",
         })
+
+    # --- PUSH PRIME TOP 3 PICKS TO ANALYSER SESSION STATE ---
+    st.session_state.setdefault("live_scanner_picks", {})[
+        "PRIME Top 3"
+    ] = prime_payload
 
     if st.button("📌 Log PRIME Top 3 Picks to History Ledger", type="primary"):
         saved_3 = _save_prime_picks_to_ledger(prime_payload, "PRIME Top 3")
