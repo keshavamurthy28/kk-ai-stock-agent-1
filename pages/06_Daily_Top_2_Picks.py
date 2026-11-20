@@ -45,18 +45,8 @@ def _save_top2_to_ledger(picks: list[dict]) -> int:
     ledger_dir.mkdir(parents=True, exist_ok=True)
     ledger_file = ledger_dir / "pick_click_ledger.csv"
     cols = [
-        "pick_id",
-        "logged_at_ist",
-        "session_date",
-        "iso_week",
-        "module",
-        "symbol",
-        "side",
-        "entry_price",
-        "stop_loss",
-        "target_1",
-        "target_2",
-        "notes",
+        "pick_id", "logged_at_ist", "session_date", "iso_week", "module",
+        "symbol", "side", "entry_price", "stop_loss", "target_1", "target_2", "notes",
     ]
     ts_str = now_ist.strftime("%Y-%m-%d %H:%M:%S IST")
     s_date = now_ist.strftime("%Y-%m-%d")
@@ -77,18 +67,10 @@ def _save_top2_to_ledger(picks: list[dict]) -> int:
             continue
         seen.add(pid)
         new_rows.append({
-            "pick_id": pid,
-            "logged_at_ist": ts_str,
-            "session_date": s_date,
-            "iso_week": i_week,
-            "module": "Daily Top 2",
-            "symbol": sym,
-            "side": side,
-            "entry_price": round(entry, 2),
-            "stop_loss": round(float(p["sl"]), 2),
-            "target_1": round(float(p["t1"]), 2),
-            "target_2": round(float(p["t2"]), 2),
-            "notes": str(p.get("notes", "")),
+            "pick_id": pid, "logged_at_ist": ts_str, "session_date": s_date, "iso_week": i_week,
+            "module": "Daily Top 2", "symbol": sym, "side": side, "entry_price": round(entry, 2),
+            "stop_loss": round(float(p["sl"]), 2), "target_1": round(float(p["t1"]), 2),
+            "target_2": round(float(p["t2"]), 2), "notes": str(p.get("notes", "")),
         })
     if not new_rows:
         return 0
@@ -126,43 +108,22 @@ with st.expander("📘 Beginner Rulebook: Same-Day Profit Booking & Risk Guardra
     )
 
 UNIVERSE = [
-    "RELIANCE.NS",
-    "TCS.NS",
-    "HDFCBANK.NS",
-    "ICICIBANK.NS",
-    "INFY.NS",
-    "SBIN.NS",
-    "ITC.NS",
-    "BHARTIARTL.NS",
-    "AXISBANK.NS",
-    "LT.NS",
-    "BAJFINANCE.NS",
-    "SUNPHARMA.NS",
-    "TITAN.NS",
-    "TATASTEEL.NS",
-    "NTPC.NS",
-    "ONGC.NS",
-    "VEDL.NS",
-    "HINDALCO.NS",
+    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS",
+    "SBIN.NS", "ITC.NS", "BHARTIARTL.NS", "AXISBANK.NS", "LT.NS",
+    "BAJFINANCE.NS", "SUNPHARMA.NS", "TITAN.NS", "TATASTEEL.NS", "NTPC.NS",
+    "ONGC.NS", "VEDL.NS", "HINDALCO.NS",
 ]
 
 col_f1, col_f2, col_f3, col_r1 = st.columns([2.2, 1.3, 1.5, 1.4])
 with col_f1:
     intraday_bias = st.selectbox(
         "🎯 Same-Day Intraday Direction:",
-        [
-            "Bullish Intraday (Buy Today / Sell Today)",
-            "Bearish Intraday (Short / Cover Today)",
-        ],
+        ["Bullish Intraday (Buy Today / Sell Today)", "Bearish Intraday (Short / Cover Today)"],
         index=0,
     )
 with col_f2:
     max_risk_inr = st.number_input(
-        "💰 Max Risk / Trade (₹)",
-        min_value=100.0,
-        max_value=100000.0,
-        value=500.0,
-        step=100.0,
+        "💰 Max Risk / Trade (₹)", min_value=100.0, max_value=100000.0, value=500.0, step=100.0,
     )
 with col_f3:
     quality_mode = st.selectbox(
@@ -188,12 +149,8 @@ def _extract_ticker_df(raw_df, sym):
     if raw_df is None or raw_df.empty:
         return pd.DataFrame()
     if isinstance(raw_df.columns, pd.MultiIndex):
-        lvl0 = raw_df.columns.get_level_values(0)
-        lvl1 = raw_df.columns.get_level_values(1)
-        if sym in lvl0:
+        if sym in raw_df.columns.get_level_values(0):
             return raw_df[sym].dropna(how="all")
-        if sym in lvl1:
-            return raw_df.xs(sym, axis=1, level=1).dropna(how="all")
         return pd.DataFrame()
     return raw_df.dropna(how="all")
 
@@ -205,104 +162,54 @@ def fetch_intraday_and_longterm_tables(direction_choice, risk_budget_inr, strict
     longterm_rows = []
 
     try:
-        raw_5m = yf.download(
-            UNIVERSE,
-            period="5d",
-            interval="5m",
-            group_by="ticker",
-            progress=False,
-            threads=True,
-            auto_adjust=True,
-        )
-        raw_1d = yf.download(
-            UNIVERSE,
-            period="3mo",
-            interval="1d",
-            group_by="ticker",
-            progress=False,
-            threads=True,
-            auto_adjust=True,
-        )
+        raw_5m = yf.download(UNIVERSE, period="5d", interval="5m", group_by="ticker", progress=False, auto_adjust=True)
+        raw_1d = yf.download(UNIVERSE, period="3mo", interval="1d", group_by="ticker", progress=False, auto_adjust=True)
     except Exception:
         return pd.DataFrame(), pd.DataFrame()
 
     for symbol in UNIVERSE:
         clean_sym = symbol.replace(".NS", "")
 
-        # --- 1. PURE SAME-DAY INTRADAY (5m + VWAP + Volatility & R:R Guardrails) ---
+        # 1. Intraday Scan (5m + VWAP)
         try:
-            df_5m = _extract_ticker_df(raw_5m, symbol).dropna(
-                subset=["Open", "High", "Low", "Close"]
-            )
+            df_5m = _extract_ticker_df(raw_5m, symbol).dropna(subset=["Open", "High", "Low", "Close"])
             if df_5m is not None and len(df_5m) >= 20:
                 df_5m = df_5m.copy()
                 df_5m.index = pd.to_datetime(df_5m.index)
                 if df_5m.index.tz is not None:
                     df_5m.index = df_5m.index.tz_convert("Asia/Kolkata").tz_localize(None)
 
-                today_dates = df_5m.index.date
-                latest_date = today_dates[-1]
+                latest_date = df_5m.index.date[-1]
                 df_today = df_5m[df_5m.index.date == latest_date]
                 prev_days = df_5m[df_5m.index.date < latest_date]
 
                 ltp_5m = float(df_5m["Close"].iloc[-1])
-                prev_close_ref = (
-                    float(prev_days["Close"].iloc[-1])
-                    if not prev_days.empty
-                    else float(df_today["Open"].iloc[0])
-                )
+                prev_close_ref = float(prev_days["Close"].iloc[-1]) if not prev_days.empty else float(df_today["Open"].iloc[0])
 
-                vol_s = (
-                    df_today["Volume"]
-                    if "Volume" in df_today and df_today["Volume"].sum() > 0
-                    else None
-                )
+                vol_s = df_today["Volume"] if "Volume" in df_today and df_today["Volume"].sum() > 0 else None
                 if vol_s is not None:
                     tp = (df_today["High"] + df_today["Low"] + df_today["Close"]) / 3.0
-                    vwap_val = float(
-                        (tp * vol_s).cumsum().iloc[-1] / vol_s.cumsum().iloc[-1]
-                    )
+                    vwap_val = float((tp * vol_s).cumsum().iloc[-1] / vol_s.cumsum().iloc[-1])
                     avg_bar_vol = float(df_5m["Volume"].tail(40).mean())
                     last_bar_vol = float(df_5m["Volume"].iloc[-1])
-                    vol_ratio = (
-                        round(last_bar_vol / avg_bar_vol, 2)
-                        if avg_bar_vol > 0
-                        else 1.0
-                    )
+                    vol_ratio = round(last_bar_vol / avg_bar_vol, 2) if avg_bar_vol > 0 else 1.0
                 else:
                     vwap_val = float(df_today["Close"].mean())
                     vol_ratio = 1.0
 
-                bar_range_pct = (
-                    ((df_5m["High"] - df_5m["Low"]) / df_5m["Close"].replace(0, np.nan))
-                    .tail(30)
-                    .mean()
-                    * 100.0
-                )
-                avg_5m_move_pct = (
-                    float(bar_range_pct)
-                    if not np.isnan(bar_range_pct) and bar_range_pct > 0
-                    else 0.25
-                )
+                bar_range_pct = ((df_5m["High"] - df_5m["Low"]) / df_5m["Close"].replace(0, np.nan)).tail(30).mean() * 100.0
+                avg_5m_move_pct = float(bar_range_pct) if not np.isnan(bar_range_pct) and bar_range_pct > 0 else 0.25
                 t1_pct = float(np.clip(avg_5m_move_pct * 4.5, 0.75, 1.8)) / 100.0
                 t2_pct = float(np.clip(avg_5m_move_pct * 8.5, 1.4, 3.0)) / 100.0
 
                 if prev_close_ref > 0 and not np.isnan(ltp_5m):
-                    intra_chg = round(
-                        ((ltp_5m - prev_close_ref) / prev_close_ref) * 100, 2
-                    )
-                    vwap_dist_pct = round(
-                        ((ltp_5m - vwap_val) / max(vwap_val, 0.01)) * 100, 2
-                    )
-                    recent_swing_low = float(df_5m["Low"].tail(8).min())
-                    recent_swing_high = float(df_5m["High"].tail(8).max())
+                    intra_chg = round(((ltp_5m - prev_close_ref) / prev_close_ref) * 100, 2)
+                    vwap_dist_pct = round(((ltp_5m - vwap_val) / max(vwap_val, 0.01)) * 100, 2)
+                    recent_low = float(df_5m["Low"].tail(8).min())
+                    recent_high = float(df_5m["High"].tail(8).max())
 
                     if bullish_mode and intra_chg > 0.25 and ltp_5m >= vwap_val * 0.998:
-                        sl_candidate = min(
-                            vwap_val * 0.996,
-                            recent_swing_low * 0.998,
-                            ltp_5m * 0.992,
-                        )
+                        sl_candidate = min(vwap_val * 0.996, recent_low * 0.998, ltp_5m * 0.992)
                         sl_intra = round(min(sl_candidate, ltp_5m * 0.995), 2)
                         t1_intra = round(ltp_5m * (1.0 + t1_pct), 2)
                         t2_intra = round(ltp_5m * (1.0 + t2_pct), 2)
@@ -317,41 +224,19 @@ def fetch_intraday_and_longterm_tables(direction_choice, risk_budget_inr, strict
 
                         qty_est = max(1, int(risk_budget_inr // per_share_risk))
                         est_t1_profit = round(qty_est * per_share_t1, 0)
-                        stretch_tag = (
-                            "Extended (>1.5% VWAP)"
-                            if vwap_dist_pct > 1.5
-                            else ("Sweet Spot (≤1.5% VWAP)" if vwap_dist_pct >= 0.15 else "Near VWAP")
-                        )
+                        stretch_tag = "Extended (>1.5% VWAP)" if vwap_dist_pct > 1.5 else ("Sweet Spot (≤1.5% VWAP)" if vwap_dist_pct >= 0.15 else "Near VWAP")
                         score_intra = round(intra_chg * max(vol_ratio, 0.8) * min(rr_t1, 2.5), 2)
 
                         intraday_rows.append({
-                            "Stock": clean_sym,
-                            "Plan": "BUY & EXIT TODAY",
-                            "LTP": round(ltp_5m, 2),
-                            "Chg_%": intra_chg,
-                            "VWAP": round(vwap_val, 2),
-                            "VWAP_Gap_%": vwap_dist_pct,
-                            "Vol_Pace": f"{vol_ratio:.2f}x",
-                            "Stop_Loss": sl_intra,
-                            "Target_1_Book": t1_intra,
-                            "Target_2_Stretch": t2_intra,
-                            "RR_T1": rr_t1,
-                            "Est_Qty": qty_est,
-                            "Est_T1_₹": est_t1_profit,
-                            "Entry_Zone": stretch_tag,
-                            "Exit_Rule": "Sell before 3:30 PM IST",
+                            "Stock": clean_sym, "Plan": "BUY & EXIT TODAY", "LTP": round(ltp_5m, 2),
+                            "Chg_%": intra_chg, "VWAP": round(vwap_val, 2), "VWAP_Gap_%": vwap_dist_pct,
+                            "Vol_Pace": f"{vol_ratio:.2f}x", "Stop_Loss": sl_intra, "Target_1_Book": t1_intra,
+                            "Target_2_Stretch": t2_intra, "RR_T1": rr_t1, "Est_Qty": qty_est,
+                            "Est_T1_₹": est_t1_profit, "Entry_Zone": stretch_tag, "Exit_Rule": "Sell before 3:30 PM IST",
                             "Score": score_intra,
                         })
-                    elif (
-                        (not bullish_mode)
-                        and intra_chg < -0.25
-                        and ltp_5m <= vwap_val * 1.002
-                    ):
-                        sl_candidate = max(
-                            vwap_val * 1.004,
-                            recent_swing_high * 1.002,
-                            ltp_5m * 1.008,
-                        )
+                    elif (not bullish_mode) and intra_chg < -0.25 and ltp_5m <= vwap_val * 1.002:
+                        sl_candidate = max(vwap_val * 1.004, recent_high * 1.002, ltp_5m * 1.008)
                         sl_intra = round(max(sl_candidate, ltp_5m * 1.005), 2)
                         t1_intra = round(ltp_5m * (1.0 - t1_pct), 2)
                         t2_intra = round(ltp_5m * (1.0 - t2_pct), 2)
@@ -366,99 +251,50 @@ def fetch_intraday_and_longterm_tables(direction_choice, risk_budget_inr, strict
 
                         qty_est = max(1, int(risk_budget_inr // per_share_risk))
                         est_t1_profit = round(qty_est * per_share_t1, 0)
-                        stretch_tag = (
-                            "Extended (<-1.5% VWAP)"
-                            if vwap_dist_pct < -1.5
-                            else ("Sweet Spot (≥-1.5% VWAP)" if vwap_dist_pct <= -0.15 else "Near VWAP")
-                        )
+                        stretch_tag = "Extended (<-1.5% VWAP)" if vwap_dist_pct < -1.5 else ("Sweet Spot (≥-1.5% VWAP)" if vwap_dist_pct <= -0.15 else "Near VWAP")
                         score_intra = round(abs(intra_chg) * max(vol_ratio, 0.8) * min(rr_t1, 2.5), 2)
 
                         intraday_rows.append({
-                            "Stock": clean_sym,
-                            "Plan": "SHORT / EXIT TODAY",
-                            "LTP": round(ltp_5m, 2),
-                            "Chg_%": intra_chg,
-                            "VWAP": round(vwap_val, 2),
-                            "VWAP_Gap_%": vwap_dist_pct,
-                            "Vol_Pace": f"{vol_ratio:.2f}x",
-                            "Stop_Loss": sl_intra,
-                            "Target_1_Book": t1_intra,
-                            "Target_2_Stretch": t2_intra,
-                            "RR_T1": rr_t1,
-                            "Est_Qty": qty_est,
-                            "Est_T1_₹": est_t1_profit,
-                            "Entry_Zone": stretch_tag,
-                            "Exit_Rule": "Cover before 3:30 PM IST",
+                            "Stock": clean_sym, "Plan": "SHORT / EXIT TODAY", "LTP": round(ltp_5m, 2),
+                            "Chg_%": intra_chg, "VWAP": round(vwap_val, 2), "VWAP_Gap_%": vwap_dist_pct,
+                            "Vol_Pace": f"{vol_ratio:.2f}x", "Stop_Loss": sl_intra, "Target_1_Book": t1_intra,
+                            "Target_2_Stretch": t2_intra, "RR_T1": rr_t1, "Est_Qty": qty_est,
+                            "Est_T1_₹": est_t1_profit, "Entry_Zone": stretch_tag, "Exit_Rule": "Cover before 3:30 PM IST",
                             "Score": score_intra,
                         })
         except Exception:
             pass
 
-        # --- 2. SEPARATE LONG-TERM TREND TABLE (1d EMA20 & EMA50) ---
+        # 2. Long-Term Table (1d EMA20 & EMA50)
         try:
             df_1d = _extract_ticker_df(raw_1d, symbol).dropna(subset=["Close"])
             if df_1d is not None and len(df_1d) >= 50:
                 close_1d = float(df_1d["Close"].iloc[-1])
                 prev_1d = float(df_1d["Close"].iloc[-2])
-                ema20_1d = float(
-                    df_1d["Close"].ewm(span=20, adjust=False).mean().iloc[-1]
-                )
-                ema50_1d = float(
-                    df_1d["Close"].ewm(span=50, adjust=False).mean().iloc[-1]
-                )
+                ema20_1d = float(df_1d["Close"].ewm(span=20, adjust=False).mean().iloc[-1])
+                ema50_1d = float(df_1d["Close"].ewm(span=50, adjust=False).mean().iloc[-1])
 
                 if prev_1d > 0 and not np.isnan(close_1d):
                     day_chg_1d = round(((close_1d - prev_1d) / prev_1d) * 100, 2)
-                    if close_1d > ema20_1d > ema50_1d:
-                        trend_tag = "🟢 Uptrend (Above 20 & 50 EMA)"
-                    elif close_1d >= ema50_1d:
-                        trend_tag = "🟡 Pullback / Mixed Trend"
-                    else:
-                        trend_tag = "🔴 Below 50 EMA"
+                    trend_tag = "🟢 Uptrend (Above 20 & 50 EMA)" if close_1d > ema20_1d > ema50_1d else ("🟡 Pullback / Mixed Trend" if close_1d >= ema50_1d else "🔴 Below 50 EMA")
+                    lt_score = round(((close_1d - ema50_1d) / max(ema50_1d, 0.01)) * 100 + day_chg_1d, 2)
 
-                    lt_score = round(
-                        ((close_1d - ema50_1d) / max(ema50_1d, 0.01)) * 100
-                        + day_chg_1d,
-                        2,
-                    )
                     longterm_rows.append({
-                        "Stock": clean_sym,
-                        "Horizon": "Multi-Week / Long-Term",
-                        "Close": round(close_1d, 2),
-                        "Day_%": day_chg_1d,
-                        "EMA_20": round(ema20_1d, 2),
-                        "EMA_50": round(ema50_1d, 2),
-                        "Long_Term_SL_Zone": round(ema50_1d * 0.97, 2),
-                        "Trend_Status": trend_tag,
-                        "Score": lt_score,
+                        "Stock": clean_sym, "Horizon": "Multi-Week / Long-Term", "Close": round(close_1d, 2),
+                        "Day_%": day_chg_1d, "EMA_20": round(ema20_1d, 2), "EMA_50": round(ema50_1d, 2),
+                        "Long_Term_SL_Zone": round(ema50_1d * 0.97, 2), "Trend_Status": trend_tag, "Score": lt_score,
                     })
         except Exception:
             pass
 
-    df_intra = (
-        pd.DataFrame(intraday_rows)
-        .sort_values(by="Score", ascending=False)
-        .drop(columns=["Score"])
-        .reset_index(drop=True)
-        if intraday_rows
-        else pd.DataFrame()
-    )
-    df_lt = (
-        pd.DataFrame(longterm_rows)
-        .sort_values(by="Score", ascending=False)
-        .drop(columns=["Score"])
-        .reset_index(drop=True)
-        if longterm_rows
-        else pd.DataFrame()
-    )
+    df_intra = pd.DataFrame(intraday_rows).sort_values(by="Score", ascending=False).drop(columns=["Score"]).reset_index(drop=True) if intraday_rows else pd.DataFrame()
+    df_lt = pd.DataFrame(longterm_rows).sort_values(by="Score", ascending=False).drop(columns=["Score"]).reset_index(drop=True) if longterm_rows else pd.DataFrame()
     return df_intra, df_lt
 
 
 is_strict = quality_mode.startswith("Strict")
 with st.spinner("Scanning live 5m intraday setups & daily long-term trends..."):
-    df_intraday, df_longterm = fetch_intraday_and_longterm_tables(
-        intraday_bias, max_risk_inr, is_strict
-    )
+    df_intraday, df_longterm = fetch_intraday_and_longterm_tables(intraday_bias, max_risk_inr, is_strict)
 
 # ---------------------------------------------------------
 # TABLE 1: PURE SAME-DAY INTRADAY WATCHLIST
@@ -466,22 +302,13 @@ with st.spinner("Scanning live 5m intraday setups & daily long-term trends..."):
 st.subheader("🎯 Table 1: Same-Day Intraday Setups (Buy & Exit Today)")
 if df_intraday.empty:
     st.session_state.setdefault("live_scanner_picks", {})["Daily Top 2"] = []
-    st.info(
-        "ℹ️ No stocks matched the same-day intraday filter right now. Try **Balanced** mode, "
-        "click **Refresh Intraday & Long-Term**, or switch direction above."
-    )
+    st.info("ℹ️ No stocks matched the same-day intraday filter right now. Try **Balanced** mode or click **Refresh**.")
 else:
     st.dataframe(
         df_intraday.style.format({
-            "LTP": "₹{:,.2f}",
-            "Chg_%": "{:+.2f}%",
-            "VWAP": "₹{:,.2f}",
-            "VWAP_Gap_%": "{:+.2f}%",
-            "Stop_Loss": "₹{:,.2f}",
-            "Target_1_Book": "₹{:,.2f}",
-            "Target_2_Stretch": "₹{:,.2f}",
-            "RR_T1": "{:.2f}x",
-            "Est_T1_₹": "₹{:,.0f}",
+            "LTP": "₹{:,.2f}", "Chg_%": "{:+.2f}%", "VWAP": "₹{:,.2f}", "VWAP_Gap_%": "{:+.2f}%",
+            "Stop_Loss": "₹{:,.2f}", "Target_1_Book": "₹{:,.2f}", "Target_2_Stretch": "₹{:,.2f}",
+            "RR_T1": "{:.2f}x", "Est_T1_₹": "₹{:,.0f}",
         }),
         use_container_width=True,
         hide_index=True,
@@ -491,26 +318,10 @@ else:
     top2_records = []
     for idx, row in df_intraday.head(2).iterrows():
         c1, c2, c3, c4 = st.columns([2.1, 1.9, 2.0, 2.0])
-        c1.metric(
-            f"#{idx+1} {row['Stock']}",
-            f"₹{row['LTP']:,.2f}",
-            f"{row['Chg_%']:+.2f}% | {row['Entry_Zone']}",
-        )
-        c2.metric(
-            "🛑 Same-Day Stop-Loss",
-            f"₹{row['Stop_Loss']:,.2f}",
-            f"Qty ~{row['Est_Qty']} (Max ₹{max_risk_inr:,.0f} risk)",
-        )
-        c3.metric(
-            "🎯 Target 1 (Book Profit)",
-            f"₹{row['Target_1_Book']:,.2f}",
-            f"Est. +₹{row['Est_T1_₹']:,.0f} ({row['RR_T1']:.2f}R)",
-        )
-        c4.metric(
-            "🚀 Target 2 (Stretch)",
-            f"₹{row['Target_2_Stretch']:,.2f}",
-            row["Exit_Rule"],
-        )
+        c1.metric(f"#{idx+1} {row['Stock']}", f"₹{row['LTP']:,.2f}", f"{row['Chg_%']:+.2f}% | {row['Entry_Zone']}")
+        c2.metric("🛑 Same-Day Stop-Loss", f"₹{row['Stop_Loss']:,.2f}", f"Qty ~{row['Est_Qty']} (Max ₹{max_risk_inr:,.0f} risk)")
+        c3.metric("🎯 Target 1 (Book Profit)", f"₹{row['Target_1_Book']:,.2f}", f"Est. +₹{row['Est_T1_₹']:,.0f} ({row['RR_T1']:.2f}R)")
+        c4.metric("🚀 Target 2 (Stretch)", f"₹{row['Target_2_Stretch']:,.2f}", row["Exit_Rule"])
         top2_records.append({
             "symbol": row["Stock"],
             "side": "SHORT" if "SHORT" in str(row["Plan"]).upper() else "BUY",
@@ -521,7 +332,6 @@ else:
             "notes": f"{row['Entry_Zone']} | Vol {row['Vol_Pace']} | R:R {row['RR_T1']:.2f}x",
         })
 
-    # --- PUSH TOP 2 INTRADAY PICKS TO ANALYSER SESSION STATE ---
     st.session_state.setdefault("live_scanner_picks", {})["Daily Top 2"] = top2_records
 
     if top2_records and st.button("📌 Log Top 2 Intraday Picks to History Ledger", type="primary"):
@@ -534,9 +344,7 @@ st.markdown("---")
 # TABLE 2: SEPARATE LONG-TERM WATCHLIST
 # ---------------------------------------------------------
 st.subheader("🏦 Table 2: Separate Long-Term Watchlist (Multi-Week / Positional Study)")
-st.caption(
-    "Kept separate from same-day intraday trades so longer-term trend stocks aren't confused with intraday entries."
-)
+st.caption("Kept separate from same-day intraday trades so longer-term trend stocks aren't confused with intraday entries.")
 
 if df_longterm.empty:
     st.info("ℹ️ Long-term daily trend data is currently unavailable.")
@@ -552,11 +360,8 @@ else:
     else:
         st.dataframe(
             df_lt_view.style.format({
-                "Close": "₹{:,.2f}",
-                "Day_%": "{:+.2f}%",
-                "EMA_20": "₹{:,.2f}",
-                "EMA_50": "₹{:,.2f}",
-                "Long_Term_SL_Zone": "₹{:,.2f}",
+                "Close": "₹{:,.2f}", "Day_%": "{:+.2f}%", "EMA_20": "₹{:,.2f}",
+                "EMA_50": "₹{:,.2f}", "Long_Term_SL_Zone": "₹{:,.2f}",
             }),
             use_container_width=True,
             hide_index=True,
