@@ -429,6 +429,26 @@ intel = fetch_predictive_nifty_engine(expiry_choice, period_val, interval_val)
 if not intel:
     st.error("⚠️ Unable to fetch live Nifty data. Click **Refresh Now** to retry.")
 else:
+    # --- PUSH ACTIVE INDEX OPTIONS SIGNAL TO ANALYSER SESSION STATE ---
+    if intel["OptType"] in ("CE", "PE"):
+        st.session_state.setdefault("live_scanner_picks", {})[
+            "Index Options Alpha Sniper"
+        ] = [
+            {
+                "symbol": f"NIFTY_{intel['Strike']}_{intel['OptType']}",
+                "side": "BUY",
+                "entry": float(intel["Entry"]),
+                "sl": float(intel["SL"]),
+                "t1": float(intel["T1"]),
+                "t2": float(intel["T2"]),
+                "notes": f"{intel['Action']} | {intel['Expiry']} | Score {intel['Score']:+d}",
+            }
+        ]
+    else:
+        st.session_state.setdefault("live_scanner_picks", {})[
+            "Index Options Alpha Sniper"
+        ] = []
+
     # ---------------------------------------------------------
     # 4. ADVANCE TREND PREDICTOR DASHBOARD
     # ---------------------------------------------------------
