@@ -476,6 +476,11 @@ with tab_picks:
                             "notes": f"Macro Red Top #{i + 1} | RVOL {r['RVOL']}x",
                         })
 
+        # --- PUSH MACRO-ALIGNED PICKS TO ANALYSER SESSION STATE ---
+        st.session_state.setdefault("live_scanner_picks", {})[
+            "Macro Radar Top Picks"
+        ] = ledger_batch
+
         if ledger_batch and st.button("📌 Log Top 2 Macro-Aligned Picks to History Ledger", type="primary"):
             saved_n = _save_macro_picks_to_ledger(ledger_batch, "Macro Radar Top Picks")
             st.success(f"Recorded {saved_n} macro-aligned Top 2 pick(s) to your history ledger.")
