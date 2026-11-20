@@ -434,6 +434,9 @@ else:
     top2_df = df_shown.head(2)
     if top2_df.empty:
         st.info("No signals in this filter slice.")
+        st.session_state.setdefault("live_scanner_picks", {})[
+            "Matched Super Signal (Top 2)"
+        ] = []
     else:
         st.session_state["matched_super_top2"] = top2_df["Stock"].tolist()
         t2_cols = st.columns(len(top2_df))
@@ -458,6 +461,11 @@ else:
             }
             for _, r in top2_df.iterrows()
         ]
+
+        # --- PUSH TOP 2 SUPER SIGNALS TO ANALYSER SESSION STATE ---
+        st.session_state.setdefault("live_scanner_picks", {})[
+            "Matched Super Signal (Top 2)"
+        ] = top2_payload
 
         if auto_log_top2:
             auto_saved = _save_super_picks_to_ledger(top2_payload, "Matched Super Signal (Top 2)")
