@@ -13,9 +13,9 @@ st.title("🧠 AI/ML Adaptive SMC, Liquidity Sweep & Profit-Booking Terminal")
 with st.expander("📘 AI/ML Upgrade Guide: How These Algorithms Predict Profit-Booking Zones", expanded=False):
     st.markdown(
         "- **ML Adaptive SuperTrend (Volatility Clustering):** Clusters rolling ATR into Low/Med/High volatility regimes to adjust trailing stops dynamically without getting wicked out early.\n"
-        "- **Chandelier Profit-Lock Exit:** Tracks `Highest High - (2.5 × ATR)` to signal exact trailing profit-booking exits when momentum stalls.\n"
+        "- **Chandelier Profit-Lock Exit:** Tracks `Highest High - (2.4 × ATR)` to signal exact trailing profit-booking exits when momentum stalls.\n"
         "- **Neural-Transformed RSI (NN-RSI):** Applies a `tanh` neural activation curve on smoothed RSI + momentum slope to catch exhaustion peaks before sharp reversals.\n"
-        "- **Liquidity Rush & RVOL Trap Detector:** Flags candles that sweep Buy-Side Liquidity (BSL) on `>= 1.8x` Relative Volume (`RVOL`) and close weak—prime institutional profit-booking alerts.\n"
+        "- **Liquidity Rush & RVOL Trap Detector:** Flags candles that sweep Buy-Side Liquidity (BSL) on `>= 1.5x` Relative Volume (`RVOL`) and close weak—prime institutional profit-booking alerts.\n"
         "- **Advance Profit-Booking Radar:** Scans the NSE catalog in advance to rank stocks nearing Target 1 / Target 2 / BSL profit-booking zones."
     )
 
@@ -111,8 +111,6 @@ SMC_LAYER_OPTIONS = [
     "Discount/Premium 50%",
 ]
 
-RANGE_BUTTONS = ["1d", "5d", "1m", "3m", "6m", "YTD", "1Y", "5Y", "All"]
-
 defaults = {
     "tf_choice": "5m",
     "range_choice": "1d",
@@ -147,7 +145,6 @@ def compute_ai_ml_features(df: pd.DataFrame) -> pd.DataFrame:
     close = df["Close"]
     high = df["High"]
     low = df["Low"]
-    open_ = df["Open"]
     vol = df["Volume"]
 
     # EMAs & VWAP
@@ -176,7 +173,6 @@ def compute_ai_ml_features(df: pd.DataFrame) -> pd.DataFrame:
     q33 = atr_pct.rolling(50, min_periods=5).quantile(0.33).fillna(atr_pct.median())
     q66 = atr_pct.rolling(50, min_periods=5).quantile(0.66).fillna(atr_pct.median())
 
-    # High volatility -> wider multiplier (3.2) to avoid noise; Low vol -> tighter (1.8) to lock profit
     adaptive_mult = np.where(atr_pct > q66, 3.2, np.where(atr_pct < q33, 1.8, 2.4))
     df["Vol_Regime"] = np.where(atr_pct > q66, "HIGH VOL", np.where(atr_pct < q33, "LOW VOL", "NORMAL"))
 
@@ -185,7 +181,7 @@ def compute_ai_ml_features(df: pd.DataFrame) -> pd.DataFrame:
     lower_basic = hl2 - adaptive_mult * df["ATR14"]
 
     st_line = np.zeros(len(df), dtype=float)
-    st_dir = np.ones(len(df), dtype=int)  # 1 = Bullish, -1 = Bearish
+    st_dir = np.ones(len(df), dtype=int)
     ub = np.array(upper_basic, dtype=float, copy=True)
     lb = np.array(lower_basic, dtype=float, copy=True)
     c_arr = np.array(close, dtype=float, copy=True)
@@ -207,7 +203,7 @@ def compute_ai_ml_features(df: pd.DataFrame) -> pd.DataFrame:
     df["ML_ST"] = st_line
     df["ML_ST_Dir"] = st_dir
 
-    # 2. Chandelier Profit-Lock Exit (Long Trailing Exit)
+    # 2. Chandelier Profit-Lock Exit
     roll_high_22 = high.rolling(22, min_periods=1).max()
     df["Chandelier_Exit"] = roll_high_22 - (2.4 * df["ATR14"])
 
@@ -240,20 +236,18 @@ def compute_ai_ml_features(df: pd.DataFrame) -> pd.DataFrame:
     prior_swing_high = high.shift(1).rolling(15, min_periods=3).max()
     prior_swing_low = low.shift(1).rolling(15, min_periods=3).min()
 
-    # Bearish Liquidity Rush (Sweeps high on high RVOL, closes weak -> Institutional Profit Booking!)
     df["Liq_Rush_Top"] = (
         (high > prior_swing_high)
         & (close < prior_swing_high)
         & (df["RVOL"] >= 1.5)
     )
-    # Bullish Liquidity Sweep (Sweeps low on high RVOL, reclaims -> Smart Money Accumulation)
     df["Liq_Sweep_Bot"] = (
         (low < prior_swing_low)
         & (close > prior_swing_low)
         & (df["RVOL"] >= 1.5)
     )
 
-    # 6. Purple / Green Trend-Flip Dots (SuperTrend flip + NN-RSI confirmation)
+    # 6. Purple / Green Trend-Flip Dots
     df["Bull_Dot"] = (df["ML_ST_Dir"] == 1) & (df["ML_ST_Dir"].shift(1) == -1)
     df["Bear_Profit_Dot"] = (
         ((df["ML_ST_Dir"] == -1) & (df["ML_ST_Dir"].shift(1) == 1))
@@ -348,7 +342,6 @@ def scan_advance_profit_bookings(catalog_subset):
 
             ltp = float(d["Close"].iloc[-1])
             bsl = float(d["High"].iloc[-60:].max())
-            ssl = float(d["Low"].iloc[-60:].min())
             chand = float(d["Chandelier_Exit"].iloc[-1])
             nn_rsi = float(d["NN_RSI"].iloc[-1])
             rvol = float(d["RVOL"].iloc[-1])
@@ -646,7 +639,7 @@ else:
             row=1, col=1,
         )
 
-    # Trend & Profit-Booking Dots (Purple/Gold Profit Dots & Green Entry Dots)
+    # Trend & Profit-Booking Dots
     if "Trend Dots (Momentum Flip)" in selected_indicators:
         b_dots = df[df["Bull_Dot"]]
         p_dots = df[df["Bear_Profit_Dot"]]
@@ -745,6 +738,15 @@ else:
                       fillcolor="rgba(41, 182, 246, 0.16)", line=dict(color="#29B6F6", width=1, dash="dot"),
                       layer="below", row=1, col=1)
 
+    if "BOS / CHoCH" in show_layers:
+        for idx_s, s in enumerate(sigs[-3:]):
+            is_latest = idx_s == len(sigs[-3:]) - 1
+            fig.add_shape(type="line", x0=s["x0_str"], x1=s["t_str"], y0=s["y"], y1=s["y"],
+                          line=dict(color="#00E676", width=1.4, dash="dot"), row=1, col=1)
+            fig.add_annotation(x=s["t_str"], y=s["y"],
+                               text=f"CHoCH ▲ @ ₹{s['y']}" if is_latest else f"BOS ▲ @ ₹{s['y']}",
+                               showarrow=False, yshift=12, font=dict(size=10, color="#00E676"), row=1, col=1)
+
     if "Liquidity Rush & Profit Alerts" in show_layers:
         for _, r_row in df[df["Liq_Rush_Top"]].tail(4).iterrows():
             fig.add_annotation(
@@ -762,6 +764,11 @@ else:
         fig.add_hline(y=ssl_level, line_dash="dot", line_color="#FF7043", line_width=1.2,
                       annotation_text=f"💧 SSL: ₹{ssl_level:,.2f}", annotation_position="bottom left",
                       annotation_font_color="#FFAB91", row=1, col=1)
+
+    if "Discount/Premium 50%" in show_layers:
+        fig.add_hline(y=eq_level, line_dash="dashdot", line_color="#9E9E9E", line_width=1.0,
+                      annotation_text=f"⚖️ 50% EQ: ₹{eq_level:,.2f}", annotation_position="top right",
+                      annotation_font_color="#BDBDBD", row=1, col=1)
 
     if st.session_state.show_trade_lines:
         fig.add_hline(y=entry_p, line_dash="solid", line_color="#FFD700", line_width=1.5,
@@ -810,18 +817,28 @@ else:
     y_vals = [float(vis_df["Low"].min()), float(vis_df["High"].max()), ltp, latest_chand]
     if st.session_state.show_trade_lines:
         y_vals.extend([entry_p, t1_p])
+    if st.session_state.fit_far_smc_yaxis:
+        if bull_fvg:
+            y_vals.extend([bull_fvg[1], bull_fvg[2]])
+        if bear_fvg:
+            y_vals.extend([bear_fvg[1], bear_fvg[2]])
+        if bull_ob:
+            y_vals.extend([bull_ob[1], bull_ob[2]])
+
     y_min_raw, y_max_raw = min(y_vals), max(y_vals)
     y_pad = max((y_max_raw - y_min_raw) * 0.08, y_max_raw * 0.005)
 
-    ist_now_str = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%H:%M:%S IST")
+    ist_now_str = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%H:%M:%S")
     fig.update_layout(
         title=f"{raw_sym} ({tf_choice}) | LTP: ₹{ltp:,.2f} | AI Profit Score: {latest_pb_score:.0f}/100 | Chandelier: ₹{latest_chand:,.2f}",
         template="plotly_dark",
+        paper_bgcolor="#131722",
+        plot_bgcolor="#131722",
         height=740 if show_nn_rsi else 650,
         dragmode="pan",
         hovermode="x unified",
         showlegend=False,
-        margin=dict(l=10, r=65, t=42, b=36),
+        margin=dict(l=10, r=65, t=42, b=24),
         yaxis=dict(
             side="right", title="Price (₹)", range=[y_min_raw - y_pad, y_max_raw + y_pad],
             showgrid=True, gridcolor="rgba(255,255,255,0.06)",
@@ -844,37 +861,97 @@ else:
             axis_kwargs.update(tickmode="auto", nticks=15, tickangle=0, tickfont=dict(size=11, color="#B0BEC5"))
         fig.update_xaxes(axis_kwargs, row=r_idx, col=1)
 
+    # TradingView-Style Flush Bottom Bar CSS (Flat text buttons, connected directly to chart)
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stPlotlyChart"] {
+            margin-bottom: -16px !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.tv-bottom-bar-marker) {
+            background-color: #131722 !important;
+            border: 1px solid #2A2E39 !important;
+            border-top: 1px solid #2A2E39 !important;
+            border-radius: 0px 0px 4px 4px !important;
+            padding: 2px 10px !important;
+            margin-top: 0px !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.tv-bottom-bar-marker) button {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            padding: 2px 4px !important;
+            min-height: 26px !important;
+            height: 26px !important;
+            font-size: 12px !important;
+            font-weight: 600 !important;
+            color: #D1D4DC !important;
+            border-radius: 3px !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.tv-bottom-bar-marker) button:hover {
+            background-color: #2A2E39 !important;
+            color: #FFFFFF !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.tv-bottom-bar-marker) button[kind="primary"] {
+            color: #2962FF !important;
+            background-color: rgba(41, 98, 255, 0.14) !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
-    # Bottom Range Selector
-    rb_cols = st.columns([0.7] * len(RANGE_BUTTONS) + [1.2, 1.5])
-    for idx_r, r_label in enumerate(RANGE_BUTTONS):
-        is_r_active = st.session_state.range_choice == r_label and st.session_state.jump_date is None
-        if rb_cols[idx_r].button(
-            r_label, key=f"btn_range_{r_label}",
-            type="primary" if is_r_active else "secondary", use_container_width=True,
-        ):
-            st.session_state.range_choice = r_label
-            st.session_state.jump_date = None
-            st.rerun()
+    # Connected TradingView Bottom Range Bar: 1D 5D 1M 3M 6M YTD 1Y 5Y All | 📅  <--->  HH:MM:SS UTC+5:30 RTH | ADJ
+    TV_RANGE_LABELS = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "All"]
+    with st.container(border=True):
+        st.markdown('<div class="tv-bottom-bar-marker" style="display:none;"></div>', unsafe_allow_html=True)
+        bar_cols = st.columns([0.38] * len(TV_RANGE_LABELS) + [0.12, 0.45, 3.6, 1.9], gap="small")
 
-    with rb_cols[len(RANGE_BUTTONS)]:
-        with st.popover("📅 Jump Date", use_container_width=True):
-            picked = st.date_input(
-                "Go to date",
-                value=st.session_state.jump_date or df["Time"].dt.date.iloc[-1],
-                min_value=df["Time"].dt.date.iloc[0],
-                max_value=df["Time"].dt.date.iloc[-1],
-            )
-            if st.button("Apply Date", use_container_width=True):
-                st.session_state.jump_date = picked
-                st.rerun()
-            if st.session_state.jump_date is not None and st.button("Clear Jump", use_container_width=True):
+        for idx_r, r_disp in enumerate(TV_RANGE_LABELS):
+            r_key = r_disp.lower() if r_disp in ["1D", "5D", "1M", "3M", "6M"] else r_disp
+            is_r_active = (st.session_state.range_choice == r_key) and (st.session_state.jump_date is None)
+            if bar_cols[idx_r].button(
+                r_disp,
+                key=f"tv_range_{r_disp}",
+                type="primary" if is_r_active else "secondary",
+                use_container_width=True,
+            ):
+                st.session_state.range_choice = r_key
                 st.session_state.jump_date = None
                 st.rerun()
 
-    with rb_cols[len(RANGE_BUTTONS) + 1]:
-        st.caption(f"🕒 {ist_now_str} · AI/ML Engine Active")
+        with bar_cols[len(TV_RANGE_LABELS)]:
+            st.markdown(
+                "<div style='border-left:1px solid #2A2E39; height:20px; margin:3px auto;'></div>",
+                unsafe_allow_html=True,
+            )
+
+        with bar_cols[len(TV_RANGE_LABELS) + 1]:
+            with st.popover("📅", use_container_width=True):
+                picked = st.date_input(
+                    "Go to date",
+                    value=st.session_state.jump_date or df["Time"].dt.date.iloc[-1],
+                    min_value=df["Time"].dt.date.iloc[0],
+                    max_value=df["Time"].dt.date.iloc[-1],
+                )
+                if st.button("Apply Date", use_container_width=True):
+                    st.session_state.jump_date = picked
+                    st.rerun()
+                if st.session_state.jump_date is not None and st.button("Clear Jump", use_container_width=True):
+                    st.session_state.jump_date = None
+                    st.rerun()
+
+        with bar_cols[-1]:
+            st.markdown(
+                f"<div style='text-align:right; color:#D1D4DC; font-size:12px; font-family:monospace; padding-top:4px;'>"
+                f"{ist_now_str} UTC+5:30   RTH "
+                f"<span style='color:#2A2E39;'>|</span> "
+                f"<span style='color:#2962FF; font-weight:600;'>ADJ</span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
 
     # --- ADVANCE MULTI-STOCK PROFIT-BOOKING RADAR ---
     st.divider()
