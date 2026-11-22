@@ -184,11 +184,11 @@ def compute_ai_ml_features(df: pd.DataFrame) -> pd.DataFrame:
     upper_basic = hl2 + adaptive_mult * df["ATR14"]
     lower_basic = hl2 - adaptive_mult * df["ATR14"]
 
-    st_line = np.zeros(len(df))
+    st_line = np.zeros(len(df), dtype=float)
     st_dir = np.ones(len(df), dtype=int)  # 1 = Bullish, -1 = Bearish
-    ub = upper_basic.to_numpy()
-    lb = lower_basic.to_numpy()
-    c_arr = close.to_numpy()
+    ub = np.array(upper_basic, dtype=float, copy=True)
+    lb = np.array(lower_basic, dtype=float, copy=True)
+    c_arr = np.array(close, dtype=float, copy=True)
 
     st_line[0] = lb[0]
     for i in range(1, len(df)):
