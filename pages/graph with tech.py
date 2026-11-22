@@ -861,38 +861,49 @@ else:
             axis_kwargs.update(tickmode="auto", nticks=15, tickangle=0, tickfont=dict(size=11, color="#B0BEC5"))
         fig.update_xaxes(axis_kwargs, row=r_idx, col=1)
 
-    # TradingView-Style Flush Bottom Bar CSS (Flat text buttons, connected directly to chart)
+    # TradingView-Style Flush Bottom Bar CSS (Single-line crisp labels, no rounded boxes, attached to chart)
     st.markdown(
         """
         <style>
         div[data-testid="stPlotlyChart"] {
-            margin-bottom: -16px !important;
+            margin-bottom: -18px !important;
         }
-        div[data-testid="stVerticalBlockBorderWrapper"]:has(.tv-bottom-bar-marker) {
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.tv-bottom-bar-marker),
+        div[data-testid="stVerticalBlock"]:has(> div > .tv-bottom-bar-marker) {
             background-color: #131722 !important;
             border: 1px solid #2A2E39 !important;
-            border-top: 1px solid #2A2E39 !important;
             border-radius: 0px 0px 4px 4px !important;
             padding: 2px 10px !important;
             margin-top: 0px !important;
         }
-        div[data-testid="stVerticalBlockBorderWrapper"]:has(.tv-bottom-bar-marker) button {
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.tv-bottom-bar-marker) button,
+        div[data-testid="stVerticalBlock"]:has(> div > .tv-bottom-bar-marker) button {
             background: transparent !important;
             border: none !important;
             box-shadow: none !important;
-            padding: 2px 4px !important;
+            padding: 0px 4px !important;
             min-height: 26px !important;
             height: 26px !important;
             font-size: 12px !important;
             font-weight: 600 !important;
             color: #D1D4DC !important;
             border-radius: 3px !important;
+            white-space: nowrap !important;
+            overflow: visible !important;
         }
-        div[data-testid="stVerticalBlockBorderWrapper"]:has(.tv-bottom-bar-marker) button:hover {
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.tv-bottom-bar-marker) button p,
+        div[data-testid="stVerticalBlock"]:has(> div > .tv-bottom-bar-marker) button p {
+            white-space: nowrap !important;
+            font-size: 12px !important;
+            margin: 0px !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.tv-bottom-bar-marker) button:hover,
+        div[data-testid="stVerticalBlock"]:has(> div > .tv-bottom-bar-marker) button:hover {
             background-color: #2A2E39 !important;
             color: #FFFFFF !important;
         }
-        div[data-testid="stVerticalBlockBorderWrapper"]:has(.tv-bottom-bar-marker) button[kind="primary"] {
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.tv-bottom-bar-marker) button[kind="primary"],
+        div[data-testid="stVerticalBlock"]:has(> div > .tv-bottom-bar-marker) button[kind="primary"] {
             color: #2962FF !important;
             background-color: rgba(41, 98, 255, 0.14) !important;
         }
@@ -905,9 +916,10 @@ else:
 
     # Connected TradingView Bottom Range Bar: 1D 5D 1M 3M 6M YTD 1Y 5Y All | 📅  <--->  HH:MM:SS UTC+5:30 RTH | ADJ
     TV_RANGE_LABELS = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "All"]
+    TV_COL_WEIGHTS = [0.55, 0.55, 0.58, 0.58, 0.58, 0.72, 0.55, 0.55, 0.65, 0.12, 0.62, 3.2, 2.3]
     with st.container(border=True):
         st.markdown('<div class="tv-bottom-bar-marker" style="display:none;"></div>', unsafe_allow_html=True)
-        bar_cols = st.columns([0.38] * len(TV_RANGE_LABELS) + [0.12, 0.45, 3.6, 1.9], gap="small")
+        bar_cols = st.columns(TV_COL_WEIGHTS, gap="small")
 
         for idx_r, r_disp in enumerate(TV_RANGE_LABELS):
             r_key = r_disp.lower() if r_disp in ["1D", "5D", "1M", "3M", "6M"] else r_disp
@@ -945,7 +957,7 @@ else:
 
         with bar_cols[-1]:
             st.markdown(
-                f"<div style='text-align:right; color:#D1D4DC; font-size:12px; font-family:monospace; padding-top:4px;'>"
+                f"<div style='text-align:right; color:#D1D4DC; font-size:12px; font-family:monospace; padding-top:4px; white-space:nowrap;'>"
                 f"{ist_now_str} UTC+5:30   RTH "
                 f"<span style='color:#2A2E39;'>|</span> "
                 f"<span style='color:#2962FF; font-weight:600;'>ADJ</span>"
