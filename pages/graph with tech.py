@@ -1,0 +1,892 @@
+from datetime import datetime, timedelta
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import pytz
+import streamlit as st
+import yfinance as yf
+
+st.set_page_config(page_title="AI/ML Advanced SMC & Profit-Booking Terminal", layout="wide")
+st.title("🧠 AI/ML Adaptive SMC, Liquidity Sweep & Profit-Booking Terminal")
+
+with st.expander("📘 AI/ML Upgrade Guide: How These Algorithms Predict Profit-Booking Zones", expanded=False):
+    st.markdown(
+        "- **ML Adaptive SuperTrend (Volatility Clustering):** Clusters rolling ATR into Low/Med/High volatility regimes to adjust trailing stops dynamically without getting wicked out early.\n"
+        "- **Chandelier Profit-Lock Exit:** Tracks `Highest High - (2.5 × ATR)` to signal exact trailing profit-booking exits when momentum stalls.\n"
+        "- **Neural-Transformed RSI (NN-RSI):** Applies a `tanh` neural activation curve on smoothed RSI + momentum slope to catch exhaustion peaks before sharp reversals.\n"
+        "- **Liquidity Rush & RVOL Trap Detector:** Flags candles that sweep Buy-Side Liquidity (BSL) on `>= 1.8x` Relative Volume (`RVOL`) and close weak—prime institutional profit-booking alerts.\n"
+        "- **Advance Profit-Booking Radar:** Scans the NSE catalog in advance to rank stocks nearing Target 1 / Target 2 / BSL profit-booking zones."
+    )
+
+NSE_STOCK_CATALOG = [
+    ("DATAPATTNS", "Data Patterns (India) Ltd", "Defence & Aerospace", 2500.0),
+    ("HAL", "Hindustan Aeronautics Ltd", "Defence & Aerospace", 4200.0),
+    ("BEL", "Bharat Electronics Ltd", "Defence & Aerospace", 310.0),
+    ("MAZDOCK", "Mazagon Dock Shipbuilders Ltd", "Defence & Aerospace", 2400.0),
+    ("BDL", "Bharat Dynamics Ltd", "Defence & Aerospace", 1250.0),
+    ("COCHINSHIP", "Cochin Shipyard Ltd", "Defence & Aerospace", 1500.0),
+    ("INFY", "Infosys Ltd", "IT & Tech", 1850.0),
+    ("TCS", "Tata Consultancy Services Ltd", "IT & Tech", 4100.0),
+    ("WIPRO", "Wipro Ltd", "IT & Tech", 560.0),
+    ("HCLTECH", "HCL Technologies Ltd", "IT & Tech", 1800.0),
+    ("TECHM", "Tech Mahindra Ltd", "IT & Tech", 1650.0),
+    ("INFOBEAN", "InfoBeans Technologies Ltd", "IT & Tech", 620.0),
+    ("PERSISTENT", "Persistent Systems Ltd", "IT & Tech", 5400.0),
+    ("LTIM", "LTIMindtree Ltd", "IT & Tech", 5900.0),
+    ("HDFCBANK", "HDFC Bank Ltd", "Banking & Finance", 1720.0),
+    ("ICICIBANK", "ICICI Bank Ltd", "Banking & Finance", 1280.0),
+    ("SBIN", "State Bank of India", "Banking & Finance", 840.0),
+    ("AXISBANK", "Axis Bank Ltd", "Banking & Finance", 1160.0),
+    ("KOTAKBANK", "Kotak Mahindra Bank Ltd", "Banking & Finance", 1780.0),
+    ("INDUSINDBK", "IndusInd Bank Ltd", "Banking & Finance", 1050.0),
+    ("LICHSGFIN", "LIC Housing Finance Ltd", "Banking & Finance", 610.0),
+    ("BAJFINANCE", "Bajaj Finance Ltd", "Banking & Finance", 6900.0),
+    ("BAJAJFINSV", "Bajaj Finserv Ltd", "Banking & Finance", 1650.0),
+    ("SUNPHARMA", "Sun Pharmaceutical Industries Ltd", "Pharma & Healthcare", 1820.0),
+    ("CIPLA", "Cipla Ltd", "Pharma & Healthcare", 1520.0),
+    ("DRREDDY", "Dr. Reddy's Laboratories Ltd", "Pharma & Healthcare", 1260.0),
+    ("APOLLOHOSP", "Apollo Hospitals Enterprise Ltd", "Pharma & Healthcare", 6850.0),
+    ("MAXHEALTH", "Max Healthcare Institute Ltd", "Pharma & Healthcare", 1020.0),
+    ("RELIANCE", "Reliance Industries Ltd", "Energy & Power", 1320.0),
+    ("NTPC", "NTPC Ltd", "Energy & Power", 390.0),
+    ("POWERGRID", "Power Grid Corporation of India Ltd", "Energy & Power", 325.0),
+    ("ONGC", "Oil & Natural Gas Corporation Ltd", "Energy & Power", 265.0),
+    ("COALINDIA", "Coal India Ltd", "Energy & Power", 440.0),
+    ("TATAPOWER", "Tata Power Company Ltd", "Energy & Power", 445.0),
+    ("GAIL", "GAIL (India) Ltd", "Energy & Power", 205.0),
+    ("TATASTEEL", "Tata Steel Ltd", "Metals & Mining", 150.0),
+    ("HINDALCO", "Hindalco Industries Ltd", "Metals & Mining", 670.0),
+    ("VEDL", "Vedanta Ltd", "Metals & Mining", 460.0),
+    ("JINDALSTEL", "Jindal Steel & Power Ltd", "Metals & Mining", 920.0),
+    ("MARUTI", "Maruti Suzuki India Ltd", "Auto & EV", 11400.0),
+    ("TATAMOTORS", "Tata Motors Ltd", "Auto & EV", 820.0),
+    ("M&M", "Mahindra & Mahindra Ltd", "Auto & EV", 2950.0),
+    ("ITC", "ITC Ltd", "FMCG & Consumer", 480.0),
+    ("HINDUNILVR", "Hindustan Unilever Ltd", "FMCG & Consumer", 2480.0),
+    ("TITAN", "Titan Company Ltd", "FMCG & Consumer", 3250.0),
+    ("TRENT", "Trent Ltd", "FMCG & Consumer", 6600.0),
+    ("ASIANPAINT", "Asian Paints Ltd", "FMCG & Consumer", 2520.0),
+    ("BHARTIARTL", "Bharti Airtel Ltd", "Telecom & Infra", 1590.0),
+    ("LT", "Larsen & Toubro Ltd", "Telecom & Infra", 3650.0),
+    ("ADANIENT", "Adani Enterprises Ltd", "Telecom & Infra", 2850.0),
+    ("ADANIPORTS", "Adani Ports & Special Economic Zone Ltd", "Telecom & Infra", 1320.0),
+    ("IRCTC", "Indian Railway Catering & Tourism Corp Ltd", "Telecom & Infra", 840.0),
+]
+
+SECTOR_OPTIONS = [
+    "All Sectors",
+    "Defence & Aerospace",
+    "IT & Tech",
+    "Banking & Finance",
+    "Pharma & Healthcare",
+    "Energy & Power",
+    "Metals & Mining",
+    "Auto & EV",
+    "FMCG & Consumer",
+    "Telecom & Infra",
+]
+PRICE_BAND_OPTIONS = ["All Prices", "Under ₹500", "₹500 – ₹2,000", "Above ₹2,000"]
+INTERVAL_OPTIONS = ["1m", "2m", "3m", "5m", "10m", "15m", "30m", "1h", "4h", "1D", "1W", "1M"]
+
+INDICATOR_OPTIONS = [
+    "VWAP",
+    "ML Adaptive SuperTrend",
+    "Chandelier Profit Exit",
+    "Keltner Channel",
+    "Trend Dots (Momentum Flip)",
+    "20 EMA",
+    "50 EMA",
+    "200 EMA",
+    "Bollinger Bands",
+    "Neural RSI (NN-RSI)",
+]
+
+SMC_LAYER_OPTIONS = [
+    "4H FVG",
+    "Order Blocks",
+    "BOS / CHoCH",
+    "Liquidity (BSL/SSL)",
+    "Liquidity Rush & Profit Alerts",
+    "Discount/Premium 50%",
+]
+
+RANGE_BUTTONS = ["1d", "5d", "1m", "3m", "6m", "YTD", "1Y", "5Y", "All"]
+
+defaults = {
+    "tf_choice": "5m",
+    "range_choice": "1d",
+    "selected_indicators": [
+        "VWAP",
+        "ML Adaptive SuperTrend",
+        "Chandelier Profit Exit",
+        "Trend Dots (Momentum Flip)",
+        "Neural RSI (NN-RSI)",
+    ],
+    "show_layers": [
+        "4H FVG",
+        "Order Blocks",
+        "BOS / CHoCH",
+        "Liquidity (BSL/SSL)",
+        "Liquidity Rush & Profit Alerts",
+    ],
+    "show_volume": True,
+    "show_spikes": True,
+    "show_trade_lines": True,
+    "fit_far_smc_yaxis": False,
+    "jump_date": None,
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+
+# --- AI / ML QUANT ENGINE ---
+def compute_ai_ml_features(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    close = df["Close"]
+    high = df["High"]
+    low = df["Low"]
+    open_ = df["Open"]
+    vol = df["Volume"]
+
+    # EMAs & VWAP
+    df["EMA20"] = close.ewm(span=20, adjust=False).mean()
+    df["EMA50"] = close.ewm(span=50, adjust=False).mean()
+    df["EMA200"] = close.ewm(span=200, adjust=False).mean()
+
+    if vol.sum() > 0:
+        df["VWAP"] = (
+            (((high + low + close) / 3.0) * vol).groupby(df["Time"].dt.date).cumsum()
+            / vol.groupby(df["Time"].dt.date).cumsum().replace(0, np.nan)
+        ).fillna(df["EMA20"])
+    else:
+        df["VWAP"] = df["EMA20"]
+
+    # ATR (14)
+    prev_close = close.shift(1).fillna(close)
+    tr = pd.concat(
+        [high - low, (high - prev_close).abs(), (low - prev_close).abs()],
+        axis=1,
+    ).max(axis=1)
+    df["ATR14"] = tr.ewm(span=14, adjust=False).mean().bfill()
+
+    # 1. K-Means Style 3-Regime Volatility Clustering -> ML Adaptive SuperTrend
+    atr_pct = (df["ATR14"] / close.replace(0, np.nan)).fillna(0.005)
+    q33 = atr_pct.rolling(50, min_periods=5).quantile(0.33).fillna(atr_pct.median())
+    q66 = atr_pct.rolling(50, min_periods=5).quantile(0.66).fillna(atr_pct.median())
+
+    # High volatility -> wider multiplier (3.2) to avoid noise; Low vol -> tighter (1.8) to lock profit
+    adaptive_mult = np.where(atr_pct > q66, 3.2, np.where(atr_pct < q33, 1.8, 2.4))
+    df["Vol_Regime"] = np.where(atr_pct > q66, "HIGH VOL", np.where(atr_pct < q33, "LOW VOL", "NORMAL"))
+
+    hl2 = (high + low) / 2.0
+    upper_basic = hl2 + adaptive_mult * df["ATR14"]
+    lower_basic = hl2 - adaptive_mult * df["ATR14"]
+
+    st_line = np.zeros(len(df))
+    st_dir = np.ones(len(df), dtype=int)  # 1 = Bullish, -1 = Bearish
+    ub = upper_basic.to_numpy()
+    lb = lower_basic.to_numpy()
+    c_arr = close.to_numpy()
+
+    st_line[0] = lb[0]
+    for i in range(1, len(df)):
+        if c_arr[i] > ub[i - 1]:
+            st_dir[i] = 1
+        elif c_arr[i] < lb[i - 1]:
+            st_dir[i] = -1
+        else:
+            st_dir[i] = st_dir[i - 1]
+            if st_dir[i] == 1 and lb[i] < lb[i - 1]:
+                lb[i] = lb[i - 1]
+            if st_dir[i] == -1 and ub[i] > ub[i - 1]:
+                ub[i] = ub[i - 1]
+        st_line[i] = lb[i] if st_dir[i] == 1 else ub[i]
+
+    df["ML_ST"] = st_line
+    df["ML_ST_Dir"] = st_dir
+
+    # 2. Chandelier Profit-Lock Exit (Long Trailing Exit)
+    roll_high_22 = high.rolling(22, min_periods=1).max()
+    df["Chandelier_Exit"] = roll_high_22 - (2.4 * df["ATR14"])
+
+    # 3. Keltner Channel (20 EMA +/- 1.8 ATR)
+    df["KC_Upper"] = df["EMA20"] + (1.8 * df["ATR14"])
+    df["KC_Lower"] = df["EMA20"] - (1.8 * df["ATR14"])
+
+    # Bollinger Bands
+    bb_mid = close.rolling(20, min_periods=1).mean()
+    bb_std = close.rolling(20, min_periods=1).std().fillna(0.0)
+    df["BB_Upper"] = bb_mid + (2.0 * bb_std)
+    df["BB_Lower"] = bb_mid - (2.0 * bb_std)
+
+    # 4. Simple Neural Network Transformed RSI (tanh activation + velocity blend)
+    delta = close.diff()
+    gain = delta.clip(lower=0).ewm(span=14, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(span=14, adjust=False).mean()
+    rs = gain / loss.replace(0, np.nan)
+    raw_rsi = (100.0 - (100.0 / (1.0 + rs))).fillna(50.0)
+    rsi_norm = (raw_rsi - 50.0) / 25.0
+    rsi_vel = rsi_norm.diff().fillna(0.0) * 1.5
+    nn_act = np.tanh(0.85 * rsi_norm + 0.35 * rsi_vel)
+    df["NN_RSI"] = 50.0 + (nn_act * 50.0)
+    df["NN_RSI_Signal"] = df["NN_RSI"].ewm(span=5, adjust=False).mean()
+
+    # 5. Relative Volume (RVOL) & Liquidity Rush / Sweep Profit-Booking Trap
+    v_avg = vol.rolling(20, min_periods=1).mean().replace(0, np.nan)
+    df["RVOL"] = (vol / v_avg).fillna(1.0)
+
+    prior_swing_high = high.shift(1).rolling(15, min_periods=3).max()
+    prior_swing_low = low.shift(1).rolling(15, min_periods=3).min()
+
+    # Bearish Liquidity Rush (Sweeps high on high RVOL, closes weak -> Institutional Profit Booking!)
+    df["Liq_Rush_Top"] = (
+        (high > prior_swing_high)
+        & (close < prior_swing_high)
+        & (df["RVOL"] >= 1.5)
+    )
+    # Bullish Liquidity Sweep (Sweeps low on high RVOL, reclaims -> Smart Money Accumulation)
+    df["Liq_Sweep_Bot"] = (
+        (low < prior_swing_low)
+        & (close > prior_swing_low)
+        & (df["RVOL"] >= 1.5)
+    )
+
+    # 6. Purple / Green Trend-Flip Dots (SuperTrend flip + NN-RSI confirmation)
+    df["Bull_Dot"] = (df["ML_ST_Dir"] == 1) & (df["ML_ST_Dir"].shift(1) == -1)
+    df["Bear_Profit_Dot"] = (
+        ((df["ML_ST_Dir"] == -1) & (df["ML_ST_Dir"].shift(1) == 1))
+        | ((df["NN_RSI"] > 78) & (df["NN_RSI"] < df["NN_RSI_Signal"]))
+        | df["Liq_Rush_Top"]
+    )
+
+    # 7. Composite AI Profit-Booking Urgency Score (0 to 100)
+    z_vwap = ((close - df["VWAP"]) / df["ATR14"].replace(0, np.nan)).fillna(0.0)
+    score = (
+        0.35 * np.clip(df["NN_RSI"], 0, 100)
+        + 0.25 * np.clip(50 + z_vwap * 15, 0, 100)
+        + 0.20 * np.clip(df["RVOL"] * 25, 0, 100)
+        + 0.20 * np.where(close < df["Chandelier_Exit"], 85, 25)
+    )
+    df["Profit_Book_Score"] = np.round(np.clip(score, 0, 100), 1)
+
+    return df
+
+
+@st.cache_data(ttl=15)
+def fetch_clean_smc(sym, tf):
+    p_map = {
+        "1m": "5d", "2m": "5d", "3m": "5d", "5m": "10d", "10m": "10d",
+        "15m": "15d", "30m": "30d", "1h": "60d", "4h": "60d",
+        "1D": "5y", "1W": "5y", "1M": "5y",
+    }
+    i_map = {
+        "1m": "1m", "2m": "1m", "3m": "1m", "5m": "5m", "10m": "5m",
+        "15m": "15m", "30m": "30m", "1h": "1h", "4h": "1h",
+        "1D": "1d", "1W": "1wk", "1M": "1mo",
+    }
+
+    t_obj = yf.Ticker(sym)
+    df = t_obj.history(period=p_map[tf], interval=i_map[tf], auto_adjust=True)
+    df4 = t_obj.history(period="60d", interval="1h", auto_adjust=True)
+
+    req = {"Open", "High", "Low", "Close", "Volume"}
+    if df is None or df.empty or not req.issubset(set(df.columns)):
+        return pd.DataFrame(), pd.DataFrame()
+
+    df = df.reset_index()
+    df.rename(columns={df.columns[0]: "Time"}, inplace=True)
+    df["Time"] = pd.to_datetime(df["Time"])
+    if df["Time"].dt.tz is not None:
+        df["Time"] = df["Time"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
+
+    if tf in ["2m", "3m", "10m", "4h"]:
+        rule_map = {
+            "2m": ("2min", "0min"),
+            "3m": ("3min", "0min"),
+            "10m": ("10min", "0min"),
+            "4h": ("4h", "15min"),
+        }
+        rule, offset = rule_map[tf]
+        df = (
+            df.set_index("Time")
+            .resample(rule, offset=offset)
+            .agg({"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"})
+            .dropna(subset=["Open", "High", "Low", "Close"])
+            .reset_index()
+        )
+
+    if df4 is not None and not df4.empty and {"Open", "High", "Low", "Close"}.issubset(set(df4.columns)):
+        df4.index = pd.to_datetime(df4.index)
+        if df4.index.tz is not None:
+            df4.index = df4.index.tz_convert("Asia/Kolkata").tz_localize(None)
+        df4 = (
+            df4.resample("4h", offset="15min")
+            .agg({"Open": "first", "High": "max", "Low": "min", "Close": "last"})
+            .dropna()
+        )
+
+    return df, df4
+
+
+@st.cache_data(ttl=120)
+def scan_advance_profit_bookings(catalog_subset):
+    """Pre-scans stocks to highlight where to book profits or enter early."""
+    rows = []
+    for sym, name, sec, _ in catalog_subset[:18]:
+        try:
+            d = yf.Ticker(f"{sym}.NS").history(period="15d", interval="15m", auto_adjust=True)
+            if d is None or len(d) < 30:
+                continue
+            d = d.reset_index()
+            d.rename(columns={d.columns[0]: "Time"}, inplace=True)
+            d["Time"] = pd.to_datetime(d["Time"])
+            if d["Time"].dt.tz is not None:
+                d["Time"] = d["Time"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
+            d = compute_ai_ml_features(d)
+
+            ltp = float(d["Close"].iloc[-1])
+            bsl = float(d["High"].iloc[-60:].max())
+            ssl = float(d["Low"].iloc[-60:].min())
+            chand = float(d["Chandelier_Exit"].iloc[-1])
+            nn_rsi = float(d["NN_RSI"].iloc[-1])
+            rvol = float(d["RVOL"].iloc[-1])
+            pb_score = float(d["Profit_Book_Score"].iloc[-1])
+            dist_bsl_pct = ((bsl - ltp) / ltp) * 100.0
+
+            if pb_score >= 72 or dist_bsl_pct <= 0.6 or ltp < chand:
+                action = "💰 BOOK / TRAIL PROFIT"
+            elif pb_score <= 35 and d["ML_ST_Dir"].iloc[-1] == 1:
+                action = "🟢 ACCUMULATE (DISCOUNT)"
+            else:
+                action = "⏳ HOLD / RIDE TREND"
+
+            rows.append({
+                "Symbol": sym,
+                "Sector": sec,
+                "LTP (₹)": round(ltp, 2),
+                "AI Profit Score": pb_score,
+                "NN-RSI": round(nn_rsi, 1),
+                "RVOL": f"{rvol:.2f}x",
+                "BSL Target (₹)": round(bsl, 2),
+                "Dist to BSL": f"{dist_bsl_pct:.2f}%",
+                "Chandelier Exit (₹)": round(chand, 2),
+                "Advance AI Action": action,
+            })
+        except Exception:
+            continue
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values(by="AI Profit Score", ascending=False)
+
+
+# --- TOP FILTER & SYMBOL BAR ---
+kf1, kf2, kf3 = st.columns([1.8, 1.5, 2.7])
+selected_sector = kf1.selectbox("🏷️ Filter by Sector", SECTOR_OPTIONS, index=0)
+selected_price_band = kf2.selectbox("💰 Filter by Price Tier", PRICE_BAND_OPTIONS, index=0)
+kf3.caption("💡 AI/ML Terminal auto-detects Chandelier Profit Exits, Liquidity Rushes & NN-RSI Exhaustion.")
+
+sym_col, tf_bar_col = st.columns([1.9, 4.1])
+with sym_col:
+    typed_query = (
+        st.text_input("Type NSE Symbol or Name", value="LICHSGFIN", placeholder="e.g., HAL, INFY, DATAPATTNS")
+        .strip()
+        .upper()
+    )
+    q_clean = typed_query.replace(".NS", "")
+
+    def _matches_price_band(approx_p, band):
+        if band == "Under ₹500":
+            return approx_p < 500.0
+        if band == "₹500 – ₹2,000":
+            return 500.0 <= approx_p <= 2000.0
+        if band == "Above ₹2,000":
+            return approx_p > 2000.0
+        return True
+
+    filtered_stocks = [
+        (sym, name, sec, approx_p)
+        for sym, name, sec, approx_p in NSE_STOCK_CATALOG
+        if (selected_sector == "All Sectors" or sec == selected_sector)
+        and _matches_price_band(approx_p, selected_price_band)
+        and ((not q_clean) or (q_clean in sym) or (q_clean in name.upper()) or (q_clean in sec.upper()))
+    ]
+
+    if filtered_stocks:
+        options_list = [f"{sym} — {name} [{sec}]" for sym, name, sec, _ in filtered_stocks]
+        if q_clean and q_clean not in [s for s, _, _, _ in filtered_stocks]:
+            options_list.insert(0, f"{q_clean} — Custom NSE Symbol ({q_clean}.NS)")
+        selected_entry = st.selectbox(f"Matching NSE Stocks ({len(options_list)} shown)", options_list, index=0)
+        raw_sym = selected_entry.split(" — ")[0].strip().upper()
+    else:
+        raw_sym = q_clean or "LICHSGFIN"
+
+ticker = raw_sym if raw_sym.endswith(".NS") else f"{raw_sym}.NS"
+
+with tf_bar_col:
+    st.caption("Candle Interval (Click to Switch)")
+    tf_cols = st.columns(len(INTERVAL_OPTIONS))
+    for idx_tf, tf_label in enumerate(INTERVAL_OPTIONS):
+        is_active = st.session_state.tf_choice == tf_label
+        if tf_cols[idx_tf].button(
+            tf_label,
+            key=f"btn_tf_{tf_label}",
+            type="primary" if is_active else "secondary",
+            use_container_width=True,
+        ):
+            st.session_state.tf_choice = tf_label
+            st.session_state.jump_date = None
+            if tf_label in ["1D", "1W", "1M"] and st.session_state.range_choice in ["1d", "5d"]:
+                st.session_state.range_choice = "1Y"
+            elif tf_label not in ["1D", "1W", "1M"] and st.session_state.range_choice in ["1Y", "5Y", "All"]:
+                st.session_state.range_choice = "1d"
+            st.rerun()
+
+tf_choice = st.session_state.tf_choice
+df, df_4h = fetch_clean_smc(ticker, tf_choice)
+
+if df.empty:
+    st.error(f"No data returned for {ticker}. Check the exact NSE symbol.")
+else:
+    df = df.reset_index(drop=True)
+    df = compute_ai_ml_features(df)
+
+    ltp = float(df["Close"].iloc[-1])
+    latest_vwap = float(df["VWAP"].iloc[-1])
+    latest_chand = float(df["Chandelier_Exit"].iloc[-1])
+    latest_ml_st = float(df["ML_ST"].iloc[-1])
+    latest_st_dir = int(df["ML_ST_Dir"].iloc[-1])
+    latest_nn_rsi = float(df["NN_RSI"].iloc[-1])
+    latest_rvol = float(df["RVOL"].iloc[-1])
+    latest_pb_score = float(df["Profit_Book_Score"].iloc[-1])
+    vol_regime = df["Vol_Regime"].iloc[-1]
+
+    is_intraday_tf = tf_choice in ["1m", "2m", "3m", "5m", "10m", "15m", "30m", "1h", "4h"]
+    if not is_intraday_tf:
+        df["Axis_Str"] = df["Time"].dt.strftime("%d %b '%y")
+    else:
+        is_new_day = df["Time"].dt.date != df["Time"].dt.date.shift(1)
+        df["Axis_Str"] = np.where(
+            is_new_day,
+            df["Time"].dt.strftime("%d %b '%y  %H:%M"),
+            df["Time"].dt.strftime("%H:%M  (%d %b)"),
+        )
+
+    v_col = [
+        "#00E676" if (c >= o and rv >= 1.5) else (
+            "#FF5252" if (c < o and rv >= 1.5) else (
+                "rgba(0,230,118,0.38)" if c >= o else "rgba(255,82,82,0.38)"
+            )
+        )
+        for o, c, rv in zip(df["Open"], df["Close"], df["RVOL"])
+    ]
+
+    def map_time_to_str(ts):
+        idx = int((df["Time"] - ts).abs().idxmin())
+        return df["Axis_Str"].iloc[idx]
+
+    # 4H FVG
+    bull_fvg, bear_fvg = None, None
+    if df_4h is not None and len(df_4h) >= 3:
+        for i in range(len(df_4h) - 1, 1, -1):
+            if bull_fvg is None and (df_4h["Low"].iloc[i] - df_4h["High"].iloc[i - 2]) > 0.05:
+                bull_fvg = (df_4h.index[i - 2], float(df_4h["High"].iloc[i - 2]), float(df_4h["Low"].iloc[i]))
+            if bear_fvg is None and (df_4h["Low"].iloc[i - 2] - df_4h["High"].iloc[i]) > 0.05:
+                bear_fvg = (df_4h.index[i - 2], float(df_4h["High"].iloc[i]), float(df_4h["Low"].iloc[i - 2]))
+            if bull_fvg and bear_fvg:
+                break
+
+    # Bullish Order Block
+    bull_ob = None
+    for i in range(len(df) - 2, 1, -1):
+        if df["Close"].iloc[i] < df["Open"].iloc[i] and df["Close"].iloc[i + 1] > df["Open"].iloc[i + 1] and df["RVOL"].iloc[i + 1] >= 1.4:
+            bull_ob = (df["Axis_Str"].iloc[i], float(df["Low"].iloc[i]), float(df["High"].iloc[i]))
+            break
+
+    # BOS / CHoCH
+    df["SH"] = df["High"] == df["High"].rolling(9, center=True).max()
+    sigs, last_sh = [], None
+    for i in range(4, len(df)):
+        if df["SH"].iloc[i - 4]:
+            last_sh = (df["Axis_Str"].iloc[i - 4], float(df["High"].iloc[i - 4]))
+        if last_sh and float(df["Close"].iloc[i - 1]) <= last_sh[1] and float(df["Close"].iloc[i]) > last_sh[1]:
+            sigs.append({"t_str": df["Axis_Str"].iloc[i], "x0_str": last_sh[0], "y": round(last_sh[1], 2)})
+            last_sh = None
+
+    # BSL / SSL / Equilibrium
+    lookback = min(len(df), 80)
+    bsl_level = round(float(df["High"].iloc[-lookback:].max()), 2)
+    ssl_level = round(float(df["Low"].iloc[-lookback:].min()), 2)
+    eq_level = round((bsl_level + ssl_level) / 2.0, 2)
+    zone_tag = "DISCOUNT (Accumulate) 🟢" if ltp <= eq_level else "PREMIUM (Profit Zone) 🟠"
+
+    # Execution & AI Trailing Levels
+    if bull_ob and bull_ob[1] <= ltp <= bull_ob[2] * 1.02:
+        entry_p = round(bull_ob[2], 2)
+    elif bull_fvg and bull_fvg[1] <= ltp <= bull_fvg[2] * 1.02:
+        entry_p = round(bull_fvg[2], 2)
+    else:
+        entry_p = round(max(latest_vwap, latest_ml_st), 2)
+
+    sl_p = round(min(latest_ml_st * 0.997, entry_p * 0.99), 2)
+    risk = max(entry_p - sl_p, entry_p * 0.008)
+    t1_p = round(entry_p + risk * 1.5, 2)
+    t2_p = round(max(bsl_level, entry_p + risk * 2.5), 2)
+
+    # Push to Session State
+    st.session_state.setdefault("live_scanner_picks", {})["SMC Terminal Blueprint"] = [{
+        "symbol": ticker,
+        "side": "BUY",
+        "entry": float(entry_p),
+        "sl": float(sl_p),
+        "t1": float(t1_p),
+        "t2": float(t2_p),
+        "notes": f"AI Score {latest_pb_score}% | Chandelier ₹{latest_chand:,.2f}",
+    }]
+
+    # --- AI PROFIT-BOOKING & EXECUTION METRICS ---
+    st.subheader(f"🧠 AI/ML Institutional Blueprint & Profit-Booking Radar: {raw_sym} ({tf_choice})")
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1.metric("Last Price", f"₹{ltp:,.2f}", f"RVOL {latest_rvol:.2f}x | {vol_regime}")
+    m2.metric("🤖 ML SuperTrend", f"₹{latest_ml_st:,.2f}", "BULLISH 🟢" if latest_st_dir == 1 else "BEARISH 🔴")
+    m3.metric("🔔 Chandelier Exit", f"₹{latest_chand:,.2f}", "Trail Stop / Book Profit")
+    m4.metric("🎯 T1 / T2 Profit Zones", f"₹{t1_p:,.1f} / ₹{t2_p:,.1f}", zone_tag)
+    m5.metric("🧬 Neural RSI (NN-RSI)", f"{latest_nn_rsi:.1f}", "Overbought Exhaustion ⚠️" if latest_nn_rsi >= 75 else "Healthy Momentum")
+    m6.metric(
+        "💰 AI Profit-Book Score",
+        f"{latest_pb_score:.0f} / 100",
+        "BOOK PROFITS NOW 🔥" if latest_pb_score >= 72 else ("HOLD / TRAIL 📈" if latest_pb_score >= 45 else "ENTRY ZONE 🟢"),
+    )
+
+    # Chart Controls
+    tc1, tc2, tc3, tc4, tc5 = st.columns([2.2, 1.3, 1.3, 1.3, 1.0])
+    with tc1:
+        st.caption(f"**{raw_sym}** · **{tf_choice}** · Regime: **{vol_regime}**")
+    with tc2:
+        with st.popover("📈 AI Indicators", use_container_width=True):
+            st.session_state.selected_indicators = st.multiselect(
+                "Select Indicators", INDICATOR_OPTIONS, default=st.session_state.selected_indicators
+            )
+    with tc3:
+        with st.popover("🧱 SMC & Liquidity", use_container_width=True):
+            st.session_state.show_layers = st.multiselect(
+                "Select SMC Overlays", SMC_LAYER_OPTIONS, default=st.session_state.show_layers
+            )
+    with tc4:
+        with st.popover("⚙️ Settings", use_container_width=True):
+            st.session_state.show_volume = st.checkbox("Show Volume / RVOL", value=st.session_state.show_volume)
+            st.session_state.show_spikes = st.checkbox("Crosshair / Spikes", value=st.session_state.show_spikes)
+            st.session_state.show_trade_lines = st.checkbox("BUY / SL / T1 / T2 Lines", value=st.session_state.show_trade_lines)
+            st.session_state.fit_far_smc_yaxis = st.checkbox("Fit Far SMC Zones", value=st.session_state.fit_far_smc_yaxis)
+    with tc5:
+        if st.button("🔄 Refresh", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+
+    selected_indicators = st.session_state.selected_indicators
+    show_layers = st.session_state.show_layers
+    show_nn_rsi = "Neural RSI (NN-RSI)" in selected_indicators
+
+    panels = ["price"] + (["volume"] if st.session_state.show_volume else []) + (["rsi"] if show_nn_rsi else [])
+    n_rows = len(panels)
+    vol_row = panels.index("volume") + 1 if "volume" in panels else None
+    rsi_row = panels.index("rsi") + 1 if "rsi" in panels else None
+    row_heights = [0.64, 0.18, 0.18] if n_rows == 3 else ([0.78, 0.22] if n_rows == 2 else [1.0])
+
+    fig = make_subplots(
+        rows=n_rows, cols=1, shared_xaxes=True,
+        vertical_spacing=0.025 if n_rows > 1 else 0.01,
+        row_heights=row_heights,
+    )
+
+    # Candlesticks
+    fig.add_trace(
+        go.Candlestick(
+            x=df["Axis_Str"], open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
+            name=ticker, increasing_line_color="#00E676", decreasing_line_color="#FF5252",
+        ),
+        row=1, col=1,
+    )
+
+    # ML Adaptive SuperTrend (Split Bull/Bear segments)
+    if "ML Adaptive SuperTrend" in selected_indicators:
+        bull_st = np.where(df["ML_ST_Dir"] == 1, df["ML_ST"], np.nan)
+        bear_st = np.where(df["ML_ST_Dir"] == -1, df["ML_ST"], np.nan)
+        fig.add_trace(
+            go.Scatter(x=df["Axis_Str"], y=bull_st, mode="lines", name="ML SuperTrend (Bull)",
+                       line=dict(color="#00E676", width=2.2)),
+            row=1, col=1,
+        )
+        fig.add_trace(
+            go.Scatter(x=df["Axis_Str"], y=bear_st, mode="lines", name="ML SuperTrend (Bear)",
+                       line=dict(color="#FF5252", width=2.2)),
+            row=1, col=1,
+        )
+
+    # Chandelier Profit-Lock Exit
+    if "Chandelier Profit Exit" in selected_indicators:
+        fig.add_trace(
+            go.Scatter(x=df["Axis_Str"], y=df["Chandelier_Exit"], mode="lines", name="Chandelier Exit",
+                       line=dict(color="#FFAB00", width=1.6, dash="dashdot")),
+            row=1, col=1,
+        )
+
+    # Keltner Channel
+    if "Keltner Channel" in selected_indicators:
+        fig.add_trace(
+            go.Scatter(x=df["Axis_Str"], y=df["KC_Upper"], mode="lines", name="KC Upper",
+                       line=dict(color="rgba(38, 198, 218, 0.55)", width=1.1, dash="dot")),
+            row=1, col=1,
+        )
+        fig.add_trace(
+            go.Scatter(x=df["Axis_Str"], y=df["KC_Lower"], mode="lines", name="KC Lower",
+                       fill="tonexty", fillcolor="rgba(38, 198, 218, 0.06)",
+                       line=dict(color="rgba(38, 198, 218, 0.55)", width=1.1, dash="dot")),
+            row=1, col=1,
+        )
+
+    # Trend & Profit-Booking Dots (Purple/Gold Profit Dots & Green Entry Dots)
+    if "Trend Dots (Momentum Flip)" in selected_indicators:
+        b_dots = df[df["Bull_Dot"]]
+        p_dots = df[df["Bear_Profit_Dot"]]
+        if not b_dots.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=b_dots["Axis_Str"], y=b_dots["Low"] * 0.9985, mode="markers", name="AI Buy Flip",
+                    marker=dict(color="#00E676", size=9, symbol="circle", line=dict(color="#111", width=1)),
+                ),
+                row=1, col=1,
+            )
+        if not p_dots.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=p_dots["Axis_Str"], y=p_dots["High"] * 1.0015, mode="markers", name="Book Profit / Exhaustion",
+                    marker=dict(color="#E040FB", size=10, symbol="diamond", line=dict(color="#FFF", width=1)),
+                ),
+                row=1, col=1,
+            )
+
+    if "VWAP" in selected_indicators:
+        fig.add_trace(
+            go.Scatter(x=df["Axis_Str"], y=df["VWAP"], mode="lines", name="VWAP",
+                       line=dict(color="#FFD700", width=1.4)),
+            row=1, col=1,
+        )
+    if "20 EMA" in selected_indicators:
+        fig.add_trace(
+            go.Scatter(x=df["Axis_Str"], y=df["EMA20"], mode="lines", name="20 EMA",
+                       line=dict(color="#29B6F6", width=1.2)),
+            row=1, col=1,
+        )
+    if "50 EMA" in selected_indicators:
+        fig.add_trace(
+            go.Scatter(x=df["Axis_Str"], y=df["EMA50"], mode="lines", name="50 EMA",
+                       line=dict(color="#FFA726", width=1.3)),
+            row=1, col=1,
+        )
+    if "200 EMA" in selected_indicators:
+        fig.add_trace(
+            go.Scatter(x=df["Axis_Str"], y=df["EMA200"], mode="lines", name="200 EMA",
+                       line=dict(color="#EC407A", width=1.4)),
+            row=1, col=1,
+        )
+    if "Bollinger Bands" in selected_indicators:
+        fig.add_trace(
+            go.Scatter(x=df["Axis_Str"], y=df["BB_Upper"], mode="lines", name="BB Upper",
+                       line=dict(color="rgba(179,157,219,0.7)", width=1.1, dash="dash")),
+            row=1, col=1,
+        )
+        fig.add_trace(
+            go.Scatter(x=df["Axis_Str"], y=df["BB_Lower"], mode="lines", name="BB Lower",
+                       line=dict(color="rgba(179,157,219,0.7)", width=1.1, dash="dash")),
+            row=1, col=1,
+        )
+
+    # Volume Panel
+    if vol_row is not None:
+        fig.add_trace(
+            go.Bar(x=df["Axis_Str"], y=df["Volume"], name="Volume (RVOL Colored)", marker_color=v_col),
+            row=vol_row, col=1,
+        )
+
+    # Neural-Transformed RSI Panel
+    if rsi_row is not None:
+        fig.add_trace(
+            go.Scatter(x=df["Axis_Str"], y=df["NN_RSI"], mode="lines", name="Neural RSI",
+                       line=dict(color="#E040FB", width=1.8)),
+            row=rsi_row, col=1,
+        )
+        fig.add_trace(
+            go.Scatter(x=df["Axis_Str"], y=df["NN_RSI_Signal"], mode="lines", name="NN Signal",
+                       line=dict(color="#29B6F6", width=1.2, dash="dot")),
+            row=rsi_row, col=1,
+        )
+        fig.add_hline(y=78, line_dash="dot", line_color="#FF5252", line_width=1, row=rsi_row, col=1)
+        fig.add_hline(y=22, line_dash="dot", line_color="#00E676", line_width=1, row=rsi_row, col=1)
+
+    end_str = df["Axis_Str"].iloc[-1]
+
+    # SMC Overlays + Liquidity Rush Annotations
+    if "4H FVG" in show_layers:
+        if bull_fvg:
+            xs_str = map_time_to_str(bull_fvg[0])
+            fig.add_shape(type="rect", x0=xs_str, x1=end_str, y0=bull_fvg[1], y1=bull_fvg[2],
+                          fillcolor="rgba(0, 230, 118, 0.14)", line=dict(color="rgba(0, 230, 118, 0.4)", width=1),
+                          layer="below", row=1, col=1)
+        if bear_fvg:
+            xs_b_str = map_time_to_str(bear_fvg[0])
+            fig.add_shape(type="rect", x0=xs_b_str, x1=end_str, y0=bear_fvg[1], y1=bear_fvg[2],
+                          fillcolor="rgba(255, 82, 82, 0.12)", line=dict(color="rgba(255, 82, 82, 0.4)", width=1),
+                          layer="below", row=1, col=1)
+
+    if "Order Blocks" in show_layers and bull_ob:
+        fig.add_shape(type="rect", x0=bull_ob[0], x1=end_str, y0=bull_ob[1], y1=bull_ob[2],
+                      fillcolor="rgba(41, 182, 246, 0.16)", line=dict(color="#29B6F6", width=1, dash="dot"),
+                      layer="below", row=1, col=1)
+
+    if "Liquidity Rush & Profit Alerts" in show_layers:
+        for _, r_row in df[df["Liq_Rush_Top"]].tail(4).iterrows():
+            fig.add_annotation(
+                x=r_row["Axis_Str"], y=r_row["High"],
+                text=f"🚨 Liq Rush ({r_row['RVOL']:.1f}x) Book Profit",
+                showarrow=True, arrowhead=2, arrowcolor="#FF5252", ay=-26,
+                font=dict(size=10, color="#FF8A80"), bgcolor="rgba(30,0,0,0.7)",
+                row=1, col=1,
+            )
+
+    if "Liquidity (BSL/SSL)" in show_layers:
+        fig.add_hline(y=bsl_level, line_dash="dot", line_color="#AB47BC", line_width=1.2,
+                      annotation_text=f"💧 BSL: ₹{bsl_level:,.2f}", annotation_position="top left",
+                      annotation_font_color="#CE93D8", row=1, col=1)
+        fig.add_hline(y=ssl_level, line_dash="dot", line_color="#FF7043", line_width=1.2,
+                      annotation_text=f"💧 SSL: ₹{ssl_level:,.2f}", annotation_position="bottom left",
+                      annotation_font_color="#FFAB91", row=1, col=1)
+
+    if st.session_state.show_trade_lines:
+        fig.add_hline(y=entry_p, line_dash="solid", line_color="#FFD700", line_width=1.5,
+                      annotation_text=f"🟡 BUY: ₹{entry_p:,.2f}", annotation_position="bottom left",
+                      annotation_font_color="#FFD700", row=1, col=1)
+        fig.add_hline(y=t1_p, line_dash="dash", line_color="#29B6F6", line_width=1.4,
+                      annotation_text=f"🎯 T1: ₹{t1_p:,.2f}", annotation_position="top left",
+                      annotation_font_color="#29B6F6", row=1, col=1)
+        fig.add_hline(y=t2_p, line_dash="dash", line_color="#00E676", line_width=1.4,
+                      annotation_text=f"🚀 T2: ₹{t2_p:,.2f}", annotation_position="top right",
+                      annotation_font_color="#00E676", row=1, col=1)
+
+    # Range Bounds
+    last_ts = df["Time"].iloc[-1]
+    r_sel = st.session_state.range_choice
+    if st.session_state.jump_date is not None:
+        start_idx = max(0, int((df["Time"] - pd.Timestamp(st.session_state.jump_date)).abs().idxmin()))
+    elif r_sel == "1d":
+        last_date = df["Time"].dt.date.iloc[-1]
+        start_idx = max(0, int(df[df["Time"].dt.date == last_date].index[0]) - 3) if is_intraday_tf else max(0, len(df) - 2)
+    elif r_sel == "5d":
+        matches = df[df["Time"] >= last_ts - timedelta(days=5)]
+        start_idx = int(matches.index[0]) if (is_intraday_tf and not matches.empty) else max(0, len(df) - 5)
+    elif r_sel == "1m":
+        matches = df[df["Time"] >= last_ts - timedelta(days=30)]
+        start_idx = int(matches.index[0]) if not matches.empty else 0
+    elif r_sel == "3m":
+        matches = df[df["Time"] >= last_ts - timedelta(days=90)]
+        start_idx = int(matches.index[0]) if not matches.empty else 0
+    elif r_sel == "6m":
+        matches = df[df["Time"] >= last_ts - timedelta(days=180)]
+        start_idx = int(matches.index[0]) if not matches.empty else 0
+    elif r_sel == "YTD":
+        matches = df[df["Time"] >= datetime(last_ts.year, 1, 1)]
+        start_idx = int(matches.index[0]) if not matches.empty else 0
+    elif r_sel == "1Y":
+        matches = df[df["Time"] >= last_ts - timedelta(days=365)]
+        start_idx = int(matches.index[0]) if not matches.empty else 0
+    elif r_sel == "5Y":
+        matches = df[df["Time"] >= last_ts - timedelta(days=365 * 5)]
+        start_idx = int(matches.index[0]) if not matches.empty else 0
+    else:
+        start_idx = 0
+
+    vis_df = df.iloc[start_idx:] if not df.iloc[start_idx:].empty else df
+    y_vals = [float(vis_df["Low"].min()), float(vis_df["High"].max()), ltp, latest_chand]
+    if st.session_state.show_trade_lines:
+        y_vals.extend([entry_p, t1_p])
+    y_min_raw, y_max_raw = min(y_vals), max(y_vals)
+    y_pad = max((y_max_raw - y_min_raw) * 0.08, y_max_raw * 0.005)
+
+    ist_now_str = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%H:%M:%S IST")
+    fig.update_layout(
+        title=f"{raw_sym} ({tf_choice}) | LTP: ₹{ltp:,.2f} | AI Profit Score: {latest_pb_score:.0f}/100 | Chandelier: ₹{latest_chand:,.2f}",
+        template="plotly_dark",
+        height=740 if show_nn_rsi else 650,
+        dragmode="pan",
+        hovermode="x unified",
+        showlegend=False,
+        margin=dict(l=10, r=65, t=42, b=36),
+        yaxis=dict(
+            side="right", title="Price (₹)", range=[y_min_raw - y_pad, y_max_raw + y_pad],
+            showgrid=True, gridcolor="rgba(255,255,255,0.06)",
+            showspikes=st.session_state.show_spikes, spikemode="across", spikesnap="cursor",
+        ),
+    )
+
+    if vol_row is not None:
+        fig.update_yaxes(side="right", title="Volume", showgrid=False, row=vol_row, col=1)
+    if rsi_row is not None:
+        fig.update_yaxes(side="right", title="NN-RSI", range=[0, 100], row=rsi_row, col=1)
+
+    for r_idx in range(1, n_rows + 1):
+        axis_kwargs = dict(
+            type="category", rangeslider_visible=False, range=[start_idx, len(df) + 3],
+            showspikes=st.session_state.show_spikes, spikemode="across", spikesnap="cursor",
+            showgrid=True, gridcolor="rgba(255,255,255,0.06)",
+        )
+        if r_idx == n_rows:
+            axis_kwargs.update(tickmode="auto", nticks=15, tickangle=0, tickfont=dict(size=11, color="#B0BEC5"))
+        fig.update_xaxes(axis_kwargs, row=r_idx, col=1)
+
+    st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
+
+    # Bottom Range Selector
+    rb_cols = st.columns([0.7] * len(RANGE_BUTTONS) + [1.2, 1.5])
+    for idx_r, r_label in enumerate(RANGE_BUTTONS):
+        is_r_active = st.session_state.range_choice == r_label and st.session_state.jump_date is None
+        if rb_cols[idx_r].button(
+            r_label, key=f"btn_range_{r_label}",
+            type="primary" if is_r_active else "secondary", use_container_width=True,
+        ):
+            st.session_state.range_choice = r_label
+            st.session_state.jump_date = None
+            st.rerun()
+
+    with rb_cols[len(RANGE_BUTTONS)]:
+        with st.popover("📅 Jump Date", use_container_width=True):
+            picked = st.date_input(
+                "Go to date",
+                value=st.session_state.jump_date or df["Time"].dt.date.iloc[-1],
+                min_value=df["Time"].dt.date.iloc[0],
+                max_value=df["Time"].dt.date.iloc[-1],
+            )
+            if st.button("Apply Date", use_container_width=True):
+                st.session_state.jump_date = picked
+                st.rerun()
+            if st.session_state.jump_date is not None and st.button("Clear Jump", use_container_width=True):
+                st.session_state.jump_date = None
+                st.rerun()
+
+    with rb_cols[len(RANGE_BUTTONS) + 1]:
+        st.caption(f"🕒 {ist_now_str} · AI/ML Engine Active")
+
+    # --- ADVANCE MULTI-STOCK PROFIT-BOOKING RADAR ---
+    st.divider()
+    st.subheader("📡 Advance AI Profit-Booking & Entry Radar (Multi-Stock Pre-Scanner)")
+    scan_col1, scan_col2 = st.columns([1.5, 4.5])
+    run_scan = scan_col1.button("🚀 Scan Filtered Stocks for Profit-Booking", use_container_width=True)
+    scan_col2.caption("Ranks stocks in advance by AI Profit Score, Chandelier Trailing Exit, NN-RSI Exhaustion & BSL Proximity.")
+
+    if run_scan:
+        with st.spinner("Running AI/ML Volatility & Liquidity Sweep Scan across NSE stocks..."):
+            radar_df = scan_advance_profit_bookings(filtered_stocks or NSE_STOCK_CATALOG)
+            if not radar_df.empty:
+                st.dataframe(radar_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No intraday bars returned right now (market closed or ticker limit). Try again during market hours.")
