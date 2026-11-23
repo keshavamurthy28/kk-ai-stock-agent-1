@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
+import os
 import time
 import numpy as np
 import pandas as pd
@@ -8,6 +9,13 @@ from plotly.subplots import make_subplots
 import pytz
 import streamlit as st
 import yfinance as yf
+
+try:
+    from kiteconnect import KiteConnect
+    KITE_SDK_AVAILABLE = True
+except ImportError:
+    KiteConnect = None
+    KITE_SDK_AVAILABLE = False
 
 st.set_page_config(page_title="AI/ML Advanced SMC & Profit-Booking Terminal", layout="wide")
 st.title("🧠 AI/ML Adaptive SMC, Liquidity Sweep & Profit-Booking Terminal")
@@ -136,12 +144,56 @@ defaults = {
     "show_trade_lines": True,
     "fit_far_smc_yaxis": False,
     "auto_refresh": False,
-    "refresh_interval_sec": 15,
+    "refresh_interval_sec": 5,
     "jump_date": None,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
+
+def _get_kite_credentials():
+    api_key = os.getenv("KITE_API_KEY", "").strip()
+    access_token = os.getenv("KITE_ACCESS_TOKEN", "").strip()
+    try:
+        if not api_key and "kite" in st.secrets:
+            api_key = str(st.secrets["kite"].get("api_key", "")).strip()
+        if not access_token and "kite" in st.secrets:
+            access_token = str(st.secrets["kite"].get("access_token", "")).strip()
+    except Exception:
+        pass
+    return api_key, access_token
+
+
+@st.cache_resource
+def get_kite_client():
+    if not KITE_SDK_AVAILABLE:
+        return None
+    api_key, access_token = _get_kite_credentials()
+    if not api_key or not access_token:
+        return None
+    try:
+        kite = KiteConnect(api_key=api_key)
+        kite.set_access_token(access_token)
+        return kite
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=86400)
+def get_nse_token_map() -> dict:
+    kite = get_kite_client()
+    if kite is None:
+        return {}
+    try:
+        insts = kite.instruments("NSE")
+        return {
+            str(item["tradingsymbol"]).upper(): int(item["instrument_token"])
+            for item in insts
+            if item.get("tradingsymbol") and item.get("instrument_token")
+        }
+    except Exception:
+        return {}
 
 
 def _switch_timeframe(tf_label: str):
@@ -280,16 +332,94 @@ def compute_ai_ml_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-@st.cache_data(ttl=300)
-def fetch_4h_context(sym: str) -> pd.DataFrame:
-    t_obj = yf.Ticker(sym)
-    df4 = t_obj.history(period="60d", interval="1h", auto_adjust=True)
+def _normalize_ist_naive(series_or_idx):
+    dt = pd.to_datetime(series_or_idx)
+    if getattr(dt, "tz", None) is not None:
+        return dt.tz_convert("Asia/Kolkata").tz_localize(None)
+    return dt
+
+
+def _fetch_kite_candles(raw_sym: str, tf: str) -> pd.DataFrame:
+    kite = get_kite_client()
+    token_map = get_nse_token_map()
+    token = token_map.get(raw_sym.upper())
+    if kite is None or not token:
+        return pd.DataFrame()
+
+    days_map = {
+        "1m": 5, "2m": 5, "3m": 5, "5m": 10, "10m": 10,
+        "15m": 15, "30m": 30, "45m": 30,
+        "1h": 60, "2h": 60, "3h": 60, "4h": 60,
+        "1D": 730, "1W": 1460, "1M": 1825, "3M": 1825, "6M": 1825, "12M": 1825,
+    }
+    kite_iv_map = {
+        "1m": "minute", "2m": "minute", "3m": "3minute", "5m": "5minute", "10m": "5minute",
+        "15m": "15minute", "30m": "30minute", "45m": "15minute",
+        "1h": "60minute", "2h": "60minute", "3h": "60minute", "4h": "60minute",
+        "1D": "day", "1W": "day", "1M": "day", "3M": "day", "6M": "day", "12M": "day",
+    }
+
+    ist = pytz.timezone("Asia/Kolkata")
+    to_dt = datetime.now(ist)
+    from_dt = to_dt - timedelta(days=days_map.get(tf, 10))
+    raw = kite.historical_data(
+        instrument_token=token,
+        from_date=from_dt.strftime("%Y-%m-%d %H:%M:%S"),
+        to_date=to_dt.strftime("%Y-%m-%d %H:%M:%S"),
+        interval=kite_iv_map.get(tf, "5minute"),
+        continuous=False,
+        oi=False,
+    )
+    if not raw:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(raw)
+    df.rename(columns={"date": "Time", "open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}, inplace=True)
+    df["Time"] = _normalize_ist_naive(df["Time"])
+    df["Volume"] = df.get("Volume", 0).fillna(0)
+    return df[["Time", "Open", "High", "Low", "Close", "Volume"]]
+
+
+def _resample_df(df: pd.DataFrame, tf: str) -> pd.DataFrame:
+    rule_map = {
+        "2m": ("2min", "0min"),
+        "10m": ("10min", "0min"),
+        "45m": ("45min", "15min"),
+        "2h": ("2h", "15min"),
+        "3h": ("3h", "15min"),
+        "4h": ("4h", "15min"),
+        "1W": ("1W-FRI", None),
+        "1M": ("ME", None),
+        "3M": ("3ME", None),
+        "6M": ("6ME", None),
+        "12M": ("12ME", None),
+    }
+    if tf not in rule_map:
+        return df
+    rule, offset = rule_map[tf]
+    resampler = df.set_index("Time").resample(rule, offset=offset) if offset else df.set_index("Time").resample(rule)
+    return (
+        resampler.agg({"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"})
+        .dropna(subset=["Open", "High", "Low", "Close"])
+        .reset_index()
+    )
+
+
+@st.cache_data(ttl=60)
+def fetch_4h_context(raw_sym: str, yf_sym: str) -> pd.DataFrame:
+    kite_1h = _fetch_kite_candles(raw_sym, "1h")
+    if not kite_1h.empty:
+        return (
+            kite_1h.set_index("Time")
+            .resample("4h", offset="15min")
+            .agg({"Open": "first", "High": "max", "Low": "min", "Close": "last"})
+            .dropna()
+        )
+    df4 = yf.Ticker(yf_sym).history(period="60d", interval="1h", auto_adjust=False)
     if df4 is None or df4.empty or not {"Open", "High", "Low", "Close"}.issubset(set(df4.columns)):
         return pd.DataFrame()
     df4 = df4.copy()
-    df4.index = pd.to_datetime(df4.index)
-    if df4.index.tz is not None:
-        df4.index = df4.index.tz_convert("Asia/Kolkata").tz_localize(None)
+    df4.index = _normalize_ist_naive(df4.index)
     return (
         df4.resample("4h", offset="15min")
         .agg({"Open": "first", "High": "max", "Low": "min", "Close": "last"})
@@ -297,21 +427,35 @@ def fetch_4h_context(sym: str) -> pd.DataFrame:
     )
 
 
-@st.cache_data(ttl=10)
-def fetch_fast_quote(sym: str):
+@st.cache_data(ttl=2)
+def fetch_live_ltp(raw_sym: str, yf_sym: str, fallback_close: float):
+    kite = get_kite_client()
+    if kite is not None:
+        key = f"NSE:{raw_sym.upper()}"
+        try:
+            q = kite.quote([key])
+            if isinstance(q, dict) and key in q and q[key].get("last_price"):
+                return float(q[key]["last_price"]), "Kite Live"
+        except Exception:
+            pass
     try:
-        info = yf.Ticker(sym).fast_info
-        for attr in ("last_price", "regularMarketPrice", "previous_close"):
+        info = yf.Ticker(yf_sym).fast_info
+        for attr in ("last_price", "regularMarketPrice"):
             val = getattr(info, attr, None)
             if val is not None and float(val) > 0:
-                return float(val)
+                return float(val), "yfinance Quote"
     except Exception:
         pass
-    return None
+    return float(fallback_close), "Bar Close"
 
 
-@st.cache_data(ttl=15)
-def fetch_clean_smc(sym: str, tf: str):
+@st.cache_data(ttl=5)
+def fetch_clean_smc(raw_sym: str, yf_sym: str, tf: str):
+    df4 = fetch_4h_context(raw_sym, yf_sym)
+    kite_df = _fetch_kite_candles(raw_sym, tf)
+    if not kite_df.empty:
+        return _resample_df(kite_df, tf), df4
+
     p_map = {
         "1m": "5d", "2m": "5d", "3m": "5d", "5m": "10d", "10m": "10d",
         "15m": "15d", "30m": "30d", "45m": "30d",
@@ -324,55 +468,30 @@ def fetch_clean_smc(sym: str, tf: str):
         "1h": "1h", "2h": "1h", "3h": "1h", "4h": "1h",
         "1D": "1d", "1W": "1wk", "1M": "1mo", "3M": "3mo", "6M": "1mo", "12M": "1mo",
     }
-
-    t_obj = yf.Ticker(sym)
-    df = t_obj.history(period=p_map[tf], interval=i_map[tf], auto_adjust=True)
-    df4 = fetch_4h_context(sym)
-
+    df = yf.Ticker(yf_sym).history(period=p_map[tf], interval=i_map[tf], auto_adjust=False)
     req = {"Open", "High", "Low", "Close", "Volume"}
     if df is None or df.empty or not req.issubset(set(df.columns)):
         return pd.DataFrame(), df4
 
     df = df.reset_index()
     df.rename(columns={df.columns[0]: "Time"}, inplace=True)
-    df["Time"] = pd.to_datetime(df["Time"])
-    if df["Time"].dt.tz is not None:
-        df["Time"] = df["Time"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
-
-    if tf in ["2m", "3m", "10m", "45m", "2h", "3h", "4h", "6M", "12M"]:
-        rule_map = {
-            "2m": ("2min", "0min"),
-            "3m": ("3min", "0min"),
-            "10m": ("10min", "0min"),
-            "45m": ("45min", "15min"),
-            "2h": ("2h", "15min"),
-            "3h": ("3h", "15min"),
-            "4h": ("4h", "15min"),
-            "6M": ("6ME", None),
-            "12M": ("12ME", None),
-        }
-        rule, offset = rule_map[tf]
-        resampler = df.set_index("Time").resample(rule, offset=offset) if offset else df.set_index("Time").resample(rule)
-        df = (
-            resampler.agg({"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"})
-            .dropna(subset=["Open", "High", "Low", "Close"])
-            .reset_index()
-        )
-
-    return df, df4
+    df["Time"] = _normalize_ist_naive(df["Time"])
+    return _resample_df(df, tf), df4
 
 
 def _scan_single_stock(item):
-    sym, name, sec, _ = item
+    sym, _, sec, _ = item
     try:
-        d = yf.Ticker(f"{sym}.NS").history(period="15d", interval="15m", auto_adjust=True)
-        if d is None or len(d) < 30:
+        d = _fetch_kite_candles(sym, "15m")
+        if d.empty:
+            d = yf.Ticker(f"{sym}.NS").history(period="15d", interval="15m", auto_adjust=False)
+            if d is None or d.empty:
+                return None
+            d = d.reset_index()
+            d.rename(columns={d.columns[0]: "Time"}, inplace=True)
+            d["Time"] = _normalize_ist_naive(d["Time"])
+        if len(d) < 30:
             return None
-        d = d.reset_index()
-        d.rename(columns={d.columns[0]: "Time"}, inplace=True)
-        d["Time"] = pd.to_datetime(d["Time"])
-        if d["Time"].dt.tz is not None:
-            d["Time"] = d["Time"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
         d = compute_ai_ml_features(d)
 
         ltp = float(d["Close"].iloc[-1])
@@ -406,7 +525,7 @@ def _scan_single_stock(item):
         return None
 
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=30)
 def scan_advance_profit_bookings(catalog_subset):
     """Pre-scans stocks concurrently to highlight where to book profits or enter early."""
     subset = list(catalog_subset)[:18]
@@ -462,19 +581,19 @@ with kf4:
     else:
         raw_sym = q_clean or "LICHSGFIN"
 
-ticker = raw_sym if raw_sym.endswith(".NS") else f"{raw_sym}.NS"
+raw_sym = raw_sym.replace(".NS", "").strip().upper()
+yf_ticker = f"{raw_sym}.NS"
 tf_choice = st.session_state.tf_choice
-df, df_4h = fetch_clean_smc(ticker, tf_choice)
+df, df_4h = fetch_clean_smc(raw_sym, yf_ticker, tf_choice)
 
 if df.empty:
-    st.error(f"No data returned for {ticker} on {tf_choice} interval. Try switching interval or check NSE symbol.")
+    st.error(f"No data returned for {raw_sym} on {tf_choice} interval. Try switching interval or check NSE symbol.")
 else:
     df = df.reset_index(drop=True)
     df = compute_ai_ml_features(df)
 
     bar_close = float(df["Close"].iloc[-1])
-    fast_px = fetch_fast_quote(ticker)
-    ltp = fast_px if fast_px is not None else bar_close
+    ltp, price_source = fetch_live_ltp(raw_sym, yf_ticker, bar_close)
 
     latest_vwap = float(df["VWAP"].iloc[-1])
     latest_chand = float(df["Chandelier_Exit"].iloc[-1])
@@ -559,7 +678,7 @@ else:
 
     # Push to Session State
     st.session_state.setdefault("live_scanner_picks", {})["SMC Terminal Blueprint"] = [{
-        "symbol": ticker,
+        "symbol": raw_sym,
         "side": "BUY",
         "entry": float(entry_p),
         "sl": float(sl_p),
@@ -569,7 +688,7 @@ else:
     }]
 
     # --- AI PROFIT-BOOKING & EXECUTION METRICS ---
-    st.subheader(f"🧠 AI/ML Institutional Blueprint & Profit-Booking Radar: {raw_sym} ({tf_choice})")
+    st.subheader(f"🧠 AI/ML Institutional Blueprint & Profit-Booking Radar: {raw_sym} ({tf_choice}) · {price_source}")
     m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("Last Price", f"₹{ltp:,.2f}", f"Close ₹{bar_close:,.2f} | RVOL {latest_rvol:.2f}x")
     m2.metric("🤖 ML SuperTrend", f"₹{latest_ml_st:,.2f}", "BULLISH 🟢" if latest_st_dir == 1 else "BEARISH 🔴")
@@ -602,7 +721,7 @@ else:
     fig.add_trace(
         go.Candlestick(
             x=df["Axis_Str"], open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
-            name=ticker, increasing_line_color="#00E676", decreasing_line_color="#FF5252",
+            name=raw_sym, increasing_line_color="#00E676", decreasing_line_color="#FF5252",
         ),
         row=1, col=1,
     )
@@ -826,7 +945,13 @@ else:
     y_min_raw, y_max_raw = min(y_vals), max(y_vals)
     y_pad = max((y_max_raw - y_min_raw) * 0.08, y_max_raw * 0.005)
 
-    ist_now_str = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%H:%M:%S")
+    ist_now = datetime.now(pytz.timezone("Asia/Kolkata"))
+    ist_now_str = ist_now.strftime("%H:%M:%S")
+    market_open_minutes = 9 * 60 + 15
+    market_close_minutes = 15 * 60 + 30
+    now_minutes = ist_now.hour * 60 + ist_now.minute
+    session_tag = "RTH" if (ist_now.weekday() < 5 and market_open_minutes <= now_minutes <= market_close_minutes) else "CLOSED"
+
     fig.update_layout(
         title=dict(
             text=f"{raw_sym} ({tf_choice}) | LTP: ₹{ltp:,.2f} | AI Profit Score: {latest_pb_score:.0f}/100 | Chandelier: ₹{latest_chand:,.2f}",
@@ -864,7 +989,6 @@ else:
             axis_kwargs.update(tickmode="auto", nticks=15, tickangle=0, tickfont=dict(size=11, color="#B0BEC5"))
         fig.update_xaxes(axis_kwargs, row=r_idx, col=1)
 
-    # TradingView-Style Connected Top Toolbar + Connected Bottom Toolbar CSS
     st.markdown(
         """
         <style>
@@ -937,7 +1061,6 @@ else:
         unsafe_allow_html=True,
     )
 
-    # --- CONNECTED TOP TRADINGVIEW BAR ---
     with st.container(border=True):
         st.markdown('<div class="tv-top-bar-marker" style="display:none;"></div>', unsafe_allow_html=True)
         top_weights = [0.46] * len(PRIMARY_INTERVALS) + [0.10, 0.65, 0.10, 1.35, 1.35, 1.05, 0.45]
@@ -1004,7 +1127,7 @@ else:
                 st.divider()
                 st.session_state.auto_refresh = st.checkbox("Auto-Refresh Poll", value=st.session_state.auto_refresh)
                 st.session_state.refresh_interval_sec = st.slider(
-                    "Poll Interval (sec)", min_value=10, max_value=120, value=int(st.session_state.refresh_interval_sec), step=5
+                    "Poll Interval (sec)", min_value=3, max_value=60, value=int(st.session_state.refresh_interval_sec), step=1
                 )
 
         with top_cols[len(PRIMARY_INTERVALS) + 6]:
@@ -1012,10 +1135,8 @@ else:
                 st.cache_data.clear()
                 st.rerun()
 
-    # --- MAIN CHART CANVAS ---
     st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
-    # --- CONNECTED BOTTOM TRADINGVIEW BAR ---
     TV_RANGE_LABELS = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "All"]
     TV_COL_WEIGHTS = [0.55, 0.55, 0.58, 0.58, 0.58, 0.72, 0.55, 0.55, 0.65, 0.12, 0.62, 3.2, 2.3]
     with st.container(border=True):
@@ -1059,14 +1180,13 @@ else:
         with bar_cols[-1]:
             st.markdown(
                 f"<div style='text-align:right; color:#D1D4DC; font-size:12px; font-family:monospace; padding-top:4px; white-space:nowrap;'>"
-                f"{ist_now_str} UTC+5:30   RTH "
+                f"{ist_now_str} UTC+5:30 &nbsp; {session_tag} "
                 f"<span style='color:#2A2E39;'>|</span> "
-                f"<span style='color:#2962FF; font-weight:600;'>ADJ</span>"
+                f"<span style='color:#2962FF; font-weight:600;'>{price_source}</span>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
 
-    # --- ADVANCE MULTI-STOCK PROFIT-BOOKING RADAR ---
     st.divider()
     st.subheader("📡 Advance AI Profit-Booking & Entry Radar (Multi-Stock Pre-Scanner)")
     scan_col1, scan_col2 = st.columns([1.5, 4.5])
@@ -1081,7 +1201,6 @@ else:
             else:
                 st.info("No intraday bars returned right now (market closed or ticker limit). Try again during market hours.")
 
-    # Optional auto-refresh loop when enabled in Settings
     if st.session_state.auto_refresh:
         time.sleep(int(st.session_state.refresh_interval_sec))
         st.rerun()
