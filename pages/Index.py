@@ -1,4 +1,5 @@
 from datetime import datetime, time as dt_time
+import math
 import time
 import numpy as np
 import pandas as pd
@@ -22,6 +23,7 @@ is_market_open = (
 )
 
 ADVANCE_ALERT_POINTS = 40.0
+LOT_SIZE = 65
 EXPIRY_CHOICES = [
     "23 Nov (Today)",
     "1 Dec (8 days)",
@@ -37,7 +39,7 @@ with head_col1:
     st.title("⚡ Nifty Options Top Action & Expiry Guide")
     st.markdown(
         "Plain-English **Top Trade Table** for **NIFTY 50** options across expiry dates "
-        "with a **₹5,000 profit goal** and **expiry exit warnings**. "
+        "with a **₹5,000 profit goal**, **lots needed**, and **expiry exit warnings**. "
         "*(Educational tool only — no guaranteed profit; verify live prices on Kite.)*"
     )
 
@@ -57,9 +59,9 @@ with head_col2:
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 1. CONTROLS (EXPIRY DATES, 65-QTY LOTS, PROFIT GOAL)
+# 1. CONTROLS (EXPIRY DATES, LOTS, PROFIT GOAL, EXPECTED PT MOVE)
 # ---------------------------------------------------------
-col_c1, col_c2, col_c3, col_c4 = st.columns([1.9, 1.4, 1.4, 1.3])
+col_c1, col_c2, col_c3, col_c4, col_c5 = st.columns([1.7, 1.3, 1.2, 1.2, 1.2])
 
 with col_c1:
     expiry_choice = st.selectbox(
@@ -70,7 +72,7 @@ with col_c1:
 
 with col_c2:
     lot_multiplier = st.selectbox(
-        "📦 Quantity (1 Lot = 65 Qty)",
+        "📦 Selected Lots (1 Lot = 65)",
         [
             "1 Lot (65 Qty)",
             "2 Lots (130 Qty)",
@@ -90,6 +92,15 @@ with col_c3:
     )
 
 with col_c4:
+    expected_pt_gain = st.number_input(
+        "📈 Expected Pt Gain",
+        min_value=1.0,
+        max_value=500.0,
+        value=15.0,
+        step=1.0,
+    )
+
+with col_c5:
     timeframe_choice = st.selectbox(
         "⏱️ Chart Speed",
         ["15m (Intraday)", "5m (Quick Scalp)", "1h (Broader Move)"],
@@ -224,7 +235,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
     spot_ltp = float(df["Close"].iloc[-1])
     prev_close = float(df["Close"].iloc[-2])
     spot_chg = round(((spot_ltp - prev_close) / prev_close) * 100, 2)
-    current_vix = round(float(df_vix["Close"].iloc[-1]), 2) if not df_vix.empty else 18.20
+    current_vix = round(float(df_vix["Close"].iloc[-1]), 2) if not df_vix.empty else 18.25
 
     df["EMA9"] = df["Close"].ewm(span=9, adjust=False).mean()
     df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
@@ -370,8 +381,14 @@ intel = fetch_predictive_nifty_engine(expiry_choice, period_val, interval_val)
 if not intel:
     st.error("⚠️ Could not load Nifty data right now. Click **Refresh Now** to try again.")
 else:
-    pts_needed_for_goal = round(profit_goal_rs / max(selected_qty, 1), 2)
-    goal_exit_prem = round(intel["Entry"] + pts_needed_for_goal, 2)
+    profit_per_lot_at_exp_pts = expected_pt_gain * LOT_SIZE
+    lots_needed_for_goal = max(1, math.ceil(profit_goal_rs / max(profit_per_lot_at_exp_pts, 1.0)))
+    qty_needed_for_goal = lots_needed_for_goal * LOT_SIZE
+    est_cost_for_goal_lots = round(intel["Entry"] * qty_needed_for_goal, 2)
+    est_max_loss_for_goal_lots = round((intel["Entry"] - intel["SL"]) * qty_needed_for_goal, 2)
+
+    pts_needed_for_selected_lots = round(profit_goal_rs / max(selected_qty, 1), 2)
+    goal_exit_prem = round(intel["Entry"] + pts_needed_for_selected_lots, 2)
     investment_needed = round(intel["Entry"] * selected_qty, 2)
     max_loss_at_sl = round((intel["Entry"] - intel["SL"]) * selected_qty, 2)
 
@@ -387,25 +404,24 @@ else:
                 "sl": float(intel["SL"]),
                 "t1": float(goal_exit_prem),
                 "t2": float(round(goal_exit_prem * 1.15, 2)),
-                "notes": f"{intel['Verdict']} | {expiry_choice} | Goal ₹{profit_goal_rs} | Exit by {exit_cutoff_time}",
+                "notes": f"{intel['Verdict']} | Lots needed: {lots_needed_for_goal} | Goal ₹{profit_goal_rs}",
             }
         ]
     else:
         st.session_state.setdefault("live_scanner_picks", {})["Index Options Alpha Sniper"] = []
 
-    # 1. TOP ACTION TABLE
-    st.markdown("### 🎯 Top Action Table: What to Trade & How to Book Profit")
+    # 1. TOP ACTION TABLE WITH LOTS NEEDED FOR ₹5,000
+    st.markdown("### 🎯 Top Action Table: What to Trade, Lots Needed & How to Book Profit")
     strike_display = f"{intel['Strike']} {intel['OptType']}" if intel["OptType"] in ("CE", "PE") else "WAIT (Skip)"
 
     top_action_df = pd.DataFrame([
         {
             "Expiry": expiry_choice,
             "Suggested Setup": strike_display,
-            "Side": "BUY (Long Option)" if intel["OptType"] in ("CE", "PE") else "NO TRADE",
-            "Est. Buy Price": f"₹{intel['Entry']:.2f} (~₹{investment_needed:,.0f} for {selected_qty} qty)",
-            "Sell Target for ₹5k": f"₹{goal_exit_prem:.2f} (+{pts_needed_for_goal:.2f} pts → +₹{profit_goal_rs:,.0f})",
-            "Stop-Loss": f"₹{intel['SL']:.2f} (-₹{max_loss_at_sl:,.0f} max loss)",
-            "When to Sell / Exit": f"Sell at ₹{goal_exit_prem:.2f} OR stop-loss OR by {exit_cutoff_time}",
+            "Lots Needed for ₹5k": f"{lots_needed_for_goal} lots ({qty_needed_for_goal} qty @ +{expected_pt_gain:.0f} pts)",
+            "Est. Cost (Needed Lots)": f"~₹{est_cost_for_goal_lots:,.0f} (Max SL loss: -₹{est_max_loss_for_goal_lots:,.0f})",
+            "Selected Lots Plan": f"{lot_multiplier}: need +{pts_needed_for_selected_lots:.2f} pts → ₹{goal_exit_prem:.2f}",
+            "When to Sell / Exit": f"Sell at target OR stop-loss OR by {exit_cutoff_time}",
         }
     ])
     st.dataframe(top_action_df, use_container_width=True, hide_index=True)
@@ -420,8 +436,8 @@ else:
 
     if is_same_day_expiry:
         st.error(
-            f"⏰ **EXPIRY WARNING ({expiry_choice}):** Today's expiry contracts decay fast and can drop to ₹0 if Nifty stalls. "
-            f"**Sell by {exit_cutoff_time}** or book profit at **₹{goal_exit_prem:.2f}**."
+            f"⏰ **EXPIRY WARNING ({expiry_choice}):** Buying more lots increases both profit potential and loss risk. "
+            f"**Sell by {exit_cutoff_time}** or book profit when your target is reached."
         )
     else:
         st.warning(
@@ -431,9 +447,9 @@ else:
 
     # 3. QUICK METRICS & EXPIRY SNAPSHOT ACROSS DATES
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Nifty 50 Now", f"₹{intel['Spot']:,.2f}", f"{intel['Change']:+.2f}%")
-    m2.metric("Ceiling / Floor", f"₹{intel['Resistance']:,.0f} / ₹{intel['Support']:,.0f}", f"+{dist_up:.0f} up | -{dist_dn:.0f} dn")
-    m3.metric("Pts Needed for Goal", f"+{pts_needed_for_goal:.2f} pts", f"Target ₹{profit_goal_rs:,.0f}")
+    m1.metric("Lots Needed for Goal", f"{lots_needed_for_goal} Lots", f"{qty_needed_for_goal} qty @ +{expected_pt_gain:.0f} pts")
+    m2.metric("Nifty 50 Now", f"₹{intel['Spot']:,.2f}", f"{intel['Change']:+.2f}%")
+    m3.metric("Ceiling / Floor", f"₹{intel['Resistance']:,.0f} / ₹{intel['Support']:,.0f}", f"+{dist_up:.0f} up | -{dist_dn:.0f} dn")
     m4.metric("Data Source", intel["OCSource"].split(" (")[0], f"PCR {intel['PCR']}")
 
     st.markdown("#### 📅 Expiry Dates Overview (Same Rule Applied)")
@@ -441,9 +457,9 @@ else:
         {
             "Expiry Tab": exp_name,
             "Selected": "✅ Active" if exp_name == expiry_choice else "",
+            "Lots Needed (Est.)": f"{lots_needed_for_goal} lots ({qty_needed_for_goal} qty)",
             "Time Decay Risk": "Very High (Same-Day)" if "Today" in exp_name else ("Moderate-High" if "8 days" in exp_name else "Lower (More Time)"),
             "Suggested Exit Cutoff": "2:00 PM IST" if "Today" in exp_name else "3:00 PM IST",
-            "Layman Note": "Fastest moves & fastest decay—strict exit time." if "Today" in exp_name else "More time cushion, still book profit on target/cutoff.",
         }
         for exp_name in EXPIRY_CHOICES
     ])
