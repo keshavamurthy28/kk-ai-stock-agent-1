@@ -46,7 +46,7 @@ with head_col1:
     st.title("⚡ Nifty Options Top Action & Expiry Guide")
     st.markdown(
         "Plain-English **Top Trade Table** for **NIFTY 50** options with a **₹5,000 profit goal**, "
-        "**exact Buy / Sell / Stop-Loss prices**, **expiry exit warnings**, and a "
+        "**color-coded BUY / SELL / STOP-LOSS prices**, **expiry exit warnings**, and a "
         "**Kite-colored Option Chain table** below the chart. "
         "*(Educational tool only — verify live prices on Kite.)*"
     )
@@ -320,7 +320,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
     spot_ltp = float(df["Close"].iloc[-1])
     prev_close = float(df["Close"].iloc[-2])
     spot_chg = round(((spot_ltp - prev_close) / prev_close) * 100, 2)
-    current_vix = round(float(df_vix["Close"].iloc[-1]), 2) if not df_vix.empty else 18.37
+    current_vix = round(float(df_vix["Close"].iloc[-1]), 2) if not df_vix.empty else 18.20
 
     df["EMA9"] = df["Close"].ewm(span=9, adjust=False).mean()
     df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
@@ -357,33 +357,47 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
     support_level = round(float(recent_window["Low"].min()), 2)
 
     score = 0
+    reasons = []
+
     if df["EMA9"].iloc[-1] > df["EMA20"].iloc[-1] > df["EMA50"].iloc[-1]:
         score += 30
+        reasons.append("EMAs aligned UP")
     elif df["EMA9"].iloc[-1] < df["EMA20"].iloc[-1] < df["EMA50"].iloc[-1]:
         score -= 30
+        reasons.append("EMAs aligned DOWN")
     elif df["EMA9"].iloc[-1] > df["EMA20"].iloc[-1]:
         score += 15
+        reasons.append("9 EMA above 20 EMA")
     else:
         score -= 15
+        reasons.append("9 EMA below 20 EMA")
 
     if spot_ltp > df["VWAP"].iloc[-1]:
         score += 20
+        reasons.append("above VWAP")
     else:
         score -= 20
+        reasons.append("below VWAP")
 
     if latest_rsi > 55 and rsi_slope > 0:
         score += 25
+        reasons.append(f"RSI {latest_rsi:.0f} rising")
     elif latest_rsi < 45 and rsi_slope < 0:
         score -= 25
+        reasons.append(f"RSI {latest_rsi:.0f} falling")
     elif rsi_slope > 3:
         score += 15
+        reasons.append("RSI momentum up")
     elif rsi_slope < -3:
         score -= 15
+        reasons.append("RSI momentum down")
 
     if hist_now > 0 and hist_now > hist_prev:
         score += 25
+        reasons.append("MACD expanding up")
     elif hist_now < 0 and hist_now < hist_prev:
         score -= 25
+        reasons.append("MACD expanding down")
     elif hist_now > hist_prev:
         score += 10
     else:
@@ -425,14 +439,17 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
 
     if score >= 10:
         opt_type = "CE"
+        action_side = "BUY"
         verdict = "BUY CALL (CE)" if score >= 35 else "CAUTIOUS BUY CALL (CE)"
         entry_prem = round(live_ce_prem, 2)
     elif score <= -10:
         opt_type = "PE"
+        action_side = "BUY"
         verdict = "BUY PUT (PE)" if score <= -35 else "CAUTIOUS BUY PUT (PE)"
         entry_prem = round(live_pe_prem, 2)
     else:
         opt_type = "WAIT"
+        action_side = "NO TRADE"
         verdict = "SKIP TRADE (CHOPPY)"
         entry_prem = round(min(live_ce_prem, live_pe_prem), 2)
 
@@ -448,7 +465,9 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         "RSI": round(latest_rsi, 1),
         "RSISlope": rsi_slope,
         "Score": score,
+        "ReasonSummary": ", ".join(reasons[:3]),
         "Verdict": verdict,
+        "ActionSide": action_side,
         "OptType": opt_type,
         "Strike": rec_strike,
         "Resistance": resistance_level,
@@ -461,6 +480,42 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         "DataFrame": df,
         "ChainDF": chain_df,
     }
+
+
+def style_action_tables(top_df: pd.DataFrame, price_df: pd.DataFrame, is_buy_signal: bool):
+    def color_top_row(row):
+        buy_bg = "rgba(0, 230, 118, 0.14)" if is_buy_signal else "rgba(158, 158, 158, 0.12)"
+        buy_fg = "#00e676" if is_buy_signal else "#bdbdbd"
+        return [
+            "background-color: #181818; color: #f5f5f5;",
+            f"background-color: {buy_bg}; color: {buy_fg}; font-weight: 700;",
+            f"background-color: {buy_bg}; color: {buy_fg}; font-weight: 700;",
+            "background-color: #181818; color: #e0e0e0;",
+            "background-color: #181818; color: #e0e0e0;",
+            "background-color: #181818; color: #ffd54f;",
+            "background-color: #181818; color: #f5f5f5;",
+        ]
+
+    def color_price_row(row):
+        buy_style = (
+            "background-color: rgba(0, 230, 118, 0.15); color: #00e676; font-weight: 700;"
+            if is_buy_signal
+            else "background-color: rgba(158, 158, 158, 0.12); color: #bdbdbd; font-weight: 600;"
+        )
+        sell_style = "background-color: rgba(0, 229, 255, 0.14); color: #4dd0e1; font-weight: 700;"
+        sl_style = "background-color: rgba(255, 82, 82, 0.16); color: #ff5252; font-weight: 700;"
+        return [
+            "background-color: #181818; color: #ffffff; font-weight: 600;",
+            "background-color: #181818; color: #ffffff; font-weight: 700;",
+            buy_style,
+            sell_style,
+            sl_style,
+            "background-color: #181818; color: #ffd54f;",
+        ]
+
+    styled_top = top_df.style.apply(color_top_row, axis=1)
+    styled_price = price_df.style.apply(color_price_row, axis=1)
+    return styled_top, styled_price
 
 
 def render_kite_colored_chain(df: pd.DataFrame):
@@ -541,6 +596,7 @@ intel = fetch_predictive_nifty_engine(expiry_choice, period_val, interval_val)
 if not intel:
     st.error("⚠️ Could not load Nifty data right now. Click **Refresh Now** to try again.")
 else:
+    is_buy_signal = intel["OptType"] in ("CE", "PE")
     profit_per_lot_at_exp_pts = expected_pt_gain * LOT_SIZE
     lots_needed_for_goal = max(1, math.ceil(profit_goal_rs / max(profit_per_lot_at_exp_pts, 1.0)))
     qty_needed_for_goal = lots_needed_for_goal * LOT_SIZE
@@ -556,7 +612,7 @@ else:
     is_same_day_expiry = "Today" in expiry_choice
     exit_cutoff_time = "2:00 PM IST (before sharp expiry decay)" if is_same_day_expiry else "3:00 PM IST (intraday exit)"
 
-    if intel["OptType"] in ("CE", "PE"):
+    if is_buy_signal:
         st.session_state.setdefault("live_scanner_picks", {})["Index Options Alpha Sniper"] = [
             {
                 "symbol": f"NIFTY_{intel['Strike']}_{intel['OptType']}",
@@ -571,21 +627,26 @@ else:
     else:
         st.session_state.setdefault("live_scanner_picks", {})["Index Options Alpha Sniper"] = []
 
-    # 1. TOP ACTION TABLE
+    # 1. TOP ACTION TABLE WITH TREND REASON & COLOR CODING
     st.markdown("### 🎯 Top Action Table: What to Trade, Lots Needed & How to Book Profit")
-    strike_display = f"{intel['Strike']} {intel['OptType']}" if intel["OptType"] in ("CE", "PE") else "WAIT (Skip)"
+    st.caption(
+        f"Signal Score: **{intel['Score']:+d}** ({intel['Verdict']}) • "
+        f"Why: {intel['ReasonSummary']} • Spot: ₹{intel['Spot']:,.2f} (Floor ₹{intel['Support']:,.0f} / Ceiling ₹{intel['Resistance']:,.0f})"
+    )
+    strike_display = f"{intel['Strike']} {intel['OptType']}" if is_buy_signal else "WAIT (Skip)"
+    side_badge = f"🟢 BUY ({intel['OptType']})" if is_buy_signal else "⚪ NO TRADE"
 
     top_action_df = pd.DataFrame([
         {
             "Expiry": expiry_choice,
+            "Action": side_badge,
             "Suggested Setup": strike_display,
             "Lots Needed for ₹5k": f"{lots_needed_for_goal} lots ({qty_needed_for_goal} qty @ +{expected_pt_gain:.0f} pts)",
             "Est. Cost (Needed Lots)": f"~₹{est_cost_for_goal_lots:,.0f} (Max SL loss: -₹{est_max_loss_for_goal_lots:,.0f})",
             "Selected Lots Plan": f"{lot_multiplier}: need +{pts_needed_for_selected_lots:.2f} pts → ₹{goal_exit_prem:.2f}",
-            "When to Sell / Exit": f"Sell at target OR stop-loss OR by {exit_cutoff_time}",
+            "When to Sell / Exit": f"SELL at target / SL / {exit_cutoff_time}",
         }
     ])
-    st.dataframe(top_action_df, use_container_width=True, hide_index=True)
 
     # 2. SEPARATE BUY / SELL TARGET / STOP-LOSS PRICE TABLE RIGHT BELOW
     st.markdown("#### 💵 Exact Buy, Sell Target & Stop-Loss Price Table")
@@ -593,21 +654,24 @@ else:
         {
             "Plan View": f"Selected Lots ({lot_multiplier})",
             "Contract": strike_display,
-            "Buy Price (Entry)": f"₹{intel['Entry']:.2f} (Cost ~₹{selected_cost:,.0f})",
-            "Sell Target Price": f"₹{goal_exit_prem:.2f} (+{pts_needed_for_selected_lots:.2f} pts → +₹{profit_goal_rs:,.0f})",
-            "Stop-Loss Price (SL)": f"₹{intel['SL']:.2f} (Max Loss -₹{selected_max_loss:,.0f})",
-            "Exit Rule": f"Sell at target / SL / {exit_cutoff_time}",
+            "BUY Price (Entry)": f"BUY @ ₹{intel['Entry']:.2f} (~₹{selected_cost:,.0f})" if is_buy_signal else "SKIP BUY",
+            "SELL Target (Profit)": f"SELL @ ₹{goal_exit_prem:.2f} (+{pts_needed_for_selected_lots:.2f} pts → +₹{profit_goal_rs:,.0f})",
+            "SELL Stop-Loss (SL)": f"EXIT @ ₹{intel['SL']:.2f} (-₹{selected_max_loss:,.0f} max loss)",
+            "Exit Rule": f"SELL at target / SL / {exit_cutoff_time}",
         },
         {
             "Plan View": f"₹5k Goal Lots ({lots_needed_for_goal} lots / {qty_needed_for_goal} qty)",
             "Contract": strike_display,
-            "Buy Price (Entry)": f"₹{intel['Entry']:.2f} (Cost ~₹{est_cost_for_goal_lots:,.0f})",
-            "Sell Target Price": f"₹{round(intel['Entry'] + expected_pt_gain, 2):.2f} (+{expected_pt_gain:.0f} pts → +₹{est_profit_for_goal_lots:,.0f})",
-            "Stop-Loss Price (SL)": f"₹{intel['SL']:.2f} (Max Loss -₹{est_max_loss_for_goal_lots:,.0f})",
-            "Exit Rule": f"Sell at target / SL / {exit_cutoff_time}",
+            "BUY Price (Entry)": f"BUY @ ₹{intel['Entry']:.2f} (~₹{est_cost_for_goal_lots:,.0f})" if is_buy_signal else "SKIP BUY",
+            "SELL Target (Profit)": f"SELL @ ₹{round(intel['Entry'] + expected_pt_gain, 2):.2f} (+{expected_pt_gain:.0f} pts → +₹{est_profit_for_goal_lots:,.0f})",
+            "SELL Stop-Loss (SL)": f"EXIT @ ₹{intel['SL']:.2f} (-₹{est_max_loss_for_goal_lots:,.0f} max loss)",
+            "Exit Rule": f"SELL at target / SL / {exit_cutoff_time}",
         },
     ])
-    st.dataframe(price_action_df, use_container_width=True, hide_index=True)
+
+    styled_top, styled_price = style_action_tables(top_action_df, price_action_df, is_buy_signal)
+    st.dataframe(styled_top, use_container_width=True, hide_index=True)
+    st.dataframe(styled_price, use_container_width=True, hide_index=True)
 
     # 3. EXPIRY & ADVANCE ALERT STRIP
     dist_up = intel["DistUp"]
