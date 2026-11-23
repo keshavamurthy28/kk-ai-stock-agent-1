@@ -399,24 +399,28 @@ else:
         )
 
     # 2. SIMPLE TABLE: WHAT TO BUY, WHEN TO SELL, WHEN TO STOP
+    strike_label = f"{intel['Strike']} {intel['OptType']}" if intel["OptType"] in ("CE", "PE") else "WAIT (Skip)"
     action_table = pd.DataFrame([
         {
             "Step": "1. BUY (Entry)",
-            "What to Look At": f"{intel['Strike']} {intel['OptType']}" if intel["OptType"] in ("CE", "PE") else "WAIT (Skip)",
-            "Est. Price / Cost": f"₹{intel['Entry']:.2f} / lot → **~₹{investment_needed:,.0f}** for {selected_qty} qty",
-            "Simple Rule": "Only buy when market is open & price is near ceiling/floor trigger; skip if choppy.",
+            "Strike / Target": strike_label,
+            "Price & Cost": f"₹{intel['Entry']:.2f} / lot (~₹{investment_needed:,.0f} for {selected_qty} qty)",
+            "P&L Impact": f"Est. outlay ~₹{investment_needed:,.0f}",
+            "Action Rule": "Buy only when market is open & price nears trigger; skip if choppy.",
         },
         {
             "Step": "2. SELL FOR PROFIT",
-            "Target Price": f"**₹{goal_exit_prem:.2f}** (+{pts_needed_for_goal:.2f} pts needed)",
-            "Target Gain": f"**+₹{profit_goal_rs:,.0f}** on {selected_qty} qty",
-            "When to Sell": f"Sell immediately at ₹{goal_exit_prem:.2f} OR by **{exit_cutoff_time}** (whichever comes first).",
+            "Strike / Target": f"Exit @ ₹{goal_exit_prem:.2f} (+{pts_needed_for_goal:.2f} pts)",
+            "Price & Cost": f"+{pts_needed_for_goal:.2f} pts premium gain needed",
+            "P&L Impact": f"+₹{profit_goal_rs:,.0f} target on {selected_qty} qty",
+            "Action Rule": f"Sell at ₹{goal_exit_prem:.2f} OR by {exit_cutoff_time} (whichever comes first).",
         },
         {
             "Step": "3. SELL TO CUT LOSS",
-            "Stop-Loss Price": f"**₹{intel['SL']:.2f}**",
-            "Max Loss": f"**-₹{max_loss_at_sl:,.0f}** on {selected_qty} qty",
-            "When to Exit": "Sell right away if price hits stop-loss or Nifty crosses the opposite fence.",
+            "Strike / Target": f"Stop @ ₹{intel['SL']:.2f}",
+            "Price & Cost": f"Drop to ₹{intel['SL']:.2f} premium",
+            "P&L Impact": f"-₹{max_loss_at_sl:,.0f} max loss on {selected_qty} qty",
+            "Action Rule": "Exit immediately if stop-loss hits or Nifty crosses opposite fence.",
         },
     ])
     st.markdown("### 📋 Simple Buy & Sell Cheat Sheet")
