@@ -334,9 +334,20 @@ def compute_ai_ml_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def _normalize_ist_naive(series_or_idx):
     dt = pd.to_datetime(series_or_idx)
+    if isinstance(dt, pd.DatetimeIndex):
+        if dt.tz is not None:
+            return dt.tz_convert("Asia/Kolkata").tz_localize(None)
+        return dt
     if getattr(dt, "tz", None) is not None:
         return dt.tz_convert("Asia/Kolkata").tz_localize(None)
     return dt
+
+
+def _to_naive_ist_ts(val) -> pd.Timestamp:
+    ts = pd.Timestamp(val)
+    if ts.tzinfo is not None:
+        return ts.tz_convert("Asia/Kolkata").tz_localize(None)
+    return ts
 
 
 def _fetch_kite_candles(raw_sym: str, tf: str) -> pd.DataFrame:
@@ -409,8 +420,10 @@ def _resample_df(df: pd.DataFrame, tf: str) -> pd.DataFrame:
 def fetch_4h_context(raw_sym: str, yf_sym: str) -> pd.DataFrame:
     kite_1h = _fetch_kite_candles(raw_sym, "1h")
     if not kite_1h.empty:
+        k1 = kite_1h.copy()
+        k1["Time"] = _normalize_ist_naive(k1["Time"])
         return (
-            kite_1h.set_index("Time")
+            k1.set_index("Time")
             .resample("4h", offset="15min")
             .agg({"Open": "first", "High": "max", "Low": "min", "Close": "last"})
             .dropna()
@@ -590,6 +603,7 @@ if df.empty:
     st.error(f"No data returned for {raw_sym} on {tf_choice} interval. Try switching interval or check NSE symbol.")
 else:
     df = df.reset_index(drop=True)
+    df["Time"] = _normalize_ist_naive(df["Time"])
     df = compute_ai_ml_features(df)
 
     bar_close = float(df["Close"].iloc[-1])
@@ -625,17 +639,21 @@ else:
     ]
 
     def map_time_to_str(ts):
-        idx = int((df["Time"] - ts).abs().idxmin())
+        ts_naive = _to_naive_ist_ts(ts)
+        df_times = _normalize_ist_naive(df["Time"])
+        idx = int((df_times - ts_naive).abs().idxmin())
         return df["Axis_Str"].iloc[idx]
 
     # 4H FVG
     bull_fvg, bear_fvg = None, None
     if df_4h is not None and len(df_4h) >= 3:
+        df_4h = df_4h.copy()
+        df_4h.index = _normalize_ist_naive(df_4h.index)
         for i in range(len(df_4h) - 1, 1, -1):
             if bull_fvg is None and (df_4h["Low"].iloc[i] - df_4h["High"].iloc[i - 2]) > 0.05:
-                bull_fvg = (df_4h.index[i - 2], float(df_4h["High"].iloc[i - 2]), float(df_4h["Low"].iloc[i]))
+                bull_fvg = (_to_naive_ist_ts(df_4h.index[i - 2]), float(df_4h["High"].iloc[i - 2]), float(df_4h["Low"].iloc[i]))
             if bear_fvg is None and (df_4h["Low"].iloc[i - 2] - df_4h["High"].iloc[i]) > 0.05:
-                bear_fvg = (df_4h.index[i - 2], float(df_4h["High"].iloc[i]), float(df_4h["Low"].iloc[i - 2]))
+                bear_fvg = (_to_naive_ist_ts(df_4h.index[i - 2]), float(df_4h["High"].iloc[i]), float(df_4h["Low"].iloc[i - 2]))
             if bull_fvg and bear_fvg:
                 break
 
@@ -1180,7 +1198,7 @@ else:
         with bar_cols[-1]:
             st.markdown(
                 f"<div style='text-align:right; color:#D1D4DC; font-size:12px; font-family:monospace; padding-top:4px; white-space:nowrap;'>"
-                f"{ist_now_str} UTC+5:30 &nbsp; {session_tag} "
+                f"{ist_now_str} UTC+5:30   {session_tag} "
                 f"<span style='color:#2A2E39;'>|</span> "
                 f"<span style='color:#2962FF; font-weight:600;'>{price_source}</span>"
                 f"</div>",
