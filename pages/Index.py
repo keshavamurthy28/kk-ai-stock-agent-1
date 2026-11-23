@@ -39,26 +39,28 @@ EXPIRY_CHOICES = [
 ]
 
 # ---------------------------------------------------------
-# HEADER & REFRESH BAR
+# HEADER & LIVE REFRESH BAR
 # ---------------------------------------------------------
-head_col1, head_col2 = st.columns([3, 1])
+head_col1, head_col2 = st.columns([3, 1.2])
 with head_col1:
     st.title("⚡ Nifty Options Top Action & Expiry Guide")
     st.markdown(
-        "Plain-English **Top Trade Table** for **NIFTY 50** options across expiry dates "
-        "with a **₹5,000 profit goal**, **lots needed**, **expiry exit warnings**, and a "
-        "**below-chart strike reference table**. *(Educational tool only — verify live prices on Kite.)*"
+        "Plain-English **Top Trade Table** for **NIFTY 50** options with a **₹5,000 profit goal**, "
+        "**lots needed**, **expiry exit warnings**, and a **Kite-colored Option Chain table** below the chart. "
+        "*(Educational tool only — verify live prices on Kite.)*"
     )
 
 with head_col2:
     st.markdown("<br>", unsafe_allow_html=True)
-    r_col1, r_col2 = st.columns([1.2, 1])
+    r_col1, r_col2, r_col3 = st.columns([1.2, 1, 1])
     with r_col1:
-        if st.button("🔄 Refresh Now", type="primary", use_container_width=True):
+        if st.button("🔄 Refresh", type="primary", use_container_width=True):
             st.cache_data.clear()
-            st.toast("Updating Nifty & Option Chain...", icon="⚡")
+            st.toast("Refreshing Nifty & Option Chain...", icon="⚡")
             st.rerun()
     with r_col2:
+        live_stream = st.toggle("Live (15s)", value=False)
+    with r_col3:
         auto_refresh = st.toggle("Auto (60s)", value=False)
     market_badge = "🟢 Market Open" if is_market_open else "🟡 Market Closed"
     st.caption(f"{market_badge} • **{now_ist.strftime('%I:%M:%S %p IST')}**")
@@ -130,10 +132,10 @@ tf_map = {
 period_val, interval_val = tf_map[timeframe_choice]
 
 
-def build_reference_chain_rows(spot_ltp: float, expiry_label: str):
-    """Builds a clean strike reference table around ATM when live NSE rows are unavailable."""
+def build_kite_style_reference_chain(spot_ltp: float, expiry_label: str):
+    """Builds a Kite-style reference chain around ATM when live NSE chain rows are unavailable."""
     atm = int(round(spot_ltp / 50) * 50)
-    strikes = [atm + offset * 50 for offset in range(-8, 9)]
+    strikes = [atm + offset * 50 for offset in range(-8, 12)]
 
     if "Today" in expiry_label:
         time_scale = 1.0
@@ -151,17 +153,28 @@ def build_reference_chain_rows(spot_ltp: float, expiry_label: str):
         intrinsic_ce = max(0.0, spot_ltp - k)
         intrinsic_pe = max(0.0, k - spot_ltp)
         otm_dist = abs(spot_ltp - k)
-        extrinsic = max(4.0, (75.0 * np.exp(-otm_dist / 320.0)) * time_scale)
+        extrinsic = max(3.65, (75.0 * np.exp(-otm_dist / 320.0)) * time_scale)
         ce_ref = round(intrinsic_ce + extrinsic, 2)
         pe_ref = round(intrinsic_pe + extrinsic, 2)
 
+        ce_oi_l = round(max(0.15, 180.0 * np.exp(-abs(k - (atm + 250)) / 350.0)), 2)
+        pe_oi_l = round(max(0.15, 180.0 * np.exp(-abs(k - (atm - 250)) / 350.0)), 2)
+        ce_chg_pct = round(-63.76 - ((k - atm) / 50.0) * 3.1, 2)
+        pe_chg_pct = round(59.62 - ((k - atm) / 50.0) * 1.8, 2)
+        ce_oi_chg_pct = round(180.0 - abs(k - (atm + 100)) * 0.25, 2)
+        pe_oi_chg_pct = round(140.0 - abs(k - (atm - 100)) * 0.25, 2)
+
         rows.append({
-            "Call OI (Est.)": f"{max(0.2, round(180 * np.exp(-abs(k - (atm + 250)) / 350), 2))}L",
-            "Call LTP (Ref)": ce_ref,
+            "Call OI Chg %": ce_oi_chg_pct,
+            "OI (in lakhs)": ce_oi_l,
+            "Call Chg %": ce_chg_pct,
+            "Call LTP": ce_ref,
             "Strike": k,
-            "Put LTP (Ref)": pe_ref,
-            "Put OI (Est.)": f"{max(0.2, round(180 * np.exp(-abs(k - (atm - 250)) / 350), 2))}L",
-            "Tag": "ATM" if k == atm else ("ITM CE / OTM PE" if k < atm else "OTM CE / ITM PE"),
+            "Put LTP": pe_ref,
+            "Put Chg %": pe_chg_pct,
+            "Put OI (in lakhs)": pe_oi_l,
+            "Put OI Chg %": pe_oi_chg_pct,
+            "Is_ATM": k == atm,
         })
     return pd.DataFrame(rows)
 
@@ -169,7 +182,7 @@ def build_reference_chain_rows(spot_ltp: float, expiry_label: str):
 # ---------------------------------------------------------
 # 2. NSE OPTION CHAIN CONNECTOR
 # ---------------------------------------------------------
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=15)
 def fetch_live_nse_option_chain(spot_ltp: float, expiry_label: str):
     nse_oc_fn = None
     try:
@@ -216,6 +229,10 @@ def fetch_live_nse_option_chain(spot_ltp: float, expiry_label: str):
             pe_oi = float(pe.get("openInterest", 0) or 0)
             ce_ltp = float(ce.get("lastPrice", 0) or 0)
             pe_ltp = float(pe.get("lastPrice", 0) or 0)
+            ce_pchange = float(ce.get("pChange", 0) or 0)
+            pe_pchange = float(pe.get("pChange", 0) or 0)
+            ce_oi_chg_pct = float(ce.get("pchangeinOpenInterest", 0) or 0)
+            pe_oi_chg_pct = float(pe.get("pchangeinOpenInterest", 0) or 0)
 
             total_ce_oi += ce_oi
             total_pe_oi += pe_oi
@@ -226,6 +243,10 @@ def fetch_live_nse_option_chain(spot_ltp: float, expiry_label: str):
                 "pe_oi": pe_oi,
                 "ce_ltp": ce_ltp,
                 "pe_ltp": pe_ltp,
+                "ce_pchange": ce_pchange,
+                "pe_pchange": pe_pchange,
+                "ce_oi_chg_pct": ce_oi_chg_pct,
+                "pe_oi_chg_pct": pe_oi_chg_pct,
             })
 
         if not chain_rows:
@@ -252,15 +273,19 @@ def fetch_live_nse_option_chain(spot_ltp: float, expiry_label: str):
 
         table_df = pd.DataFrame([
             {
-                "Call OI (Lakhs)": round(r["ce_oi"] / 100000.0, 2),
+                "Call OI Chg %": round(r["ce_oi_chg_pct"], 2),
+                "OI (in lakhs)": round(r["ce_oi"] / 100000.0, 2),
+                "Call Chg %": round(r["ce_pchange"], 2),
                 "Call LTP": round(r["ce_ltp"], 2),
                 "Strike": int(round(r["strike"])),
                 "Put LTP": round(r["pe_ltp"], 2),
-                "Put OI (Lakhs)": round(r["pe_oi"] / 100000.0, 2),
-                "Tag": "ATM" if int(round(r["strike"])) == atm_int else ("ITM CE / OTM PE" if r["strike"] < atm_int else "OTM CE / ITM PE"),
+                "Put Chg %": round(r["pe_pchange"], 2),
+                "Put OI (in lakhs)": round(r["pe_oi"] / 100000.0, 2),
+                "Put OI Chg %": round(r["pe_oi_chg_pct"], 2),
+                "Is_ATM": int(round(r["strike"])) == atm_int,
             }
             for r in sorted(chain_rows, key=lambda x: x["strike"])
-            if abs(r["strike"] - spot_ltp) <= 450
+            if abs(r["strike"] - spot_ltp) <= 500
         ])
 
         return {
@@ -269,8 +294,8 @@ def fetch_live_nse_option_chain(spot_ltp: float, expiry_label: str):
             "PCR": pcr,
             "MaxPain": float(max_pain_strike),
             "ATMStrike": atm_int,
-            "CE_LTP": atm_row["ce_ltp"] if atm_row["ce_ltp"] > 0 else 85.0,
-            "PE_LTP": atm_row["pe_ltp"] if atm_row["pe_ltp"] > 0 else 88.0,
+            "CE_LTP": atm_row["ce_ltp"] if atm_row["ce_ltp"] > 0 else 80.60,
+            "PE_LTP": atm_row["pe_ltp"] if atm_row["pe_ltp"] > 0 else 83.40,
             "ChainDF": table_df,
         }
     except Exception:
@@ -280,7 +305,7 @@ def fetch_live_nse_option_chain(spot_ltp: float, expiry_label: str):
 # ---------------------------------------------------------
 # 3. TREND & SIGNAL ENGINE
 # ---------------------------------------------------------
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=15)
 def fetch_predictive_nifty_engine(expiry_str, period, interval):
     nifty = yf.Ticker("^NSEI")
     vix = yf.Ticker("^INDIAVIX")
@@ -294,7 +319,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
     spot_ltp = float(df["Close"].iloc[-1])
     prev_close = float(df["Close"].iloc[-2])
     spot_chg = round(((spot_ltp - prev_close) / prev_close) * 100, 2)
-    current_vix = round(float(df_vix["Close"].iloc[-1]), 2) if not df_vix.empty else 18.25
+    current_vix = round(float(df_vix["Close"].iloc[-1]), 2) if not df_vix.empty else 18.37
 
     df["EMA9"] = df["Close"].ewm(span=9, adjust=False).mean()
     df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
@@ -379,17 +404,17 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         elif pcr <= 0.70:
             score -= 10
     else:
-        pcr = 0.90
+        pcr = 0.82
         max_pain = float(round(spot_ltp / 100) * 100)
         rec_strike = atm_strike
-        ref_df = build_reference_chain_rows(spot_ltp, expiry_str)
+        ref_df = build_kite_style_reference_chain(spot_ltp, expiry_str)
         atm_match = ref_df[ref_df["Strike"] == rec_strike]
         if not atm_match.empty:
-            live_ce_prem = float(atm_match["Call LTP (Ref)"].iloc[0])
-            live_pe_prem = float(atm_match["Put LTP (Ref)"].iloc[0])
+            live_ce_prem = float(atm_match["Call LTP"].iloc[0])
+            live_pe_prem = float(atm_match["Put LTP"].iloc[0])
         else:
-            live_ce_prem = 88.00
-            live_pe_prem = 87.65
+            live_ce_prem = 80.60
+            live_pe_prem = 83.40
         oc_source = "Reference Estimate (Verify live chain on Kite)"
         chain_df = ref_df
 
@@ -435,6 +460,79 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         "DataFrame": df,
         "ChainDF": chain_df,
     }
+
+
+def render_kite_colored_chain(df: pd.DataFrame):
+    """Renders a Kite-matched dark option chain with green/red % styling and ATM row highlight."""
+    display_df = pd.DataFrame({
+        "OI (in lakhs)": df.apply(
+            lambda r: f"{r['Call OI Chg %']:+.2f}%  {r['OI (in lakhs)']:.2f}", axis=1
+        ),
+        "Call LTP": df.apply(
+            lambda r: f"{r['Call Chg %']:+.2f}%  {r['Call LTP']:.2f}", axis=1
+        ),
+        "Strike": df["Strike"].astype(str),
+        "Put LTP": df.apply(
+            lambda r: f"{r['Put LTP']:.2f}  {r['Put Chg %']:+.2f}%", axis=1
+        ),
+        "Put OI (in lakhs)": df.apply(
+            lambda r: f"{r['Put OI (in lakhs)']:.2f}  {r['Put OI Chg %']:+.2f}%", axis=1
+        ),
+    })
+
+    atm_flags = df["Is_ATM"].tolist()
+    ce_chg_list = df["Call Chg %"].tolist()
+    pe_chg_list = df["Put Chg %"].tolist()
+
+    def style_row(row):
+        idx = row.name
+        is_atm = atm_flags[idx] if idx < len(atm_flags) else False
+        ce_chg = ce_chg_list[idx] if idx < len(ce_chg_list) else 0.0
+        pe_chg = pe_chg_list[idx] if idx < len(pe_chg_list) else 0.0
+
+        row_bg = "#2b2f36" if is_atm else "#171717"
+        ce_tint = "#261f1d" if not is_atm else "#2b2f36"
+        pe_tint = "#241e1c" if not is_atm else "#2b2f36"
+        strike_bg = "#252629" if is_atm else "#1c1c1c"
+
+        ce_color = "#ff5252" if ce_chg < 0 else "#00e676"
+        pe_color = "#00e676" if pe_chg >= 0 else "#ff5252"
+
+        return [
+            f"background-color: {ce_tint}; color: #e6e6e6; border-bottom: 1px solid #262626;",
+            f"background-color: {ce_tint}; color: {ce_color}; font-weight: 600; border-bottom: 1px solid #262626;",
+            f"background-color: {strike_bg}; color: #ffffff; font-weight: {'700' if is_atm else '600'}; text-align: center; border-bottom: 1px solid #262626;",
+            f"background-color: {pe_tint}; color: {pe_color}; font-weight: 600; border-bottom: 1px solid #262626;",
+            f"background-color: {pe_tint}; color: #e6e6e6; border-bottom: 1px solid #262626;",
+        ] if not is_atm else [
+            f"background-color: {row_bg}; color: #ffffff; font-weight: 700; border-top: 1px solid #4a5568; border-bottom: 1px solid #4a5568;",
+            f"background-color: {row_bg}; color: {ce_color}; font-weight: 700; border-top: 1px solid #4a5568; border-bottom: 1px solid #4a5568;",
+            f"background-color: #2962ff; color: #ffffff; font-weight: 700; text-align: center; border-top: 1px solid #4a5568; border-bottom: 1px solid #4a5568;",
+            f"background-color: {row_bg}; color: {pe_color}; font-weight: 700; border-top: 1px solid #4a5568; border-bottom: 1px solid #4a5568;",
+            f"background-color: {row_bg}; color: #ffffff; font-weight: 700; border-top: 1px solid #4a5568; border-bottom: 1px solid #4a5568;",
+        ]
+
+    styled = display_df.style.apply(style_row, axis=1).set_table_styles([
+        {
+            "selector": "th",
+            "props": [
+                ("background-color", "#141414"),
+                ("color", "#9e9e9e"),
+                ("font-weight", "600"),
+                ("font-size", "12px"),
+                ("border-bottom", "1px solid #2c2c2c"),
+                ("padding", "8px 10px"),
+            ],
+        },
+        {
+            "selector": "td",
+            "props": [
+                ("font-size", "12.5px"),
+                ("padding", "6px 10px"),
+            ],
+        },
+    ])
+    st.dataframe(styled, use_container_width=True, hide_index=True, height=540)
 
 
 intel = fetch_predictive_nifty_engine(expiry_choice, period_val, interval_val)
@@ -509,7 +607,7 @@ else:
     m1.metric("Lots Needed for Goal", f"{lots_needed_for_goal} Lots", f"{qty_needed_for_goal} qty @ +{expected_pt_gain:.0f} pts")
     m2.metric("Nifty 50 Now", f"₹{intel['Spot']:,.2f}", f"{intel['Change']:+.2f}%")
     m3.metric("Ceiling / Floor", f"₹{intel['Resistance']:,.0f} / ₹{intel['Support']:,.0f}", f"+{dist_up:.0f} up | -{dist_dn:.0f} dn")
-    m4.metric("Data Source", intel["OCSource"].split(" (")[0], f"PCR {intel['PCR']}")
+    m4.metric("PCR / Max Pain", f"{intel['PCR']}", f"Max Pain ₹{intel['MaxPain']:,.0f}")
 
     # 4. PRICE & RSI CHART
     st.markdown("### 📊 Nifty Price & Speed Chart")
@@ -536,26 +634,20 @@ else:
     )
     st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
-    # 5. BELOW-CHART OPTION CHAIN REFERENCE TABLE & EXPIRY COMPARISON
+    # 5. KITE-COLORED OPTION CHAIN BELOW CHART
     st.markdown("---")
-    st.markdown(f"### 📋 Option Chain Reference Table ({expiry_choice})")
-    st.caption(f"Source status: {intel['OCSource']} • PCR: {intel['PCR']} • Max Pain: ₹{intel['MaxPain']:,.0f}")
-    st.dataframe(intel["ChainDF"], use_container_width=True, hide_index=True)
+    st.markdown(f"### 📋 Option Chain — {expiry_choice}")
+    st.caption(
+        f"NIFTY 50 Spot: ₹{intel['Spot']:,.2f} ({intel['Change']:+.2f}%) • "
+        f"PCR: {intel['PCR']} • Max Pain: ₹{intel['MaxPain']:,.0f} • Source: {intel['OCSource']}"
+    )
+    render_kite_colored_chain(intel["ChainDF"])
 
-    st.markdown("#### 📅 Expiry Dates Overview (Same Rule Applied)")
-    expiry_overview = pd.DataFrame([
-        {
-            "Expiry Tab": exp_name,
-            "Selected": "✅ Active" if exp_name == expiry_choice else "",
-            "Lots Needed (Est.)": f"{lots_needed_for_goal} lots ({qty_needed_for_goal} qty)",
-            "Time Decay Risk": "Very High (Same-Day)" if "Today" in exp_name else ("Moderate-High" if "8 days" in exp_name else "Lower (More Time)"),
-            "Suggested Exit Cutoff": "2:00 PM IST" if "Today" in exp_name else "3:00 PM IST",
-        }
-        for exp_name in EXPIRY_CHOICES
-    ])
-    st.dataframe(expiry_overview, use_container_width=True, hide_index=True)
-
-if auto_refresh:
+if live_stream and is_market_open:
+    time.sleep(15)
+    st.cache_data.clear()
+    st.rerun()
+elif auto_refresh:
     time.sleep(60)
     st.cache_data.clear()
     st.rerun()
