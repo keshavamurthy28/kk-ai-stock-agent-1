@@ -57,7 +57,7 @@ with head_col2:
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 1. CONTROLS (EXPIRY DATES FROM SCREENSHOT, LOTS, PROFIT GOAL)
+# 1. CONTROLS (EXPIRY DATES, 65-QTY LOTS, PROFIT GOAL)
 # ---------------------------------------------------------
 col_c1, col_c2, col_c3, col_c4 = st.columns([1.9, 1.4, 1.4, 1.3])
 
@@ -70,14 +70,14 @@ with col_c1:
 
 with col_c2:
     lot_multiplier = st.selectbox(
-        "📦 Quantity (1 Lot = 25 Qty)",
+        "📦 Quantity (1 Lot = 65 Qty)",
         [
-            "1 Lot (25 Qty)",
-            "2 Lots (50 Qty)",
-            "4 Lots (100 Qty)",
-            "8 Lots (200 Qty)",
+            "1 Lot (65 Qty)",
+            "2 Lots (130 Qty)",
+            "4 Lots (260 Qty)",
+            "8 Lots (520 Qty)",
         ],
-        index=1,
+        index=0,
     )
 
 with col_c3:
@@ -97,10 +97,10 @@ with col_c4:
     )
 
 qty_map = {
-    "1 Lot (25 Qty)": 25,
-    "2 Lots (50 Qty)": 50,
-    "4 Lots (100 Qty)": 100,
-    "8 Lots (200 Qty)": 200,
+    "1 Lot (65 Qty)": 65,
+    "2 Lots (130 Qty)": 130,
+    "4 Lots (260 Qty)": 260,
+    "8 Lots (520 Qty)": 520,
 }
 selected_qty = qty_map[lot_multiplier]
 
@@ -201,7 +201,7 @@ def fetch_live_nse_option_chain(spot_ltp: float, expiry_label: str):
             "MaxPain": float(max_pain_strike),
             "ATMStrike": int(round(atm_row["strike"])),
             "CE_LTP": atm_row["ce_ltp"] if atm_row["ce_ltp"] > 0 else 85.0,
-            "PE_LTP": atm_row["pe_ltp"] if atm_row["pe_ltp"] > 0 else 115.0,
+            "PE_LTP": atm_row["pe_ltp"] if atm_row["pe_ltp"] > 0 else 88.0,
         }
     except Exception:
         return None
@@ -224,7 +224,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
     spot_ltp = float(df["Close"].iloc[-1])
     prev_close = float(df["Close"].iloc[-2])
     spot_chg = round(((spot_ltp - prev_close) / prev_close) * 100, 2)
-    current_vix = round(float(df_vix["Close"].iloc[-1]), 2) if not df_vix.empty else 18.14
+    current_vix = round(float(df_vix["Close"].iloc[-1]), 2) if not df_vix.empty else 18.20
 
     df["EMA9"] = df["Close"].ewm(span=9, adjust=False).mean()
     df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
@@ -311,10 +311,9 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         pcr = 0.90
         max_pain = float(round(spot_ltp / 100) * 100)
         rec_strike = atm_strike
-        # Typical same-day vs. multi-day premium spacing
         if "Today" in expiry_str:
-            live_ce_prem = 82.90
-            live_pe_prem = 116.05
+            live_ce_prem = 88.00
+            live_pe_prem = 87.65
         elif "8 days" in expiry_str:
             live_ce_prem = 270.45
             live_pe_prem = 289.60
@@ -394,7 +393,7 @@ else:
     else:
         st.session_state.setdefault("live_scanner_picks", {})["Index Options Alpha Sniper"] = []
 
-    # 1. TOP ACTION TABLE (HIGHLIGHTED FIRST FOR EASY READING)
+    # 1. TOP ACTION TABLE
     st.markdown("### 🎯 Top Action Table: What to Trade & How to Book Profit")
     strike_display = f"{intel['Strike']} {intel['OptType']}" if intel["OptType"] in ("CE", "PE") else "WAIT (Skip)"
 
