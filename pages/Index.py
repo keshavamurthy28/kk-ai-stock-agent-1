@@ -29,6 +29,13 @@ EXPIRY_CHOICES = [
     "1 Dec (8 days)",
     "8 Dec (2 weeks)",
     "15 Dec (3 weeks)",
+    "22 Dec (4 weeks)",
+    "29 Dec (1 month)",
+    "25 Jan (2 months)",
+    "30 Mar (4 months)",
+    "29 Jun (7 months)",
+    "28 Sep (10 months)",
+    "28 Dec (1 year)",
 ]
 
 # ---------------------------------------------------------
@@ -39,8 +46,8 @@ with head_col1:
     st.title("⚡ Nifty Options Top Action & Expiry Guide")
     st.markdown(
         "Plain-English **Top Trade Table** for **NIFTY 50** options across expiry dates "
-        "with a **₹5,000 profit goal**, **lots needed**, and **expiry exit warnings**. "
-        "*(Educational tool only — no guaranteed profit; verify live prices on Kite.)*"
+        "with a **₹5,000 profit goal**, **lots needed**, **expiry exit warnings**, and a "
+        "**below-chart strike reference table**. *(Educational tool only — verify live prices on Kite.)*"
     )
 
 with head_col2:
@@ -61,7 +68,7 @@ st.markdown("---")
 # ---------------------------------------------------------
 # 1. CONTROLS (EXPIRY DATES, LOTS, PROFIT GOAL, EXPECTED PT MOVE)
 # ---------------------------------------------------------
-col_c1, col_c2, col_c3, col_c4, col_c5 = st.columns([1.7, 1.3, 1.2, 1.2, 1.2])
+col_c1, col_c2, col_c3, col_c4, col_c5 = st.columns([1.8, 1.3, 1.2, 1.2, 1.2])
 
 with col_c1:
     expiry_choice = st.selectbox(
@@ -121,6 +128,42 @@ tf_map = {
     "1h (Broader Move)": ("1mo", "1h"),
 }
 period_val, interval_val = tf_map[timeframe_choice]
+
+
+def build_reference_chain_rows(spot_ltp: float, expiry_label: str):
+    """Builds a clean strike reference table around ATM when live NSE rows are unavailable."""
+    atm = int(round(spot_ltp / 50) * 50)
+    strikes = [atm + offset * 50 for offset in range(-8, 9)]
+
+    if "Today" in expiry_label:
+        time_scale = 1.0
+    elif "8 days" in expiry_label:
+        time_scale = 2.6
+    elif "2 weeks" in expiry_label:
+        time_scale = 3.5
+    elif "3 weeks" in expiry_label:
+        time_scale = 4.2
+    else:
+        time_scale = 5.0
+
+    rows = []
+    for k in strikes:
+        intrinsic_ce = max(0.0, spot_ltp - k)
+        intrinsic_pe = max(0.0, k - spot_ltp)
+        otm_dist = abs(spot_ltp - k)
+        extrinsic = max(4.0, (75.0 * np.exp(-otm_dist / 320.0)) * time_scale)
+        ce_ref = round(intrinsic_ce + extrinsic, 2)
+        pe_ref = round(intrinsic_pe + extrinsic, 2)
+
+        rows.append({
+            "Call OI (Est.)": f"{max(0.2, round(180 * np.exp(-abs(k - (atm + 250)) / 350), 2))}L",
+            "Call LTP (Ref)": ce_ref,
+            "Strike": k,
+            "Put LTP (Ref)": pe_ref,
+            "Put OI (Est.)": f"{max(0.2, round(180 * np.exp(-abs(k - (atm - 250)) / 350), 2))}L",
+            "Tag": "ATM" if k == atm else ("ITM CE / OTM PE" if k < atm else "OTM CE / ITM PE"),
+        })
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------
@@ -205,14 +248,30 @@ def fetch_live_nse_option_chain(spot_ltp: float, expiry_label: str):
                 max_pain_strike = pin
 
         atm_row = min(chain_rows, key=lambda r: abs(r["strike"] - spot_ltp))
+        atm_int = int(round(atm_row["strike"]))
+
+        table_df = pd.DataFrame([
+            {
+                "Call OI (Lakhs)": round(r["ce_oi"] / 100000.0, 2),
+                "Call LTP": round(r["ce_ltp"], 2),
+                "Strike": int(round(r["strike"])),
+                "Put LTP": round(r["pe_ltp"], 2),
+                "Put OI (Lakhs)": round(r["pe_oi"] / 100000.0, 2),
+                "Tag": "ATM" if int(round(r["strike"])) == atm_int else ("ITM CE / OTM PE" if r["strike"] < atm_int else "OTM CE / ITM PE"),
+            }
+            for r in sorted(chain_rows, key=lambda x: x["strike"])
+            if abs(r["strike"] - spot_ltp) <= 450
+        ])
+
         return {
             "ExpiryUsed": target_expiry,
             "NSETime": timestamp,
             "PCR": pcr,
             "MaxPain": float(max_pain_strike),
-            "ATMStrike": int(round(atm_row["strike"])),
+            "ATMStrike": atm_int,
             "CE_LTP": atm_row["ce_ltp"] if atm_row["ce_ltp"] > 0 else 85.0,
             "PE_LTP": atm_row["pe_ltp"] if atm_row["pe_ltp"] > 0 else 88.0,
+            "ChainDF": table_df,
         }
     except Exception:
         return None
@@ -314,6 +373,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         live_ce_prem = nse_oc["CE_LTP"]
         live_pe_prem = nse_oc["PE_LTP"]
         oc_source = f"Live NSE ({nse_oc['ExpiryUsed']})"
+        chain_df = nse_oc["ChainDF"]
         if pcr >= 1.15:
             score += 10
         elif pcr <= 0.70:
@@ -322,16 +382,16 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         pcr = 0.90
         max_pain = float(round(spot_ltp / 100) * 100)
         rec_strike = atm_strike
-        if "Today" in expiry_str:
+        ref_df = build_reference_chain_rows(spot_ltp, expiry_str)
+        atm_match = ref_df[ref_df["Strike"] == rec_strike]
+        if not atm_match.empty:
+            live_ce_prem = float(atm_match["Call LTP (Ref)"].iloc[0])
+            live_pe_prem = float(atm_match["Put LTP (Ref)"].iloc[0])
+        else:
             live_ce_prem = 88.00
             live_pe_prem = 87.65
-        elif "8 days" in expiry_str:
-            live_ce_prem = 270.45
-            live_pe_prem = 289.60
-        else:
-            live_ce_prem = 367.35
-            live_pe_prem = 351.65
-        oc_source = "Estimated (Check live chain on Kite)"
+        oc_source = "Reference Estimate (Verify live chain on Kite)"
+        chain_df = ref_df
 
     score = max(-100, min(100, score))
     dist_up_pts = round(resistance_level - spot_ltp, 1)
@@ -373,6 +433,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         "Entry": entry_prem,
         "SL": sl_prem,
         "DataFrame": df,
+        "ChainDF": chain_df,
     }
 
 
@@ -389,8 +450,6 @@ else:
 
     pts_needed_for_selected_lots = round(profit_goal_rs / max(selected_qty, 1), 2)
     goal_exit_prem = round(intel["Entry"] + pts_needed_for_selected_lots, 2)
-    investment_needed = round(intel["Entry"] * selected_qty, 2)
-    max_loss_at_sl = round((intel["Entry"] - intel["SL"]) * selected_qty, 2)
 
     is_same_day_expiry = "Today" in expiry_choice
     exit_cutoff_time = "2:00 PM IST (before sharp expiry decay)" if is_same_day_expiry else "3:00 PM IST (intraday exit)"
@@ -410,7 +469,7 @@ else:
     else:
         st.session_state.setdefault("live_scanner_picks", {})["Index Options Alpha Sniper"] = []
 
-    # 1. TOP ACTION TABLE WITH LOTS NEEDED FOR ₹5,000
+    # 1. TOP ACTION TABLE
     st.markdown("### 🎯 Top Action Table: What to Trade, Lots Needed & How to Book Profit")
     strike_display = f"{intel['Strike']} {intel['OptType']}" if intel["OptType"] in ("CE", "PE") else "WAIT (Skip)"
 
@@ -445,27 +504,14 @@ else:
             f"or when profit hits **₹{profit_goal_rs:,.0f}** so gains do not reverse."
         )
 
-    # 3. QUICK METRICS & EXPIRY SNAPSHOT ACROSS DATES
+    # 3. QUICK METRICS
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Lots Needed for Goal", f"{lots_needed_for_goal} Lots", f"{qty_needed_for_goal} qty @ +{expected_pt_gain:.0f} pts")
     m2.metric("Nifty 50 Now", f"₹{intel['Spot']:,.2f}", f"{intel['Change']:+.2f}%")
     m3.metric("Ceiling / Floor", f"₹{intel['Resistance']:,.0f} / ₹{intel['Support']:,.0f}", f"+{dist_up:.0f} up | -{dist_dn:.0f} dn")
     m4.metric("Data Source", intel["OCSource"].split(" (")[0], f"PCR {intel['PCR']}")
 
-    st.markdown("#### 📅 Expiry Dates Overview (Same Rule Applied)")
-    expiry_overview = pd.DataFrame([
-        {
-            "Expiry Tab": exp_name,
-            "Selected": "✅ Active" if exp_name == expiry_choice else "",
-            "Lots Needed (Est.)": f"{lots_needed_for_goal} lots ({qty_needed_for_goal} qty)",
-            "Time Decay Risk": "Very High (Same-Day)" if "Today" in exp_name else ("Moderate-High" if "8 days" in exp_name else "Lower (More Time)"),
-            "Suggested Exit Cutoff": "2:00 PM IST" if "Today" in exp_name else "3:00 PM IST",
-        }
-        for exp_name in EXPIRY_CHOICES
-    ])
-    st.dataframe(expiry_overview, use_container_width=True, hide_index=True)
-
-    # 4. SIMPLE PRICE & RSI CHART
+    # 4. PRICE & RSI CHART
     st.markdown("### 📊 Nifty Price & Speed Chart")
     df_c = intel["DataFrame"].tail(80)
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.75, 0.25])
@@ -489,6 +535,25 @@ else:
         yaxis=dict(side="right", title="Nifty (₹)"), yaxis2=dict(side="right", title="RSI", range=[15, 85]),
     )
     st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
+
+    # 5. BELOW-CHART OPTION CHAIN REFERENCE TABLE & EXPIRY COMPARISON
+    st.markdown("---")
+    st.markdown(f"### 📋 Option Chain Reference Table ({expiry_choice})")
+    st.caption(f"Source status: {intel['OCSource']} • PCR: {intel['PCR']} • Max Pain: ₹{intel['MaxPain']:,.0f}")
+    st.dataframe(intel["ChainDF"], use_container_width=True, hide_index=True)
+
+    st.markdown("#### 📅 Expiry Dates Overview (Same Rule Applied)")
+    expiry_overview = pd.DataFrame([
+        {
+            "Expiry Tab": exp_name,
+            "Selected": "✅ Active" if exp_name == expiry_choice else "",
+            "Lots Needed (Est.)": f"{lots_needed_for_goal} lots ({qty_needed_for_goal} qty)",
+            "Time Decay Risk": "Very High (Same-Day)" if "Today" in exp_name else ("Moderate-High" if "8 days" in exp_name else "Lower (More Time)"),
+            "Suggested Exit Cutoff": "2:00 PM IST" if "Today" in exp_name else "3:00 PM IST",
+        }
+        for exp_name in EXPIRY_CHOICES
+    ])
+    st.dataframe(expiry_overview, use_container_width=True, hide_index=True)
 
 if auto_refresh:
     time.sleep(60)
