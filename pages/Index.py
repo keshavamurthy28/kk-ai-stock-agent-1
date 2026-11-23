@@ -46,7 +46,7 @@ with head_col1:
     st.title("⚡ Nifty Options Top Action & Expiry Guide")
     st.markdown(
         "Plain-English **Top Trade Table** for **NIFTY 50** options with a **₹5,000 profit goal**, "
-        "**color-coded BUY / SELL / STOP-LOSS prices**, **expiry exit warnings**, and a "
+        "**color-coded BUY / SELL / STOP-LOSS prices with `(data%)`**, **expiry exit warnings**, and a "
         "**Kite-colored Option Chain table** below the chart. "
         "*(Educational tool only — verify live prices on Kite.)*"
     )
@@ -597,17 +597,24 @@ if not intel:
     st.error("⚠️ Could not load Nifty data right now. Click **Refresh Now** to try again.")
 else:
     is_buy_signal = intel["OptType"] in ("CE", "PE")
+    entry_p = max(float(intel["Entry"]), 0.01)
+    sl_p = float(intel["SL"])
+    sl_pct = ((sl_p - entry_p) / entry_p) * 100.0
+
     profit_per_lot_at_exp_pts = expected_pt_gain * LOT_SIZE
     lots_needed_for_goal = max(1, math.ceil(profit_goal_rs / max(profit_per_lot_at_exp_pts, 1.0)))
     qty_needed_for_goal = lots_needed_for_goal * LOT_SIZE
-    est_cost_for_goal_lots = round(intel["Entry"] * qty_needed_for_goal, 2)
-    est_max_loss_for_goal_lots = round((intel["Entry"] - intel["SL"]) * qty_needed_for_goal, 2)
+    est_cost_for_goal_lots = round(entry_p * qty_needed_for_goal, 2)
+    est_max_loss_for_goal_lots = round((entry_p - sl_p) * qty_needed_for_goal, 2)
     est_profit_for_goal_lots = round(expected_pt_gain * qty_needed_for_goal, 2)
+    goal_lots_target_prem = round(entry_p + expected_pt_gain, 2)
+    goal_lots_target_pct = ((goal_lots_target_prem - entry_p) / entry_p) * 100.0
 
     pts_needed_for_selected_lots = round(profit_goal_rs / max(selected_qty, 1), 2)
-    goal_exit_prem = round(intel["Entry"] + pts_needed_for_selected_lots, 2)
-    selected_cost = round(intel["Entry"] * selected_qty, 2)
-    selected_max_loss = round((intel["Entry"] - intel["SL"]) * selected_qty, 2)
+    goal_exit_prem = round(entry_p + pts_needed_for_selected_lots, 2)
+    selected_target_pct = ((goal_exit_prem - entry_p) / entry_p) * 100.0
+    selected_cost = round(entry_p * selected_qty, 2)
+    selected_max_loss = round((entry_p - sl_p) * selected_qty, 2)
 
     is_same_day_expiry = "Today" in expiry_choice
     exit_cutoff_time = "2:00 PM IST (before sharp expiry decay)" if is_same_day_expiry else "3:00 PM IST (intraday exit)"
@@ -617,11 +624,11 @@ else:
             {
                 "symbol": f"NIFTY_{intel['Strike']}_{intel['OptType']}",
                 "side": "BUY",
-                "entry": float(intel["Entry"]),
-                "sl": float(intel["SL"]),
+                "entry": float(entry_p),
+                "sl": float(sl_p),
                 "t1": float(goal_exit_prem),
                 "t2": float(round(goal_exit_prem * 1.15, 2)),
-                "notes": f"{intel['Verdict']} | Lots needed: {lots_needed_for_goal} | Goal ₹{profit_goal_rs}",
+                "notes": f"{intel['Verdict']} | Tgt ({selected_target_pct:+.1f}%) | SL ({sl_pct:+.1f}%)",
             }
         ]
     else:
@@ -643,29 +650,29 @@ else:
             "Suggested Setup": strike_display,
             "Lots Needed for ₹5k": f"{lots_needed_for_goal} lots ({qty_needed_for_goal} qty @ +{expected_pt_gain:.0f} pts)",
             "Est. Cost (Needed Lots)": f"~₹{est_cost_for_goal_lots:,.0f} (Max SL loss: -₹{est_max_loss_for_goal_lots:,.0f})",
-            "Selected Lots Plan": f"{lot_multiplier}: need +{pts_needed_for_selected_lots:.2f} pts → ₹{goal_exit_prem:.2f}",
+            "Selected Lots Plan": f"{lot_multiplier}: need +{pts_needed_for_selected_lots:.2f} pts → ₹{goal_exit_prem:.2f} ({selected_target_pct:+.1f}%)",
             "When to Sell / Exit": f"SELL at target / SL / {exit_cutoff_time}",
         }
     ])
 
-    # 2. SEPARATE BUY / SELL TARGET / STOP-LOSS PRICE TABLE RIGHT BELOW
+    # 2. SEPARATE BUY / SELL TARGET / STOP-LOSS PRICE TABLE WITH (data%)
     st.markdown("#### 💵 Exact Buy, Sell Target & Stop-Loss Price Table")
     price_action_df = pd.DataFrame([
         {
             "Plan View": f"Selected Lots ({lot_multiplier})",
             "Contract": strike_display,
-            "BUY Price (Entry)": f"BUY @ ₹{intel['Entry']:.2f} (~₹{selected_cost:,.0f})" if is_buy_signal else "SKIP BUY",
-            "SELL Target (Profit)": f"SELL @ ₹{goal_exit_prem:.2f} (+{pts_needed_for_selected_lots:.2f} pts → +₹{profit_goal_rs:,.0f})",
-            "SELL Stop-Loss (SL)": f"EXIT @ ₹{intel['SL']:.2f} (-₹{selected_max_loss:,.0f} max loss)",
-            "Exit Rule": f"SELL at target / SL / {exit_cutoff_time}",
+            "BUY Price (Entry)": f"BUY @ ₹{entry_p:.2f} (~₹{selected_cost:,.0f})" if is_buy_signal else "SKIP BUY",
+            "SELL Target (Profit)": f"SELL @ ₹{goal_exit_prem:.2f} ({selected_target_pct:+.1f}%) (+{pts_needed_for_selected_lots:.2f} pts → +₹{profit_goal_rs:,.0f})",
+            "SELL Stop-Loss (SL)": f"EXIT @ ₹{sl_p:.2f} ({sl_pct:+.1f}%) (-₹{selected_max_loss:,.0f} max loss)",
+            "Exit Rule": f"SELL at target ({selected_target_pct:+.1f}%) / SL ({sl_pct:+.1f}%) / {exit_cutoff_time}",
         },
         {
             "Plan View": f"₹5k Goal Lots ({lots_needed_for_goal} lots / {qty_needed_for_goal} qty)",
             "Contract": strike_display,
-            "BUY Price (Entry)": f"BUY @ ₹{intel['Entry']:.2f} (~₹{est_cost_for_goal_lots:,.0f})" if is_buy_signal else "SKIP BUY",
-            "SELL Target (Profit)": f"SELL @ ₹{round(intel['Entry'] + expected_pt_gain, 2):.2f} (+{expected_pt_gain:.0f} pts → +₹{est_profit_for_goal_lots:,.0f})",
-            "SELL Stop-Loss (SL)": f"EXIT @ ₹{intel['SL']:.2f} (-₹{est_max_loss_for_goal_lots:,.0f} max loss)",
-            "Exit Rule": f"SELL at target / SL / {exit_cutoff_time}",
+            "BUY Price (Entry)": f"BUY @ ₹{entry_p:.2f} (~₹{est_cost_for_goal_lots:,.0f})" if is_buy_signal else "SKIP BUY",
+            "SELL Target (Profit)": f"SELL @ ₹{goal_lots_target_prem:.2f} ({goal_lots_target_pct:+.1f}%) (+{expected_pt_gain:.0f} pts → +₹{est_profit_for_goal_lots:,.0f})",
+            "SELL Stop-Loss (SL)": f"EXIT @ ₹{sl_p:.2f} ({sl_pct:+.1f}%) (-₹{est_max_loss_for_goal_lots:,.0f} max loss)",
+            "Exit Rule": f"SELL at target ({goal_lots_target_pct:+.1f}%) / SL ({sl_pct:+.1f}%) / {exit_cutoff_time}",
         },
     ])
 
