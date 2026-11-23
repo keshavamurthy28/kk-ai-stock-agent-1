@@ -22,16 +22,23 @@ is_market_open = (
 )
 
 ADVANCE_ALERT_POINTS = 40.0
+EXPIRY_CHOICES = [
+    "23 Nov (Today)",
+    "1 Dec (8 days)",
+    "8 Dec (2 weeks)",
+    "15 Dec (3 weeks)",
+]
 
 # ---------------------------------------------------------
 # HEADER & REFRESH BAR
 # ---------------------------------------------------------
 head_col1, head_col2 = st.columns([3, 1])
 with head_col1:
-    st.title("⚡ Nifty Options Simple Buy & Exit Guide")
+    st.title("⚡ Nifty Options Top Action & Expiry Guide")
     st.markdown(
-        "Plain-English guide for **Option Buying (CE / PE)** with a **₹5,000 profit goal** "
-        "and **expiry exit warnings**. *(Educational tool only — not guaranteed profit or financial advice.)*"
+        "Plain-English **Top Trade Table** for **NIFTY 50** options across expiry dates "
+        "with a **₹5,000 profit goal** and **expiry exit warnings**. "
+        "*(Educational tool only — no guaranteed profit; verify live prices on Kite.)*"
     )
 
 with head_col2:
@@ -50,14 +57,14 @@ with head_col2:
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 1. SIMPLE CONTROLS (EXPIRY, LOTS, PROFIT GOAL)
+# 1. CONTROLS (EXPIRY DATES FROM SCREENSHOT, LOTS, PROFIT GOAL)
 # ---------------------------------------------------------
-col_c1, col_c2, col_c3, col_c4 = st.columns([1.8, 1.4, 1.4, 1.4])
+col_c1, col_c2, col_c3, col_c4 = st.columns([1.9, 1.4, 1.4, 1.3])
 
 with col_c1:
     expiry_choice = st.selectbox(
         "📅 Expiry Date",
-        ["23 Nov (Weekly)", "1 Dec (Next Weekly)", "29 Dec (Monthly)"],
+        EXPIRY_CHOICES,
         index=0,
     )
 
@@ -193,8 +200,8 @@ def fetch_live_nse_option_chain(spot_ltp: float, expiry_label: str):
             "PCR": pcr,
             "MaxPain": float(max_pain_strike),
             "ATMStrike": int(round(atm_row["strike"])),
-            "CE_LTP": atm_row["ce_ltp"] if atm_row["ce_ltp"] > 0 else 132.0,
-            "PE_LTP": atm_row["pe_ltp"] if atm_row["pe_ltp"] > 0 else 135.0,
+            "CE_LTP": atm_row["ce_ltp"] if atm_row["ce_ltp"] > 0 else 85.0,
+            "PE_LTP": atm_row["pe_ltp"] if atm_row["pe_ltp"] > 0 else 115.0,
         }
     except Exception:
         return None
@@ -217,7 +224,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
     spot_ltp = float(df["Close"].iloc[-1])
     prev_close = float(df["Close"].iloc[-2])
     spot_chg = round(((spot_ltp - prev_close) / prev_close) * 100, 2)
-    current_vix = round(float(df_vix["Close"].iloc[-1]), 2) if not df_vix.empty else 15.57
+    current_vix = round(float(df_vix["Close"].iloc[-1]), 2) if not df_vix.empty else 18.14
 
     df["EMA9"] = df["Close"].ewm(span=9, adjust=False).mean()
     df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
@@ -301,12 +308,20 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         elif pcr <= 0.70:
             score -= 10
     else:
-        pcr = 0.86
-        max_pain = float(round((support_level + resistance_level) / 100) * 50)
+        pcr = 0.90
+        max_pain = float(round(spot_ltp / 100) * 100)
         rec_strike = atm_strike
-        live_ce_prem = 132.0
-        live_pe_prem = 132.0
-        oc_source = "Estimated (Verify live chain)"
+        # Typical same-day vs. multi-day premium spacing
+        if "Today" in expiry_str:
+            live_ce_prem = 82.90
+            live_pe_prem = 116.05
+        elif "8 days" in expiry_str:
+            live_ce_prem = 270.45
+            live_pe_prem = 289.60
+        else:
+            live_ce_prem = 367.35
+            live_pe_prem = 351.65
+        oc_source = "Estimated (Check live chain on Kite)"
 
     score = max(-100, min(100, score))
     dist_up_pts = round(resistance_level - spot_ltp, 1)
@@ -361,8 +376,8 @@ else:
     investment_needed = round(intel["Entry"] * selected_qty, 2)
     max_loss_at_sl = round((intel["Entry"] - intel["SL"]) * selected_qty, 2)
 
-    is_same_or_near_expiry = ("23 Nov" in expiry_choice) or ("Weekly" in expiry_choice and "Next" not in expiry_choice)
-    exit_cutoff_time = "2:15 PM IST (before last-hour decay)" if is_same_or_near_expiry else "3:00 PM IST (intraday square-off)"
+    is_same_day_expiry = "Today" in expiry_choice
+    exit_cutoff_time = "2:00 PM IST (before sharp expiry decay)" if is_same_day_expiry else "3:00 PM IST (intraday exit)"
 
     if intel["OptType"] in ("CE", "PE"):
         st.session_state.setdefault("live_scanner_picks", {})["Index Options Alpha Sniper"] = [
@@ -372,66 +387,68 @@ else:
                 "entry": float(intel["Entry"]),
                 "sl": float(intel["SL"]),
                 "t1": float(goal_exit_prem),
-                "t2": float(round(goal_exit_prem * 1.2, 2)),
-                "notes": f"{intel['Verdict']} | Goal ₹{profit_goal_rs} (+{pts_needed_for_goal} pts) | Exit by {exit_cutoff_time}",
+                "t2": float(round(goal_exit_prem * 1.15, 2)),
+                "notes": f"{intel['Verdict']} | {expiry_choice} | Goal ₹{profit_goal_rs} | Exit by {exit_cutoff_time}",
             }
         ]
     else:
         st.session_state.setdefault("live_scanner_picks", {})["Index Options Alpha Sniper"] = []
 
-    # 1. TOP VERDICT & EXPIRY SELL ALERT
-    if intel["OptType"] == "CE":
-        st.success(f"### 👉 SIGNAL: {intel['Verdict']} — Strike **{intel['Strike']} CE** ({expiry_choice})")
-    elif intel["OptType"] == "PE":
-        st.error(f"### 👉 SIGNAL: {intel['Verdict']} — Strike **{intel['Strike']} PE** ({expiry_choice})")
-    else:
-        st.warning(f"### 👉 SIGNAL: {intel['Verdict']} — Do NOT buy yet")
+    # 1. TOP ACTION TABLE (HIGHLIGHTED FIRST FOR EASY READING)
+    st.markdown("### 🎯 Top Action Table: What to Trade & How to Book Profit")
+    strike_display = f"{intel['Strike']} {intel['OptType']}" if intel["OptType"] in ("CE", "PE") else "WAIT (Skip)"
 
-    if is_same_or_near_expiry:
-        st.error(
-            f"⏰ **EXPIRY SELL WARNING ({expiry_choice}):** Near/same-day expiry options lose value rapidly from time decay. "
-            f"**Sell / exit by {exit_cutoff_time}** or as soon as your **₹{profit_goal_rs:,.0f}** goal is hit—never hold blindly into the close."
-        )
-    else:
-        st.info(
-            f"⏰ **EXPIRY & EXIT RULE ({expiry_choice}):** More time left than weekly expiry, but still **sell by {exit_cutoff_time}** "
-            f"or when profit reaches **₹{profit_goal_rs:,.0f}** so gains don't slip away."
-        )
-
-    # 2. SIMPLE TABLE: WHAT TO BUY, WHEN TO SELL, WHEN TO STOP
-    strike_label = f"{intel['Strike']} {intel['OptType']}" if intel["OptType"] in ("CE", "PE") else "WAIT (Skip)"
-    action_table = pd.DataFrame([
+    top_action_df = pd.DataFrame([
         {
-            "Step": "1. BUY (Entry)",
-            "Strike / Target": strike_label,
-            "Price & Cost": f"₹{intel['Entry']:.2f} / lot (~₹{investment_needed:,.0f} for {selected_qty} qty)",
-            "P&L Impact": f"Est. outlay ~₹{investment_needed:,.0f}",
-            "Action Rule": "Buy only when market is open & price nears trigger; skip if choppy.",
-        },
-        {
-            "Step": "2. SELL FOR PROFIT",
-            "Strike / Target": f"Exit @ ₹{goal_exit_prem:.2f} (+{pts_needed_for_goal:.2f} pts)",
-            "Price & Cost": f"+{pts_needed_for_goal:.2f} pts premium gain needed",
-            "P&L Impact": f"+₹{profit_goal_rs:,.0f} target on {selected_qty} qty",
-            "Action Rule": f"Sell at ₹{goal_exit_prem:.2f} OR by {exit_cutoff_time} (whichever comes first).",
-        },
-        {
-            "Step": "3. SELL TO CUT LOSS",
-            "Strike / Target": f"Stop @ ₹{intel['SL']:.2f}",
-            "Price & Cost": f"Drop to ₹{intel['SL']:.2f} premium",
-            "P&L Impact": f"-₹{max_loss_at_sl:,.0f} max loss on {selected_qty} qty",
-            "Action Rule": "Exit immediately if stop-loss hits or Nifty crosses opposite fence.",
-        },
+            "Expiry": expiry_choice,
+            "Suggested Setup": strike_display,
+            "Side": "BUY (Long Option)" if intel["OptType"] in ("CE", "PE") else "NO TRADE",
+            "Est. Buy Price": f"₹{intel['Entry']:.2f} (~₹{investment_needed:,.0f} for {selected_qty} qty)",
+            "Sell Target for ₹5k": f"₹{goal_exit_prem:.2f} (+{pts_needed_for_goal:.2f} pts → +₹{profit_goal_rs:,.0f})",
+            "Stop-Loss": f"₹{intel['SL']:.2f} (-₹{max_loss_at_sl:,.0f} max loss)",
+            "When to Sell / Exit": f"Sell at ₹{goal_exit_prem:.2f} OR stop-loss OR by {exit_cutoff_time}",
+        }
     ])
-    st.markdown("### 📋 Simple Buy & Sell Cheat Sheet")
-    st.dataframe(action_table, use_container_width=True, hide_index=True)
+    st.dataframe(top_action_df, use_container_width=True, hide_index=True)
 
-    # 3. QUICK NUMBERS ROW
+    # 2. EXPIRY & ADVANCE ALERT STRIP
+    dist_up = intel["DistUp"]
+    dist_dn = intel["DistDown"]
+    if dist_up <= ADVANCE_ALERT_POINTS:
+        st.info(f"⏳ **40-Pt Advance Alert:** Nifty is {max(dist_up, 0):.0f} pts from upside ceiling ₹{intel['Resistance']:,.0f}.")
+    elif dist_dn <= ADVANCE_ALERT_POINTS:
+        st.info(f"⏳ **40-Pt Advance Alert:** Nifty is {max(dist_dn, 0):.0f} pts from downside floor ₹{intel['Support']:,.0f}.")
+
+    if is_same_day_expiry:
+        st.error(
+            f"⏰ **EXPIRY WARNING ({expiry_choice}):** Today's expiry contracts decay fast and can drop to ₹0 if Nifty stalls. "
+            f"**Sell by {exit_cutoff_time}** or book profit at **₹{goal_exit_prem:.2f}**."
+        )
+    else:
+        st.warning(
+            f"⏰ **EXPIRY & PROFIT RULE ({expiry_choice}):** Even with more days to expiry, **sell by {exit_cutoff_time}** "
+            f"or when profit hits **₹{profit_goal_rs:,.0f}** so gains do not reverse."
+        )
+
+    # 3. QUICK METRICS & EXPIRY SNAPSHOT ACROSS DATES
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Nifty Now", f"₹{intel['Spot']:,.2f}", f"{intel['Change']:+.2f}%")
-    m2.metric("Upside / Downside Fence", f"₹{intel['Resistance']:,.0f} / ₹{intel['Support']:,.0f}", f"+{intel['DistUp']:.0f} up | -{intel['DistDown']:.0f} dn")
-    m3.metric("Pts Needed for ₹5k", f"+{pts_needed_for_goal:.2f} pts", f"For {selected_qty} qty")
-    m4.metric("Sell Deadline", exit_cutoff_time.split(" (")[0], expiry_choice)
+    m1.metric("Nifty 50 Now", f"₹{intel['Spot']:,.2f}", f"{intel['Change']:+.2f}%")
+    m2.metric("Ceiling / Floor", f"₹{intel['Resistance']:,.0f} / ₹{intel['Support']:,.0f}", f"+{dist_up:.0f} up | -{dist_dn:.0f} dn")
+    m3.metric("Pts Needed for Goal", f"+{pts_needed_for_goal:.2f} pts", f"Target ₹{profit_goal_rs:,.0f}")
+    m4.metric("Data Source", intel["OCSource"].split(" (")[0], f"PCR {intel['PCR']}")
+
+    st.markdown("#### 📅 Expiry Dates Overview (Same Rule Applied)")
+    expiry_overview = pd.DataFrame([
+        {
+            "Expiry Tab": exp_name,
+            "Selected": "✅ Active" if exp_name == expiry_choice else "",
+            "Time Decay Risk": "Very High (Same-Day)" if "Today" in exp_name else ("Moderate-High" if "8 days" in exp_name else "Lower (More Time)"),
+            "Suggested Exit Cutoff": "2:00 PM IST" if "Today" in exp_name else "3:00 PM IST",
+            "Layman Note": "Fastest moves & fastest decay—strict exit time." if "Today" in exp_name else "More time cushion, still book profit on target/cutoff.",
+        }
+        for exp_name in EXPIRY_CHOICES
+    ])
+    st.dataframe(expiry_overview, use_container_width=True, hide_index=True)
 
     # 4. SIMPLE PRICE & RSI CHART
     st.markdown("### 📊 Nifty Price & Speed Chart")
