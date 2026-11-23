@@ -1,4 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
+import time
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -89,10 +91,6 @@ SECTOR_OPTIONS = [
 PRICE_BAND_OPTIONS = ["All Prices", "Under ₹500", "₹500 – ₹2,000", "Above ₹2,000"]
 
 PRIMARY_INTERVALS = ["1m", "2m", "3m", "5m", "10m", "15m", "30m", "1h", "4h", "1D", "1W", "1M"]
-ALL_SUPPORTED_INTERVALS = [
-    "1m", "2m", "3m", "5m", "10m", "15m", "30m", "45m",
-    "1h", "2h", "3h", "4h", "1D", "1W", "1M", "3M", "6M", "12M"
-]
 
 INDICATOR_OPTIONS = [
     "VWAP",
@@ -137,6 +135,8 @@ defaults = {
     "show_spikes": True,
     "show_trade_lines": True,
     "fit_far_smc_yaxis": False,
+    "auto_refresh": False,
+    "refresh_interval_sec": 15,
     "jump_date": None,
 }
 for k, v in defaults.items():
@@ -180,7 +180,7 @@ def compute_ai_ml_features(df: pd.DataFrame) -> pd.DataFrame:
     ).max(axis=1)
     df["ATR14"] = tr.ewm(span=14, adjust=False).mean().bfill()
 
-    # 1. K-Means Style 3-Regime Volatility Clustering -> ML Adaptive SuperTrend
+    # 1. Volatility Clustering -> ML Adaptive SuperTrend
     atr_pct = (df["ATR14"] / close.replace(0, np.nan)).fillna(0.005)
     q33 = atr_pct.rolling(50, min_periods=5).quantile(0.33).fillna(atr_pct.median())
     q66 = atr_pct.rolling(50, min_periods=5).quantile(0.66).fillna(atr_pct.median())
@@ -280,8 +280,38 @@ def compute_ai_ml_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+@st.cache_data(ttl=300)
+def fetch_4h_context(sym: str) -> pd.DataFrame:
+    t_obj = yf.Ticker(sym)
+    df4 = t_obj.history(period="60d", interval="1h", auto_adjust=True)
+    if df4 is None or df4.empty or not {"Open", "High", "Low", "Close"}.issubset(set(df4.columns)):
+        return pd.DataFrame()
+    df4 = df4.copy()
+    df4.index = pd.to_datetime(df4.index)
+    if df4.index.tz is not None:
+        df4.index = df4.index.tz_convert("Asia/Kolkata").tz_localize(None)
+    return (
+        df4.resample("4h", offset="15min")
+        .agg({"Open": "first", "High": "max", "Low": "min", "Close": "last"})
+        .dropna()
+    )
+
+
+@st.cache_data(ttl=10)
+def fetch_fast_quote(sym: str):
+    try:
+        info = yf.Ticker(sym).fast_info
+        for attr in ("last_price", "regularMarketPrice", "previous_close"):
+            val = getattr(info, attr, None)
+            if val is not None and float(val) > 0:
+                return float(val)
+    except Exception:
+        pass
+    return None
+
+
 @st.cache_data(ttl=15)
-def fetch_clean_smc(sym, tf):
+def fetch_clean_smc(sym: str, tf: str):
     p_map = {
         "1m": "5d", "2m": "5d", "3m": "5d", "5m": "10d", "10m": "10d",
         "15m": "15d", "30m": "30d", "45m": "30d",
@@ -297,11 +327,11 @@ def fetch_clean_smc(sym, tf):
 
     t_obj = yf.Ticker(sym)
     df = t_obj.history(period=p_map[tf], interval=i_map[tf], auto_adjust=True)
-    df4 = t_obj.history(period="60d", interval="1h", auto_adjust=True)
+    df4 = fetch_4h_context(sym)
 
     req = {"Open", "High", "Low", "Close", "Volume"}
     if df is None or df.empty or not req.issubset(set(df.columns)):
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), df4
 
     df = df.reset_index()
     df.rename(columns={df.columns[0]: "Time"}, inplace=True)
@@ -329,70 +359,70 @@ def fetch_clean_smc(sym, tf):
             .reset_index()
         )
 
-    if df4 is not None and not df4.empty and {"Open", "High", "Low", "Close"}.issubset(set(df4.columns)):
-        df4.index = pd.to_datetime(df4.index)
-        if df4.index.tz is not None:
-            df4.index = df4.index.tz_convert("Asia/Kolkata").tz_localize(None)
-        df4 = (
-            df4.resample("4h", offset="15min")
-            .agg({"Open": "first", "High": "max", "Low": "min", "Close": "last"})
-            .dropna()
-        )
-
     return df, df4
+
+
+def _scan_single_stock(item):
+    sym, name, sec, _ = item
+    try:
+        d = yf.Ticker(f"{sym}.NS").history(period="15d", interval="15m", auto_adjust=True)
+        if d is None or len(d) < 30:
+            return None
+        d = d.reset_index()
+        d.rename(columns={d.columns[0]: "Time"}, inplace=True)
+        d["Time"] = pd.to_datetime(d["Time"])
+        if d["Time"].dt.tz is not None:
+            d["Time"] = d["Time"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
+        d = compute_ai_ml_features(d)
+
+        ltp = float(d["Close"].iloc[-1])
+        bsl = float(d["High"].iloc[-60:].max())
+        chand = float(d["Chandelier_Exit"].iloc[-1])
+        nn_rsi = float(d["NN_RSI"].iloc[-1])
+        rvol = float(d["RVOL"].iloc[-1])
+        pb_score = float(d["Profit_Book_Score"].iloc[-1])
+        dist_bsl_pct = ((bsl - ltp) / ltp) * 100.0 if ltp else 0.0
+
+        if pb_score >= 72 or dist_bsl_pct <= 0.6 or ltp < chand:
+            action = "💰 BOOK / TRAIL PROFIT"
+        elif pb_score <= 35 and d["ML_ST_Dir"].iloc[-1] == 1:
+            action = "🟢 ACCUMULATE (DISCOUNT)"
+        else:
+            action = "⏳ HOLD / RIDE TREND"
+
+        return {
+            "Symbol": sym,
+            "Sector": sec,
+            "LTP (₹)": round(ltp, 2),
+            "AI Profit Score": pb_score,
+            "NN-RSI": round(nn_rsi, 1),
+            "RVOL": f"{rvol:.2f}x",
+            "BSL Target (₹)": round(bsl, 2),
+            "Dist to BSL": f"{dist_bsl_pct:.2f}%",
+            "Chandelier Exit (₹)": round(chand, 2),
+            "Advance AI Action": action,
+        }
+    except Exception:
+        return None
 
 
 @st.cache_data(ttl=120)
 def scan_advance_profit_bookings(catalog_subset):
-    """Pre-scans stocks to highlight where to book profits or enter early."""
+    """Pre-scans stocks concurrently to highlight where to book profits or enter early."""
+    subset = list(catalog_subset)[:18]
     rows = []
-    for sym, name, sec, _ in catalog_subset[:18]:
-        try:
-            d = yf.Ticker(f"{sym}.NS").history(period="15d", interval="15m", auto_adjust=True)
-            if d is None or len(d) < 30:
-                continue
-            d = d.reset_index()
-            d.rename(columns={d.columns[0]: "Time"}, inplace=True)
-            d["Time"] = pd.to_datetime(d["Time"])
-            if d["Time"].dt.tz is not None:
-                d["Time"] = d["Time"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
-            d = compute_ai_ml_features(d)
-
-            ltp = float(d["Close"].iloc[-1])
-            bsl = float(d["High"].iloc[-60:].max())
-            chand = float(d["Chandelier_Exit"].iloc[-1])
-            nn_rsi = float(d["NN_RSI"].iloc[-1])
-            rvol = float(d["RVOL"].iloc[-1])
-            pb_score = float(d["Profit_Book_Score"].iloc[-1])
-            dist_bsl_pct = ((bsl - ltp) / ltp) * 100.0
-
-            if pb_score >= 72 or dist_bsl_pct <= 0.6 or ltp < chand:
-                action = "💰 BOOK / TRAIL PROFIT"
-            elif pb_score <= 35 and d["ML_ST_Dir"].iloc[-1] == 1:
-                action = "🟢 ACCUMULATE (DISCOUNT)"
-            else:
-                action = "⏳ HOLD / RIDE TREND"
-
-            rows.append({
-                "Symbol": sym,
-                "Sector": sec,
-                "LTP (₹)": round(ltp, 2),
-                "AI Profit Score": pb_score,
-                "NN-RSI": round(nn_rsi, 1),
-                "RVOL": f"{rvol:.2f}x",
-                "BSL Target (₹)": round(bsl, 2),
-                "Dist to BSL": f"{dist_bsl_pct:.2f}%",
-                "Chandelier Exit (₹)": round(chand, 2),
-                "Advance AI Action": action,
-            })
-        except Exception:
-            continue
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = [pool.submit(_scan_single_stock, item) for item in subset]
+        for fut in as_completed(futures):
+            res = fut.result()
+            if res is not None:
+                rows.append(res)
     if not rows:
         return pd.DataFrame()
     return pd.DataFrame(rows).sort_values(by="AI Profit Score", ascending=False)
 
 
-# --- TOP FILTER & SYMBOL BAR (Clean, without far-away interval buttons) ---
+# --- TOP FILTER & SYMBOL BAR ---
 kf1, kf2, kf3, kf4 = st.columns([1.4, 1.3, 1.5, 2.0])
 selected_sector = kf1.selectbox("🏷️ Filter by Sector", SECTOR_OPTIONS, index=0)
 selected_price_band = kf2.selectbox("💰 Filter by Price Tier", PRICE_BAND_OPTIONS, index=0)
@@ -442,7 +472,10 @@ else:
     df = df.reset_index(drop=True)
     df = compute_ai_ml_features(df)
 
-    ltp = float(df["Close"].iloc[-1])
+    bar_close = float(df["Close"].iloc[-1])
+    fast_px = fetch_fast_quote(ticker)
+    ltp = fast_px if fast_px is not None else bar_close
+
     latest_vwap = float(df["VWAP"].iloc[-1])
     latest_chand = float(df["Chandelier_Exit"].iloc[-1])
     latest_ml_st = float(df["ML_ST"].iloc[-1])
@@ -538,7 +571,7 @@ else:
     # --- AI PROFIT-BOOKING & EXECUTION METRICS ---
     st.subheader(f"🧠 AI/ML Institutional Blueprint & Profit-Booking Radar: {raw_sym} ({tf_choice})")
     m1, m2, m3, m4, m5, m6 = st.columns(6)
-    m1.metric("Last Price", f"₹{ltp:,.2f}", f"RVOL {latest_rvol:.2f}x | {vol_regime}")
+    m1.metric("Last Price", f"₹{ltp:,.2f}", f"Close ₹{bar_close:,.2f} | RVOL {latest_rvol:.2f}x")
     m2.metric("🤖 ML SuperTrend", f"₹{latest_ml_st:,.2f}", "BULLISH 🟢" if latest_st_dir == 1 else "BEARISH 🔴")
     m3.metric("🔔 Chandelier Exit", f"₹{latest_chand:,.2f}", "Trail Stop / Book Profit")
     m4.metric("🎯 T1 / T2 Profit Zones", f"₹{t1_p:,.1f} / ₹{t2_p:,.1f}", zone_tag)
@@ -835,7 +868,6 @@ else:
     st.markdown(
         """
         <style>
-        /* Connected TradingView TOP Interval & Indicator Bar (Right above LICHSGFIN LTP header) */
         div[data-testid="stVerticalBlockBorderWrapper"]:has(.tv-top-bar-marker),
         div[data-testid="stVerticalBlock"]:has(> div > .tv-top-bar-marker) {
             background-color: #131722 !important;
@@ -847,14 +879,12 @@ else:
             position: relative !important;
             z-index: 2 !important;
         }
-        /* Pull Plotly chart up and down so both bars sit flush against the chart frame */
         div[data-testid="stPlotlyChart"] {
             margin-top: 0px !important;
             margin-bottom: -18px !important;
             border-left: 1px solid #2A2E39 !important;
             border-right: 1px solid #2A2E39 !important;
         }
-        /* Connected TradingView BOTTOM Range Bar */
         div[data-testid="stVerticalBlockBorderWrapper"]:has(.tv-bottom-bar-marker),
         div[data-testid="stVerticalBlock"]:has(> div > .tv-bottom-bar-marker) {
             background-color: #131722 !important;
@@ -863,7 +893,6 @@ else:
             padding: 2px 10px !important;
             margin-top: 0px !important;
         }
-        /* Shared flat TradingView button styling for both Top & Bottom bars */
         div[data-testid="stVerticalBlockBorderWrapper"]:has(.tv-top-bar-marker) button,
         div[data-testid="stVerticalBlock"]:has(> div > .tv-top-bar-marker) button,
         div[data-testid="stVerticalBlockBorderWrapper"]:has(.tv-bottom-bar-marker) button,
@@ -908,10 +937,9 @@ else:
         unsafe_allow_html=True,
     )
 
-    # --- CONNECTED TOP TRADINGVIEW BAR (Right above LICHSGFIN (1M) | LTP: ...) ---
+    # --- CONNECTED TOP TRADINGVIEW BAR ---
     with st.container(border=True):
         st.markdown('<div class="tv-top-bar-marker" style="display:none;"></div>', unsafe_allow_html=True)
-        # 12 primary intervals + divider + More Intervals popover + divider + AI Indicators + SMC Layers + Settings + Refresh
         top_weights = [0.46] * len(PRIMARY_INTERVALS) + [0.10, 0.65, 0.10, 1.35, 1.35, 1.05, 0.45]
         top_cols = st.columns(top_weights, gap="small")
 
@@ -926,11 +954,9 @@ else:
                 _switch_timeframe(tf_label)
                 st.rerun()
 
-        # Vertical Divider |
         with top_cols[len(PRIMARY_INTERVALS)]:
             st.markdown("<div style='border-left:1px solid #2A2E39; height:20px; margin:3px auto;'></div>", unsafe_allow_html=True)
 
-        # TradingView-Style Categorized Interval Dropdown (Minutes / Hours / Days & Months)
         with top_cols[len(PRIMARY_INTERVALS) + 1]:
             extra_active = tf_choice not in PRIMARY_INTERVALS
             more_label = f"⏱️ {tf_choice}" if extra_active else "⏱️ More"
@@ -954,33 +980,33 @@ else:
                         _switch_timeframe(d_tf)
                         st.rerun()
 
-        # Vertical Divider |
         with top_cols[len(PRIMARY_INTERVALS) + 2]:
             st.markdown("<div style='border-left:1px solid #2A2E39; height:20px; margin:3px auto;'></div>", unsafe_allow_html=True)
 
-        # AI Indicators Popover
         with top_cols[len(PRIMARY_INTERVALS) + 3]:
             with st.popover("📈 Indicators", use_container_width=True):
                 st.session_state.selected_indicators = st.multiselect(
                     "Select AI/ML Indicators", INDICATOR_OPTIONS, default=st.session_state.selected_indicators
                 )
 
-        # SMC & Liquidity Popover
         with top_cols[len(PRIMARY_INTERVALS) + 4]:
             with st.popover("🧱 SMC Layers", use_container_width=True):
                 st.session_state.show_layers = st.multiselect(
                     "Select SMC & Profit Alerts", SMC_LAYER_OPTIONS, default=st.session_state.show_layers
                 )
 
-        # Settings Popover
         with top_cols[len(PRIMARY_INTERVALS) + 5]:
             with st.popover("⚙️ Settings", use_container_width=True):
                 st.session_state.show_volume = st.checkbox("Show Volume / RVOL", value=st.session_state.show_volume)
                 st.session_state.show_spikes = st.checkbox("Crosshair / Spikes", value=st.session_state.show_spikes)
                 st.session_state.show_trade_lines = st.checkbox("BUY / SL / T1 / T2 Lines", value=st.session_state.show_trade_lines)
                 st.session_state.fit_far_smc_yaxis = st.checkbox("Fit Far SMC Zones", value=st.session_state.fit_far_smc_yaxis)
+                st.divider()
+                st.session_state.auto_refresh = st.checkbox("Auto-Refresh Poll", value=st.session_state.auto_refresh)
+                st.session_state.refresh_interval_sec = st.slider(
+                    "Poll Interval (sec)", min_value=10, max_value=120, value=int(st.session_state.refresh_interval_sec), step=5
+                )
 
-        # Refresh Icon Button
         with top_cols[len(PRIMARY_INTERVALS) + 6]:
             if st.button("🔄", key="tv_top_refresh", help="Refresh Live Data", use_container_width=True):
                 st.cache_data.clear()
@@ -989,7 +1015,7 @@ else:
     # --- MAIN CHART CANVAS ---
     st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
-    # --- CONNECTED BOTTOM TRADINGVIEW BAR (1D 5D 1M 3M 6M YTD 1Y 5Y All | 📅  <--->  HH:MM:SS UTC+5:30 RTH | ADJ) ---
+    # --- CONNECTED BOTTOM TRADINGVIEW BAR ---
     TV_RANGE_LABELS = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "All"]
     TV_COL_WEIGHTS = [0.55, 0.55, 0.58, 0.58, 0.58, 0.72, 0.55, 0.55, 0.65, 0.12, 0.62, 3.2, 2.3]
     with st.container(border=True):
@@ -1054,3 +1080,8 @@ else:
                 st.dataframe(radar_df, use_container_width=True, hide_index=True)
             else:
                 st.info("No intraday bars returned right now (market closed or ticker limit). Try again during market hours.")
+
+    # Optional auto-refresh loop when enabled in Settings
+    if st.session_state.auto_refresh:
+        time.sleep(int(st.session_state.refresh_interval_sec))
+        st.rerun()
