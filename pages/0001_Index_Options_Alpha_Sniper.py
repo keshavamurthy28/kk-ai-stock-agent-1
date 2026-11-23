@@ -22,6 +22,8 @@ is_market_open = (
     and dt_time(9, 15) <= current_time <= dt_time(15, 30)
 )
 
+ADVANCE_ALERT_POINTS = 40.0
+
 # ---------------------------------------------------------
 # HEADER & TOP REFRESH BAR
 # ---------------------------------------------------------
@@ -29,8 +31,8 @@ head_col1, head_col2 = st.columns([3, 1])
 with head_col1:
     st.title("⚡ Nifty Options Quick Guide (Advance Signal)")
     st.markdown(
-        "Simple view for **buying Nifty CE (Call) or PE (Put)**—shows early alerts, "
-        "key trigger levels, and exact ₹ risk/reward at a glance."
+        "Simple view for **buying Nifty CE (Call) or PE (Put)**—gives early "
+        "**40-point alerts**, clear **Skip Trade** warnings, and exact ₹ risk/reward."
     )
 
 with head_col2:
@@ -348,24 +350,40 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         opt_type = "PE"
         entry_prem = round(live_pe_prem, 2)
     else:
-        simple_verdict = "WAIT (NO TRADE)"
+        simple_verdict = "SKIP TRADE (WAIT)"
         strength_label = "Choppy / No Clear Direction"
         opt_type = "WAIT"
         entry_prem = round(min(live_ce_prem, live_pe_prem), 2)
 
     if dist_up_pts <= 0:
-        advance_alert = f"🚨 Nifty is ABOVE upside ceiling ₹{resistance_level:,.0f} — watch for CE continuation or fakeout."
+        advance_alert = f"🚨 BREAKOUT ZONE: Nifty is ABOVE upside ceiling ₹{resistance_level:,.0f} — watch CE momentum or fakeout."
     elif dist_down_pts <= 0:
-        advance_alert = f"🚨 Nifty is BELOW downside floor ₹{support_level:,.0f} — watch for PE continuation or bounce."
-    elif dist_up_pts <= 60:
-        advance_alert = f"⏳ EARLY ALERT: Nifty is only {dist_up_pts:.0f} pts below upside ceiling ₹{resistance_level:,.0f}. Get ready for CE breakout."
-    elif dist_down_pts <= 60:
-        advance_alert = f"⏳ EARLY ALERT: Nifty is only {dist_down_pts:.0f} pts above downside floor ₹{support_level:,.0f}. Get ready for PE breakdown."
+        advance_alert = f"🚨 BREAKDOWN ZONE: Nifty is BELOW downside floor ₹{support_level:,.0f} — watch PE momentum or bounce."
+    elif dist_up_pts <= ADVANCE_ALERT_POINTS:
+        advance_alert = f"⏳ 40-PT ADVANCE ALERT: Nifty is {dist_up_pts:.0f} pts below upside ceiling ₹{resistance_level:,.0f}. Get ready for CE breakout."
+    elif dist_down_pts <= ADVANCE_ALERT_POINTS:
+        advance_alert = f"⏳ 40-PT ADVANCE ALERT: Nifty is {dist_down_pts:.0f} pts above downside floor ₹{support_level:,.0f}. Get ready for PE breakdown."
     else:
         advance_alert = (
-            f"👀 ADVANCE WATCH: Nifty is {dist_up_pts:.0f} pts below upside ceiling (₹{resistance_level:,.0f}) "
-            f"and {dist_down_pts:.0f} pts above downside floor (₹{support_level:,.0f})."
+            f"👀 ADVANCE WATCH: Nifty is {dist_up_pts:.0f} pts below ceiling (₹{resistance_level:,.0f}) "
+            f"and {dist_down_pts:.0f} pts above floor (₹{support_level:,.0f}) — 40-pt alert triggers when within 40 pts."
         )
+
+    is_choppy_middle = (
+        abs(score) < 10
+        or (dist_up_pts > ADVANCE_ALERT_POINTS and dist_down_pts > ADVANCE_ALERT_POINTS and abs(score) < 35)
+    )
+    if not is_market_open:
+        skip_reason = "Market is closed—skip live buying right now and use this as a watch plan."
+    elif abs(score) < 10:
+        skip_reason = "Direction score is near zero—market is choppy/sideways, so skip buying."
+    elif dist_up_pts > ADVANCE_ALERT_POINTS and dist_down_pts > ADVANCE_ALERT_POINTS:
+        skip_reason = (
+            f"Nifty is stuck in the middle ({dist_up_pts:.0f} pts below ceiling, {dist_down_pts:.0f} pts above floor)—"
+            "skip or wait until price comes within 40 pts of a trigger."
+        )
+    else:
+        skip_reason = ""
 
     sl_prem = round(entry_prem * 0.75, 2)
     t1_prem = round(entry_prem * 1.35, 2)
@@ -391,6 +409,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         "DistUp": dist_up_pts,
         "DistDown": dist_down_pts,
         "AdvanceAlert": advance_alert,
+        "SkipReason": skip_reason,
         "Expiry": expiry_str,
         "Entry": entry_prem,
         "SL": sl_prem,
@@ -425,7 +444,7 @@ else:
         ] = []
 
     # ---------------------------------------------------------
-    # 4. INSTANT VERDICT & ADVANCE ALERT
+    # 4. INSTANT VERDICT, ADVANCE ALERT & SKIP RULE
     # ---------------------------------------------------------
     strike_text = f"Strike: **{intel['Strike']} {intel['OptType']}**" if intel["OptType"] in ("CE", "PE") else "No trade yet"
     if intel["OptType"] == "CE":
@@ -436,6 +455,11 @@ else:
         st.warning(f"### 👉 TODAY'S LEAN: {intel['SimpleVerdict']} ({intel['StrengthLabel']})")
 
     st.info(intel["AdvanceAlert"])
+
+    if intel["SkipReason"]:
+        st.warning(f"🛑 **SKIP TRADE RULE:** {intel['SkipReason']}")
+    else:
+        st.success("✅ **ACTIVE SETUP RULE:** Price is near a key boundary or momentum is clearly aligned—check your entry & stop-loss below.")
 
     # ---------------------------------------------------------
     # 5. FIVE PLAIN-ENGLISH CARDS
@@ -485,7 +509,7 @@ else:
             )
         elif intel["OptType"] == "WAIT":
             st.write(
-                "• **Stay out for now.** Direction is unclear.\n"
+                "• **Skip this setup.** Direction is unclear.\n"
                 f"• Only look for **CE** if Nifty crosses **₹{intel['Resistance']:,.0f}**, or **PE** if it drops below **₹{intel['Support']:,.0f}**."
             )
         else:
@@ -507,8 +531,8 @@ else:
         st.markdown("#### 3. Stop-Loss & Safety")
         st.write(
             f"• **Hard Stop-Loss (₹{intel['SL']:.2f}):** Max loss ~**₹{total_risk_amt:,.0f}** on {selected_qty} qty. Exit immediately if hit.\n"
-            "• **Stick to 1 Lot** while learning.\n"
-            "• **Double-check live option price** in your broker app before placing any order."
+            "• **Skip when choppy:** Do not force trades when score is weak or price is stuck mid-range.\n"
+            "• **Stick to 1 Lot** while learning and verify live option prices in your broker app."
         )
 
     st.markdown("---")
