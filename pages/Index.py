@@ -46,7 +46,8 @@ with head_col1:
     st.title("⚡ Nifty Options Top Action & Expiry Guide")
     st.markdown(
         "Plain-English **Top Trade Table** for **NIFTY 50** options with a **₹5,000 profit goal**, "
-        "**lots needed**, **expiry exit warnings**, and a **Kite-colored Option Chain table** below the chart. "
+        "**exact Buy / Sell / Stop-Loss prices**, **expiry exit warnings**, and a "
+        "**Kite-colored Option Chain table** below the chart. "
         "*(Educational tool only — verify live prices on Kite.)*"
     )
 
@@ -545,9 +546,12 @@ else:
     qty_needed_for_goal = lots_needed_for_goal * LOT_SIZE
     est_cost_for_goal_lots = round(intel["Entry"] * qty_needed_for_goal, 2)
     est_max_loss_for_goal_lots = round((intel["Entry"] - intel["SL"]) * qty_needed_for_goal, 2)
+    est_profit_for_goal_lots = round(expected_pt_gain * qty_needed_for_goal, 2)
 
     pts_needed_for_selected_lots = round(profit_goal_rs / max(selected_qty, 1), 2)
     goal_exit_prem = round(intel["Entry"] + pts_needed_for_selected_lots, 2)
+    selected_cost = round(intel["Entry"] * selected_qty, 2)
+    selected_max_loss = round((intel["Entry"] - intel["SL"]) * selected_qty, 2)
 
     is_same_day_expiry = "Today" in expiry_choice
     exit_cutoff_time = "2:00 PM IST (before sharp expiry decay)" if is_same_day_expiry else "3:00 PM IST (intraday exit)"
@@ -583,7 +587,29 @@ else:
     ])
     st.dataframe(top_action_df, use_container_width=True, hide_index=True)
 
-    # 2. EXPIRY & ADVANCE ALERT STRIP
+    # 2. SEPARATE BUY / SELL TARGET / STOP-LOSS PRICE TABLE RIGHT BELOW
+    st.markdown("#### 💵 Exact Buy, Sell Target & Stop-Loss Price Table")
+    price_action_df = pd.DataFrame([
+        {
+            "Plan View": f"Selected Lots ({lot_multiplier})",
+            "Contract": strike_display,
+            "Buy Price (Entry)": f"₹{intel['Entry']:.2f} (Cost ~₹{selected_cost:,.0f})",
+            "Sell Target Price": f"₹{goal_exit_prem:.2f} (+{pts_needed_for_selected_lots:.2f} pts → +₹{profit_goal_rs:,.0f})",
+            "Stop-Loss Price (SL)": f"₹{intel['SL']:.2f} (Max Loss -₹{selected_max_loss:,.0f})",
+            "Exit Rule": f"Sell at target / SL / {exit_cutoff_time}",
+        },
+        {
+            "Plan View": f"₹5k Goal Lots ({lots_needed_for_goal} lots / {qty_needed_for_goal} qty)",
+            "Contract": strike_display,
+            "Buy Price (Entry)": f"₹{intel['Entry']:.2f} (Cost ~₹{est_cost_for_goal_lots:,.0f})",
+            "Sell Target Price": f"₹{round(intel['Entry'] + expected_pt_gain, 2):.2f} (+{expected_pt_gain:.0f} pts → +₹{est_profit_for_goal_lots:,.0f})",
+            "Stop-Loss Price (SL)": f"₹{intel['SL']:.2f} (Max Loss -₹{est_max_loss_for_goal_lots:,.0f})",
+            "Exit Rule": f"Sell at target / SL / {exit_cutoff_time}",
+        },
+    ])
+    st.dataframe(price_action_df, use_container_width=True, hide_index=True)
+
+    # 3. EXPIRY & ADVANCE ALERT STRIP
     dist_up = intel["DistUp"]
     dist_dn = intel["DistDown"]
     if dist_up <= ADVANCE_ALERT_POINTS:
@@ -602,14 +628,14 @@ else:
             f"or when profit hits **₹{profit_goal_rs:,.0f}** so gains do not reverse."
         )
 
-    # 3. QUICK METRICS
+    # 4. QUICK METRICS
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Lots Needed for Goal", f"{lots_needed_for_goal} Lots", f"{qty_needed_for_goal} qty @ +{expected_pt_gain:.0f} pts")
     m2.metric("Nifty 50 Now", f"₹{intel['Spot']:,.2f}", f"{intel['Change']:+.2f}%")
     m3.metric("Ceiling / Floor", f"₹{intel['Resistance']:,.0f} / ₹{intel['Support']:,.0f}", f"+{dist_up:.0f} up | -{dist_dn:.0f} dn")
     m4.metric("PCR / Max Pain", f"{intel['PCR']}", f"Max Pain ₹{intel['MaxPain']:,.0f}")
 
-    # 4. PRICE & RSI CHART
+    # 5. PRICE & RSI CHART
     st.markdown("### 📊 Nifty Price & Speed Chart")
     df_c = intel["DataFrame"].tail(80)
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.75, 0.25])
@@ -634,7 +660,7 @@ else:
     )
     st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
-    # 5. KITE-COLORED OPTION CHAIN BELOW CHART
+    # 6. KITE-COLORED OPTION CHAIN BELOW CHART
     st.markdown("---")
     st.markdown(f"### 📋 Option Chain — {expiry_choice}")
     st.caption(
