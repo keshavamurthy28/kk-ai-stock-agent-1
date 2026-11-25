@@ -7,3 +7,4 @@ pytz
 xlsxwriter
 openpyxl
 nsepythonserver
+kiteconnect
