@@ -1,5 +1,6 @@
-from datetime import datetime, time as dt_time
+from datetime import date, datetime, time as dt_time, timedelta
 import math
+import os
 import time
 import numpy as np
 import pandas as pd
@@ -24,19 +25,365 @@ is_market_open = (
 
 ADVANCE_ALERT_POINTS = 40.0
 LOT_SIZE = 65
-EXPIRY_CHOICES = [
-    "23 Nov (Today)",
-    "1 Dec (8 days)",
-    "8 Dec (2 weeks)",
-    "15 Dec (3 weeks)",
-    "22 Dec (4 weeks)",
-    "29 Dec (1 month)",
-    "25 Jan (2 months)",
-    "30 Mar (4 months)",
-    "29 Jun (7 months)",
-    "28 Sep (10 months)",
-    "28 Dec (1 year)",
-]
+
+
+def _next_weekday_on_or_after(start_date: date, target_weekday: int) -> date:
+    """Returns the nearest date >= start_date matching target_weekday (0=Mon .. 6=Sun)."""
+    days_ahead = (target_weekday - start_date.weekday()) % 7
+    return start_date + timedelta(days=days_ahead)
+
+
+def _last_weekday_of_month(year: int, month: int, target_weekday: int) -> date:
+    """Returns the last occurrence of target_weekday in a given year/month."""
+    if month == 12:
+        next_month_first = date(year + 1, 1, 1)
+    else:
+        next_month_first = date(year, month + 1, 1)
+    last_day = next_month_first - timedelta(days=1)
+    offset = (last_day.weekday() - target_weekday) % 7
+    return last_day - timedelta(days=offset)
+
+
+def _format_expiry_label(exp_date: date, today_date: date, is_monthly: bool = False) -> str:
+    """Formats an active expiry date cleanly relative to today."""
+    delta_days = (exp_date - today_date).days
+    date_str = exp_date.strftime("%d %b").lstrip("0")
+    if delta_days == 0:
+        rel = "Today"
+    elif delta_days == 1:
+        rel = "1 day"
+    elif delta_days < 14:
+        rel = f"{delta_days} days"
+    elif delta_days < 60:
+        weeks = max(2, round(delta_days / 7))
+        rel = f"{weeks} weeks"
+    else:
+        months = max(1, round(delta_days / 30))
+        rel = f"{months} months"
+    suffix = " Monthly" if is_monthly else ""
+    return f"{date_str} ({rel}{suffix})"
+
+
+@st.cache_data(ttl=300)
+def get_active_nifty_expiries(today_iso: str) -> list[dict]:
+    """Generates active Nifty 50 expiries >= today (never includes expired dates)."""
+    today_date = date.fromisoformat(today_iso)
+    candidate_map: dict[date, bool] = {}
+
+    # Upcoming Tuesdays (Nifty weekly/monthly cycle)
+    cursor = _next_weekday_on_or_after(today_date, 1)
+    for _ in range(8):
+        last_tue = _last_weekday_of_month(cursor.year, cursor.month, 1)
+        candidate_map[cursor] = candidate_map.get(cursor, False) or (cursor == last_tue)
+        candidate_map[last_tue] = True
+        cursor += timedelta(days=7)
+
+    # Longer-dated monthly / quarterly checkpoints
+    for m_offset in range(1, 13):
+        yr = today_date.year + (today_date.month - 1 + m_offset) // 12
+        mo = (today_date.month - 1 + m_offset) % 12 + 1
+        last_tue = _last_weekday_of_month(yr, mo, 1)
+        if last_tue >= today_date:
+            candidate_map[last_tue] = True
+
+    active_dates = sorted(d for d in candidate_map.keys() if d >= today_date)[:12]
+    results = []
+    for d in active_dates:
+        is_m = candidate_map[d]
+        results.append({
+            "date": d,
+            "iso": d.isoformat(),
+            "label": _format_expiry_label(d, today_date, is_monthly=is_m),
+        })
+    return results
+
+
+# ---------------------------------------------------------
+# KITE CONNECT HELPERS
+# ---------------------------------------------------------
+def _get_kite_credentials() -> tuple[str, str, str, str]:
+    """Reads Kite credentials from session_state, st.secrets, or environment variables."""
+    sec = {}
+    try:
+        if "kite" in st.secrets:
+            sec = dict(st.secrets["kite"])
+    except Exception:
+        sec = {}
+
+    api_key = (
+        st.session_state.get("kite_api_key")
+        or sec.get("api_key")
+        or os.getenv("KITE_API_KEY", "")
+    ).strip()
+    access_token = (
+        st.session_state.get("kite_access_token")
+        or sec.get("access_token")
+        or os.getenv("KITE_ACCESS_TOKEN", "")
+    ).strip()
+    api_secret = (
+        st.session_state.get("kite_api_secret")
+        or sec.get("api_secret")
+        or os.getenv("KITE_API_SECRET", "")
+    ).strip()
+    request_token = (
+        st.session_state.get("kite_request_token")
+        or sec.get("request_token")
+        or os.getenv("KITE_REQUEST_TOKEN", "")
+    ).strip()
+    return api_key, access_token, api_secret, request_token
+
+
+def get_kite_client():
+    """Returns an authenticated KiteConnect client if credentials are available."""
+    try:
+        from kiteconnect import KiteConnect
+    except ImportError:
+        return None
+
+    api_key, access_token, api_secret, request_token = _get_kite_credentials()
+    if not api_key:
+        return None
+
+    kite = KiteConnect(api_key=api_key)
+    if access_token:
+        kite.set_access_token(access_token)
+        return kite
+
+    if api_secret and request_token:
+        try:
+            session_data = kite.generate_session(request_token, api_secret=api_secret)
+            new_token = session_data.get("access_token", "")
+            if new_token:
+                st.session_state["kite_access_token"] = new_token
+                kite.set_access_token(new_token)
+                return kite
+        except Exception:
+            return None
+
+    return None
+
+
+@st.cache_data(ttl=3600)
+def fetch_kite_nfo_instruments(api_key: str, access_token: str) -> pd.DataFrame:
+    """Caches Kite NFO instruments for NIFTY options."""
+    if not api_key or not access_token:
+        return pd.DataFrame()
+    try:
+        from kiteconnect import KiteConnect
+        kite = KiteConnect(api_key=api_key)
+        kite.set_access_token(access_token)
+        inst = pd.DataFrame(kite.instruments("NFO"))
+        if inst.empty:
+            return pd.DataFrame()
+        nifty_opts = inst[
+            (inst["name"] == "NIFTY")
+            & (inst["instrument_type"].isin(["CE", "PE"]))
+        ].copy()
+        if nifty_opts.empty:
+            return pd.DataFrame()
+        nifty_opts["expiry_date"] = pd.to_datetime(nifty_opts["expiry"]).dt.date
+        nifty_opts["strike"] = nifty_opts["strike"].astype(float)
+        return nifty_opts
+    except Exception:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=15)
+def fetch_kite_spot_ltp(api_key: str, access_token: str) -> float | None:
+    """Fetches live NIFTY 50 spot LTP from Kite if connected."""
+    if not api_key or not access_token:
+        return None
+    try:
+        from kiteconnect import KiteConnect
+        kite = KiteConnect(api_key=api_key)
+        kite.set_access_token(access_token)
+        ltp_resp = kite.ltp(["NSE:NIFTY 50"])
+        val = ltp_resp.get("NSE:NIFTY 50", {}).get("last_price")
+        return float(val) if val is not None else None
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=15)
+def fetch_kite_option_chain(
+    spot_ltp: float,
+    selected_expiry_iso: str,
+    api_key: str,
+    access_token: str,
+):
+    """Builds option chain, PCR, and Max Pain from connected Kite account."""
+    if not api_key or not access_token:
+        return None
+
+    opts_df = fetch_kite_nfo_instruments(api_key, access_token)
+    if opts_df.empty:
+        return None
+
+    target_date = date.fromisoformat(selected_expiry_iso)
+    available_dates = sorted(opts_df["expiry_date"].dropna().unique())
+    if not available_dates:
+        return None
+
+    # Pick exact expiry date or nearest active expiry on/after target_date
+    future_or_eq = [d for d in available_dates if d >= target_date]
+    matched_date = future_or_eq[0] if future_or_eq else available_dates[-1]
+
+    exp_df = opts_df[
+        (opts_df["expiry_date"] == matched_date)
+        & ((opts_df["strike"] - spot_ltp).abs() <= 500.0)
+    ].copy()
+    if exp_df.empty:
+        return None
+
+    try:
+        from kiteconnect import KiteConnect
+        kite = KiteConnect(api_key=api_key)
+        kite.set_access_token(access_token)
+
+        symbols = exp_df["tradingsymbol"].tolist()
+        quote_map: dict = {}
+        # Kite quote call handles batches cleanly
+        for i in range(0, len(symbols), 200):
+            batch = [f"NFO:{s}" for s in symbols[i : i + 200]]
+            q = kite.quote(batch)
+            if isinstance(q, dict):
+                quote_map.update(q)
+
+        by_strike: dict[float, dict] = {}
+        total_ce_oi = 0.0
+        total_pe_oi = 0.0
+
+        for _, row in exp_df.iterrows():
+            tsym = row["tradingsymbol"]
+            strike = float(row["strike"])
+            otype = row["instrument_type"]
+            q_item = quote_map.get(f"NFO:{tsym}", {})
+
+            ltp = float(q_item.get("last_price", 0.0) or 0.0)
+            net_chg = float(q_item.get("net_change", 0.0) or 0.0)
+            prev_ltp = ltp - net_chg
+            pct_chg = round((net_chg / prev_ltp) * 100.0, 2) if prev_ltp > 0 else 0.0
+
+            oi = float(q_item.get("oi", 0.0) or 0.0)
+            oi_prev = float(q_item.get("oi_day_high", 0.0) or 0.0)
+            # Use oi_day_low/day_open fallback only if needed; 0.0 if unavailable
+            oi_chg_pct = 0.0
+            if oi > 0 and oi_prev > 0 and oi_prev != oi:
+                oi_chg_pct = round(((oi - oi_prev) / oi_prev) * 100.0, 2)
+
+            entry = by_strike.setdefault(
+                strike,
+                {
+                    "strike": strike,
+                    "ce_oi": 0.0,
+                    "pe_oi": 0.0,
+                    "ce_ltp": 0.0,
+                    "pe_ltp": 0.0,
+                    "ce_pchange": 0.0,
+                    "pe_pchange": 0.0,
+                    "ce_oi_chg_pct": 0.0,
+                    "pe_oi_chg_pct": 0.0,
+                },
+            )
+            if otype == "CE":
+                entry["ce_oi"] = oi
+                entry["ce_ltp"] = ltp
+                entry["ce_pchange"] = pct_chg
+                entry["ce_oi_chg_pct"] = oi_chg_pct
+                total_ce_oi += oi
+            elif otype == "PE":
+                entry["pe_oi"] = oi
+                entry["pe_ltp"] = ltp
+                entry["pe_pchange"] = pct_chg
+                entry["pe_oi_chg_pct"] = oi_chg_pct
+                total_pe_oi += oi
+
+        chain_rows = [by_strike[k] for k in sorted(by_strike.keys())]
+        if not chain_rows:
+            return None
+
+        pcr = round(total_pe_oi / total_ce_oi, 2) if total_ce_oi > 0 else 1.0
+        min_pain = float("inf")
+        max_pain_strike = float(round(spot_ltp / 50) * 50)
+        for pin_row in chain_rows:
+            pin = pin_row["strike"]
+            pain = 0.0
+            for r in chain_rows:
+                k = r["strike"]
+                if pin > k:
+                    pain += (pin - k) * r["pe_oi"]
+                elif pin < k:
+                    pain += (k - pin) * r["ce_oi"]
+            if pain < min_pain:
+                min_pain = pain
+                max_pain_strike = pin
+
+        atm_row = min(chain_rows, key=lambda r: abs(r["strike"] - spot_ltp))
+        atm_int = int(round(atm_row["strike"]))
+
+        table_df = pd.DataFrame([
+            {
+                "Call OI Chg %": round(r["ce_oi_chg_pct"], 2),
+                "OI (in lakhs)": round(r["ce_oi"] / 100000.0, 2),
+                "Call Chg %": round(r["ce_pchange"], 2),
+                "Call LTP": round(r["ce_ltp"], 2),
+                "Strike": int(round(r["strike"])),
+                "Put LTP": round(r["pe_ltp"], 2),
+                "Put Chg %": round(r["pe_pchange"], 2),
+                "Put OI (in lakhs)": round(r["pe_oi"] / 100000.0, 2),
+                "Put OI Chg %": round(r["pe_oi_chg_pct"], 2),
+                "Is_ATM": int(round(r["strike"])) == atm_int,
+            }
+            for r in chain_rows
+        ])
+
+        return {
+            "ExpiryUsed": matched_date.strftime("%d %b %Y"),
+            "PCR": pcr,
+            "MaxPain": float(max_pain_strike),
+            "ATMStrike": atm_int,
+            "CE_LTP": atm_row["ce_ltp"] if atm_row["ce_ltp"] > 0 else 80.60,
+            "PE_LTP": atm_row["pe_ltp"] if atm_row["pe_ltp"] > 0 else 83.40,
+            "ChainDF": table_df,
+        }
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------
+# SIDEBAR: KITE CONNECTION & ACTIVE EXPIRIES
+# ---------------------------------------------------------
+active_expiries = get_active_nifty_expiries(now_ist.date().isoformat())
+expiry_labels = [item["label"] for item in active_expiries]
+label_to_iso = {item["label"]: item["iso"] for item in active_expiries}
+
+with st.sidebar:
+    st.header("🔗 Kite Connect Status")
+    api_key_in, access_token_in, api_secret_in, req_token_in = _get_kite_credentials()
+    kite_client = get_kite_client()
+
+    if kite_client is not None:
+        st.success("Connected to Zerodha Kite")
+        try:
+            profile = kite_client.profile()
+            st.caption(f"User: **{profile.get('user_name', 'Connected')}** ({profile.get('user_id', '')})")
+        except Exception:
+            pass
+    else:
+        st.info("Kite not connected — using NSE / Reference fallback")
+
+    with st.expander("Configure Kite Session", expanded=(kite_client is None)):
+        k_api = st.text_input("Kite API Key", value=api_key_in, type="password")
+        k_tok = st.text_input("Kite Access Token", value=access_token_in, type="password")
+        k_sec = st.text_input("API Secret (optional)", value=api_secret_in, type="password")
+        k_req = st.text_input("Request Token (optional)", value=req_token_in, type="password")
+        if st.button("Save Kite Credentials", use_container_width=True):
+            st.session_state["kite_api_key"] = k_api.strip()
+            st.session_state["kite_access_token"] = k_tok.strip()
+            st.session_state["kite_api_secret"] = k_sec.strip()
+            st.session_state["kite_request_token"] = k_req.strip()
+            st.cache_data.clear()
+            st.rerun()
 
 # ---------------------------------------------------------
 # HEADER & LIVE REFRESH BAR
@@ -69,14 +416,14 @@ with head_col2:
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 1. CONTROLS (EXPIRY DATES, LOTS, PROFIT GOAL, EXPECTED PT MOVE)
+# 1. CONTROLS (ACTIVE EXPIRY DATES, LOTS, PROFIT GOAL, EXPECTED PT MOVE)
 # ---------------------------------------------------------
 col_c1, col_c2, col_c3, col_c4, col_c5 = st.columns([1.8, 1.3, 1.2, 1.2, 1.2])
 
 with col_c1:
     expiry_choice = st.selectbox(
         "📅 Expiry Date",
-        EXPIRY_CHOICES,
+        expiry_labels,
         index=0,
     )
 
@@ -117,6 +464,10 @@ with col_c5:
         index=0,
     )
 
+selected_expiry_iso = label_to_iso[expiry_choice]
+selected_expiry_date = date.fromisoformat(selected_expiry_iso)
+days_to_expiry = (selected_expiry_date - now_ist.date()).days
+
 qty_map = {
     "1 Lot (65 Qty)": 65,
     "2 Lots (130 Qty)": 130,
@@ -133,18 +484,18 @@ tf_map = {
 period_val, interval_val = tf_map[timeframe_choice]
 
 
-def build_kite_style_reference_chain(spot_ltp: float, expiry_label: str):
-    """Builds a Kite-style reference chain around ATM when live NSE chain rows are unavailable."""
+def build_kite_style_reference_chain(spot_ltp: float, dte: int):
+    """Builds a Kite-style reference chain around ATM when live chain rows are unavailable."""
     atm = int(round(spot_ltp / 50) * 50)
     strikes = [atm + offset * 50 for offset in range(-8, 12)]
 
-    if "Today" in expiry_label:
+    if dte <= 0:
         time_scale = 1.0
-    elif "8 days" in expiry_label:
+    elif dte <= 8:
         time_scale = 2.6
-    elif "2 weeks" in expiry_label:
+    elif dte <= 15:
         time_scale = 3.5
-    elif "3 weeks" in expiry_label:
+    elif dte <= 22:
         time_scale = 4.2
     else:
         time_scale = 5.0
@@ -160,10 +511,10 @@ def build_kite_style_reference_chain(spot_ltp: float, expiry_label: str):
 
         ce_oi_l = round(max(0.15, 180.0 * np.exp(-abs(k - (atm + 250)) / 350.0)), 2)
         pe_oi_l = round(max(0.15, 180.0 * np.exp(-abs(k - (atm - 250)) / 350.0)), 2)
-        ce_chg_pct = round(-63.76 - ((k - atm) / 50.0) * 3.1, 2)
-        pe_chg_pct = round(59.62 - ((k - atm) / 50.0) * 1.8, 2)
-        ce_oi_chg_pct = round(180.0 - abs(k - (atm + 100)) * 0.25, 2)
-        pe_oi_chg_pct = round(140.0 - abs(k - (atm - 100)) * 0.25, 2)
+        ce_chg_pct = round(-12.5 - ((k - atm) / 50.0) * 2.1, 2)
+        pe_chg_pct = round(14.2 - ((k - atm) / 50.0) * 1.5, 2)
+        ce_oi_chg_pct = round(45.0 - abs(k - (atm + 100)) * 0.15, 2)
+        pe_oi_chg_pct = round(38.0 - abs(k - (atm - 100)) * 0.15, 2)
 
         rows.append({
             "Call OI Chg %": ce_oi_chg_pct,
@@ -181,10 +532,10 @@ def build_kite_style_reference_chain(spot_ltp: float, expiry_label: str):
 
 
 # ---------------------------------------------------------
-# 2. NSE OPTION CHAIN CONNECTOR
+# 2. NSE OPTION CHAIN CONNECTOR (FALLBACK WHEN KITE IS OFF)
 # ---------------------------------------------------------
 @st.cache_data(ttl=15)
-def fetch_live_nse_option_chain(spot_ltp: float, expiry_label: str):
+def fetch_live_nse_option_chain(spot_ltp: float, expiry_iso: str):
     nse_oc_fn = None
     try:
         from nsepython import nse_optionchain_scalar as _fn
@@ -206,12 +557,22 @@ def fetch_live_nse_option_chain(spot_ltp: float, expiry_label: str):
         if not records or not expiries:
             return None
 
-        target_expiry = expiries[0]
-        label_token = expiry_label.split()[0].lower()
-        for exp in expiries:
-            if label_token in str(exp).lower():
-                target_expiry = exp
-                break
+        target_dt = date.fromisoformat(expiry_iso)
+        parsed_exps = []
+        for exp_str in expiries:
+            for fmt in ("%d-%b-%Y", "%d-%B-%Y", "%Y-%m-%d"):
+                try:
+                    parsed_exps.append((datetime.strptime(str(exp_str), fmt).date(), str(exp_str)))
+                    break
+                except ValueError:
+                    continue
+
+        if parsed_exps:
+            parsed_exps.sort(key=lambda x: x[0])
+            future_exps = [item for item in parsed_exps if item[0] >= target_dt]
+            target_expiry = future_exps[0][1] if future_exps else parsed_exps[-1][1]
+        else:
+            target_expiry = expiries[0]
 
         chain_rows = []
         total_ce_oi = 0.0
@@ -307,7 +668,15 @@ def fetch_live_nse_option_chain(spot_ltp: float, expiry_label: str):
 # 3. TREND & SIGNAL ENGINE
 # ---------------------------------------------------------
 @st.cache_data(ttl=15)
-def fetch_predictive_nifty_engine(expiry_str, period, interval):
+def fetch_predictive_nifty_engine(
+    expiry_label: str,
+    expiry_iso: str,
+    dte: int,
+    period: str,
+    interval: str,
+    kite_api_key: str,
+    kite_access_token: str,
+):
     nifty = yf.Ticker("^NSEI")
     vix = yf.Ticker("^INDIAVIX")
 
@@ -317,7 +686,8 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
     if df is None or df.empty or len(df) < 30:
         return None
 
-    spot_ltp = float(df["Close"].iloc[-1])
+    kite_spot = fetch_kite_spot_ltp(kite_api_key, kite_access_token)
+    spot_ltp = float(kite_spot) if kite_spot is not None else float(df["Close"].iloc[-1])
     prev_close = float(df["Close"].iloc[-2])
     spot_chg = round(((spot_ltp - prev_close) / prev_close) * 100, 2)
     current_vix = round(float(df_vix["Close"].iloc[-1]), 2) if not df_vix.empty else 18.20
@@ -404,9 +774,22 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         score -= 10
 
     atm_strike = int(round(spot_ltp / 50) * 50)
-    nse_oc = fetch_live_nse_option_chain(spot_ltp, expiry_str)
+    kite_oc = fetch_kite_option_chain(spot_ltp, expiry_iso, kite_api_key, kite_access_token)
+    nse_oc = None if kite_oc else fetch_live_nse_option_chain(spot_ltp, expiry_iso)
 
-    if nse_oc:
+    if kite_oc:
+        pcr = kite_oc["PCR"]
+        max_pain = kite_oc["MaxPain"]
+        rec_strike = kite_oc["ATMStrike"]
+        live_ce_prem = kite_oc["CE_LTP"]
+        live_pe_prem = kite_oc["PE_LTP"]
+        oc_source = f"Live Kite ({kite_oc['ExpiryUsed']})"
+        chain_df = kite_oc["ChainDF"]
+        if pcr >= 1.15:
+            score += 10
+        elif pcr <= 0.70:
+            score -= 10
+    elif nse_oc:
         pcr = nse_oc["PCR"]
         max_pain = nse_oc["MaxPain"]
         rec_strike = nse_oc["ATMStrike"]
@@ -422,7 +805,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         pcr = 0.82
         max_pain = float(round(spot_ltp / 100) * 100)
         rec_strike = atm_strike
-        ref_df = build_kite_style_reference_chain(spot_ltp, expiry_str)
+        ref_df = build_kite_style_reference_chain(spot_ltp, dte)
         atm_match = ref_df[ref_df["Strike"] == rec_strike]
         if not atm_match.empty:
             live_ce_prem = float(atm_match["Call LTP"].iloc[0])
@@ -474,7 +857,7 @@ def fetch_predictive_nifty_engine(expiry_str, period, interval):
         "Support": support_level,
         "DistUp": dist_up_pts,
         "DistDown": dist_down_pts,
-        "Expiry": expiry_str,
+        "Expiry": expiry_label,
         "Entry": entry_prem,
         "SL": sl_prem,
         "DataFrame": df,
@@ -591,10 +974,18 @@ def render_kite_colored_chain(df: pd.DataFrame):
     st.dataframe(styled, use_container_width=True, hide_index=True, height=540)
 
 
-intel = fetch_predictive_nifty_engine(expiry_choice, period_val, interval_val)
+intel = fetch_predictive_nifty_engine(
+    expiry_choice,
+    selected_expiry_iso,
+    days_to_expiry,
+    period_val,
+    interval_val,
+    api_key_in,
+    access_token_in,
+)
 
 if not intel:
-    st.error("⚠️ Could not load Nifty data right now. Click **Refresh Now** to try again.")
+    st.error("⚠️ Could not load Nifty data right now. Click **Refresh** to try again.")
 else:
     is_buy_signal = intel["OptType"] in ("CE", "PE")
     entry_p = max(float(intel["Entry"]), 0.01)
@@ -616,7 +1007,7 @@ else:
     selected_cost = round(entry_p * selected_qty, 2)
     selected_max_loss = round((entry_p - sl_p) * selected_qty, 2)
 
-    is_same_day_expiry = "Today" in expiry_choice
+    is_same_day_expiry = days_to_expiry == 0
     exit_cutoff_time = "2:00 PM IST (before sharp expiry decay)" if is_same_day_expiry else "3:00 PM IST (intraday exit)"
 
     if is_buy_signal:
