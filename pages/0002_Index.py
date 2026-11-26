@@ -458,13 +458,20 @@ with ltp_col2:
         step=0.05,
     )
 
-with st.expander("📸 Moment Snapshot / Screenshot Notes (Optional — for your current screen check)", expanded=False):
-    st.text_area(
-        "Paste or type strike LTPs, PCR, or notes from your screenshot right now",
-        key="moment_screenshot_notes",
-        height=70,
-        placeholder="Example: 25800 CE LTP = 237.10, 25850 CE = 211.90, PCR = 0.94, Max Pain = 25700",
+# Paste / Upload Screenshot box (click/focus or paste/drop screenshot image)
+with st.expander("📸 Paste or Upload Screenshot (For Your Current Screen Moment)", expanded=False):
+    pasted_screenshot = st.file_uploader(
+        "Paste (Ctrl+V / Cmd+V) or drag-and-drop your option chain / broker screenshot",
+        type=["png", "jpg", "jpeg", "webp"],
+        accept_multiple_files=False,
+        key="screenshot_paste_uploader",
     )
+    if pasted_screenshot is not None:
+        st.image(
+            pasted_screenshot,
+            caption=f"Pasted Screenshot: {pasted_screenshot.name}",
+            use_container_width=True,
+        )
 
 selected_expiry_iso = label_to_iso[expiry_choice]
 selected_expiry_date = date.fromisoformat(selected_expiry_iso)
