@@ -379,8 +379,8 @@ head_col1, head_col2 = st.columns([3, 1])
 with head_col1:
     st.title("⚡ Nifty Options Quick Guide (Advance Signal)")
     st.markdown(
-        "Simple view for **buying Nifty CE (Call) or PE (Put)**—gives early "
-        "**40-point alerts**, clear **Skip Trade** warnings, and exact ₹ risk/reward."
+        "Simple view for **buying Nifty CE (Call) or PE (Put)**—shows the exact **40-point trigger** "
+        "from your ceiling/floor fences, clear **Skip Trade** status, and exact ₹ risk/reward."
     )
 
 with head_col2:
@@ -586,6 +586,10 @@ def fetch_predictive_nifty_engine(
 
     dist_up_pts = round(resistance_level - spot_ltp, 1)
     dist_down_pts = round(spot_ltp - support_level, 1)
+    ce_40pt_trigger = round(resistance_level - ADVANCE_ALERT_POINTS, 2)
+    pe_40pt_trigger = round(support_level + ADVANCE_ALERT_POINTS, 2)
+    pts_to_ce_40 = round(max(ce_40pt_trigger - spot_ltp, 0.0), 1)
+    pts_to_pe_40 = round(max(spot_ltp - pe_40pt_trigger, 0.0), 1)
 
     if score >= 35:
         simple_verdict = "BUY CALL (CE)"
@@ -614,27 +618,27 @@ def fetch_predictive_nifty_engine(
         entry_prem = round(min(live_ce_prem, live_pe_prem), 2)
 
     if dist_up_pts <= 0:
-        advance_alert = f"🚨 BREAKOUT ZONE: Nifty is ABOVE upside ceiling ₹{resistance_level:,.0f} — watch CE momentum or fakeout."
+        trigger_status = f"CE 40-Pt Trigger Reached (Above ₹{resistance_level:,.0f} ceiling)"
     elif dist_down_pts <= 0:
-        advance_alert = f"🚨 BREAKDOWN ZONE: Nifty is BELOW downside floor ₹{support_level:,.0f} — watch PE momentum or bounce."
+        trigger_status = f"PE 40-Pt Trigger Reached (Below ₹{support_level:,.0f} floor)"
     elif dist_up_pts <= ADVANCE_ALERT_POINTS:
-        advance_alert = f"⏳ 40-PT ADVANCE ALERT: Nifty is {dist_up_pts:.0f} pts below upside ceiling ₹{resistance_level:,.0f}. Get ready for CE breakout."
+        trigger_status = f"CE 40-Pt Trigger ACTIVE (Within {dist_up_pts:.0f} pts of ₹{resistance_level:,.0f} ceiling)"
     elif dist_down_pts <= ADVANCE_ALERT_POINTS:
-        advance_alert = f"⏳ 40-PT ADVANCE ALERT: Nifty is {dist_down_pts:.0f} pts above downside floor ₹{support_level:,.0f}. Get ready for PE breakdown."
+        trigger_status = f"PE 40-Pt Trigger ACTIVE (Within {dist_down_pts:.0f} pts of ₹{support_level:,.0f} floor)"
     else:
-        advance_alert = (
-            f"👀 ADVANCE WATCH: Nifty is {dist_up_pts:.0f} pts below ceiling (₹{resistance_level:,.0f}) "
-            f"and {dist_down_pts:.0f} pts above floor (₹{support_level:,.0f}) — 40-pt alert triggers when within 40 pts."
+        trigger_status = (
+            f"Waiting for 40-Pt Trigger — CE Watch at ₹{ce_40pt_trigger:,.0f} ({pts_to_ce_40:.0f} pts away) "
+            f"| PE Watch at ₹{pe_40pt_trigger:,.0f} ({pts_to_pe_40:.0f} pts away)"
         )
 
     if not is_market_open:
-        skip_reason = "Market is closed—skip live buying right now and use this as a watch plan."
+        skip_reason = "Market is closed—skip live buying right now and watch the 40-pt trigger levels below."
     elif abs(score) < 10:
-        skip_reason = "Direction score is near zero—market is choppy/sideways, so skip buying."
+        skip_reason = "Direction score is near zero—market is choppy, so skip buying until a 40-pt trigger is reached."
     elif dist_up_pts > ADVANCE_ALERT_POINTS and dist_down_pts > ADVANCE_ALERT_POINTS:
         skip_reason = (
-            f"Nifty is stuck in the middle ({dist_up_pts:.0f} pts below ceiling, {dist_down_pts:.0f} pts above floor)—"
-            "skip or wait until price comes within 40 pts of a trigger."
+            f"Nifty is in the middle ({dist_up_pts:.0f} pts below ceiling ₹{resistance_level:,.0f}, "
+            f"{dist_down_pts:.0f} pts above floor ₹{support_level:,.0f})—skip until within 40 pts of ceiling or floor."
         )
     else:
         skip_reason = ""
@@ -662,7 +666,11 @@ def fetch_predictive_nifty_engine(
         "Support": support_level,
         "DistUp": dist_up_pts,
         "DistDown": dist_down_pts,
-        "AdvanceAlert": advance_alert,
+        "CE40Trigger": ce_40pt_trigger,
+        "PE40Trigger": pe_40pt_trigger,
+        "PtsToCE40": pts_to_ce_40,
+        "PtsToPE40": pts_to_pe_40,
+        "TriggerStatus": trigger_status,
         "SkipReason": skip_reason,
         "Expiry": expiry_label,
         "Entry": entry_prem,
@@ -685,7 +693,9 @@ intel = fetch_predictive_nifty_engine(
 if not intel:
     st.error("⚠️ Could not load Nifty data right now. Click **Refresh Now** to try again.")
 else:
-    if intel["OptType"] in ("CE", "PE"):
+    is_skip_now = bool(intel["SkipReason"]) or intel["OptType"] == "WAIT"
+
+    if not is_skip_now and intel["OptType"] in ("CE", "PE"):
         st.session_state.setdefault("live_scanner_picks", {})[
             "Index Options Alpha Sniper"
         ] = [
@@ -704,20 +714,20 @@ else:
             "Index Options Alpha Sniper"
         ] = []
 
-    strike_text = f"Strike: **{intel['Strike']} {intel['OptType']}**" if intel["OptType"] in ("CE", "PE") else "No trade yet"
-    if intel["OptType"] == "CE":
-        st.success(f"### 👉 TODAY'S LEAN: {intel['SimpleVerdict']} ({intel['StrengthLabel']}) — {strike_text}")
-    elif intel["OptType"] == "PE":
-        st.error(f"### 👉 TODAY'S LEAN: {intel['SimpleVerdict']} ({intel['StrengthLabel']}) — {strike_text}")
+    # Single clear decision banner (no conflicting CE/PE banner when Skip Trade applies)
+    if is_skip_now:
+        st.warning(
+            f"### 🛑 SKIP TRADE FOR NOW — {intel['TriggerStatus']}\n"
+            f"{intel['SkipReason'] or 'Wait for a clear 40-pt trigger near ceiling or floor.'}"
+        )
+    elif intel["OptType"] == "CE":
+        st.success(
+            f"### 👉 ACTION: {intel['SimpleVerdict']} — Strike: **{intel['Strike']} CE** ({intel['TriggerStatus']})"
+        )
     else:
-        st.warning(f"### 👉 TODAY'S LEAN: {intel['SimpleVerdict']} ({intel['StrengthLabel']})")
-
-    st.info(intel["AdvanceAlert"])
-
-    if intel["SkipReason"]:
-        st.warning(f"🛑 **SKIP TRADE RULE:** {intel['SkipReason']}")
-    else:
-        st.success("✅ **ACTIVE SETUP RULE:** Price is near a key boundary or momentum is clearly aligned—check your entry & stop-loss below.")
+        st.error(
+            f"### 👉 ACTION: {intel['SimpleVerdict']} — Strike: **{intel['Strike']} PE** ({intel['TriggerStatus']})"
+        )
 
     if intel["Score"] >= 35:
         score_plain = "Strong Up"
@@ -737,7 +747,11 @@ else:
     m1.metric("Nifty Now", f"₹{intel['Spot']:,.2f}", f"{intel['Change']:+.2f}% today")
     m2.metric("Direction Strength", f"{intel['Score']:+d} / 100", score_plain)
     m3.metric("Speed Gauge (RSI)", f"{intel['RSI']}", f"{rsi_plain} ({intel['RSISlope']:+.1f})")
-    m4.metric("Up / Down Fences", f"₹{intel['Resistance']:,.0f} / ₹{intel['Support']:,.0f}", f"+{intel['DistUp']:.0f} up | -{intel['DistDown']:.0f} dn")
+    m4.metric(
+        "40-Pt Triggers (CE / PE)",
+        f"₹{intel['CE40Trigger']:,.0f} / ₹{intel['PE40Trigger']:,.0f}",
+        f"Fences ₹{intel['Resistance']:,.0f} / ₹{intel['Support']:,.0f}",
+    )
     m5.metric("PCR / Pin Zone", f"{intel['PCR']} / ₹{intel['MaxPain']:,.0f}", f"{pcr_plain} · {intel['OCSource']}")
 
     st.caption("Why the app leans this way: " + " • ".join(intel["Reasons"]))
@@ -756,13 +770,15 @@ else:
         st.markdown("#### 1. When to Enter")
         if not is_market_open:
             st.write(
-                "• **Market is closed right now.** Use this as a watch list, not an instant buy.\n"
-                "• After **9:15 AM IST**, click **Refresh Now** and wait for price to move toward the trigger level."
+                "• **Market is closed right now.** Do not place a live buy.\n"
+                f"• Watch **CE 40-Pt Trigger @ ₹{intel['CE40Trigger']:,.0f}** (ceiling ₹{intel['Resistance']:,.0f}) "
+                f"and **PE 40-Pt Trigger @ ₹{intel['PE40Trigger']:,.0f}** (floor ₹{intel['Support']:,.0f}) after **9:15 AM IST**."
             )
-        elif intel["OptType"] == "WAIT":
+        elif is_skip_now:
             st.write(
-                "• **Skip this setup.** Direction is unclear.\n"
-                f"• Only look for **CE** if Nifty crosses **₹{intel['Resistance']:,.0f}**, or **PE** if it drops below **₹{intel['Support']:,.0f}**."
+                "• **Skip this trade right now.** Price is outside the 40-pt trigger zone or direction is unclear.\n"
+                f"• **40-Pt CE Trigger:** Nifty reaches **₹{intel['CE40Trigger']:,.0f}** ({intel['PtsToCE40']:.0f} pts away toward ₹{intel['Resistance']:,.0f}).\n"
+                f"• **40-Pt PE Trigger:** Nifty reaches **₹{intel['PE40Trigger']:,.0f}** ({intel['PtsToPE40']:.0f} pts away toward ₹{intel['Support']:,.0f})."
             )
         else:
             st.write(
@@ -783,7 +799,7 @@ else:
         st.markdown("#### 3. Stop-Loss & Safety")
         st.write(
             f"• **Hard Stop-Loss (₹{intel['SL']:.2f}):** Max loss ~**₹{total_risk_amt:,.0f}** on {selected_qty} qty. Exit immediately if hit.\n"
-            "• **Skip when choppy:** Do not force trades when score is weak or price is stuck mid-range.\n"
+            "• **Skip when choppy:** Do not force trades when price is stuck between the 40-pt triggers.\n"
             "• **Stick to 1 Lot** while learning and verify live option prices in your broker app."
         )
 
@@ -844,6 +860,24 @@ else:
         line_color="#00E676",
         annotation_text=f"Upside Ceiling: ₹{intel['Resistance']:,.0f}",
         annotation_position="top left",
+        row=1,
+        col=1,
+    )
+    fig.add_hline(
+        y=intel["CE40Trigger"],
+        line_dash="dash",
+        line_color="rgba(0, 230, 118, 0.55)",
+        annotation_text=f"CE 40-Pt Trigger: ₹{intel['CE40Trigger']:,.0f}",
+        annotation_position="top right",
+        row=1,
+        col=1,
+    )
+    fig.add_hline(
+        y=intel["PE40Trigger"],
+        line_dash="dash",
+        line_color="rgba(255, 82, 82, 0.55)",
+        annotation_text=f"PE 40-Pt Trigger: ₹{intel['PE40Trigger']:,.0f}",
+        annotation_position="bottom right",
         row=1,
         col=1,
     )
